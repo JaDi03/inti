@@ -15,7 +15,7 @@ createRoot(root).render(
         <App />
       </PrivyProvider>
     ) : (
-      <p style={{ fontFamily: "system-ui", margin: 48 }}>Falta PRIVY_APP_ID en el archivo .env de la raiz.</p>
+      <p style={{ fontFamily: "system-ui", margin: 48 }}>PRIVY_APP_ID is missing from the root .env file.</p>
     )}
   </StrictMode>,
 );

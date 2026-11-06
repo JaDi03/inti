@@ -63,7 +63,7 @@ export interface PromptInputProps {
   disabled?: boolean;
 }
 
-export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres hacer", className, disabled = false }: PromptInputProps) {
+export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want to do", className, disabled = false }: PromptInputProps) {
   const [expanded, setExpanded] = useState(false);
   const [isSmoothResize, setIsSmoothResize] = useState(false);
   const [value, setValue] = useState("");
@@ -131,7 +131,7 @@ export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres ha
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      setMicError("No pude usar el micrófono. Revisa el permiso del navegador.");
+      setMicError("Could not use the microphone. Check the browser permission.");
       return;
     }
     streamRef.current = stream;
@@ -175,7 +175,7 @@ export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres ha
       handleValueChange((baseline + (interim ? " " + interim : "")).trim());
     };
     recognition.onerror = (event) => {
-      if (event.error !== "aborted" && event.error !== "no-speech") setMicError("El dictado se detuvo por un error del navegador.");
+      if (event.error !== "aborted" && event.error !== "no-speech") setMicError("Dictation stopped because of a browser error.");
       stopRecording();
     };
     recognition.onend = () => stopRecording();
@@ -304,7 +304,7 @@ export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres ha
             }
           }}
           placeholder={placeholder}
-          aria-label="Mensaje para Inti"
+          aria-label="Message for Inti"
           disabled={isRecording}
           style={{
             transition: isSmoothResize
@@ -344,7 +344,7 @@ export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres ha
             "absolute inset-x-0 top-0 z-[1] cursor-text py-[17px] pr-12 pl-4 text-left text-[15px] leading-[17px] font-medium text-muted-foreground/80 outline-none",
             !expanded ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-1 scale-105 opacity-0",
           )}
-          aria-label="Abrir el cuadro de mensaje"
+          aria-label="Open the message box"
         >
           {placeholder}
         </button>
@@ -375,7 +375,7 @@ export function PromptInput({ onSubmit, placeholder = "Escribe lo que quieres ha
           }}
           onClick={onActionButtonClick}
           disabled={showArrow && (!hasValue || disabled)}
-          aria-label={showStop ? "Detener dictado" : showMic ? "Dictar con el micrófono" : "Enviar"}
+          aria-label={showStop ? "Stop dictation" : showMic ? "Dictate with the microphone" : "Send"}
           style={{ borderRadius: 9999 }}
           className="absolute right-2.5 bottom-2.5 z-[10] flex h-8 w-8 items-center justify-center bg-primary text-primary-foreground transition-all duration-300 outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
         >
