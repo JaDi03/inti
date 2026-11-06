@@ -55,6 +55,14 @@ pnpm cycle "I want some NEAR exposure without much risk"
 pnpm cycle --propose "Put half of my USDC into NEAR"
 ```
 
+### Web login (test page)
+
+`web/` is a minimal page that proves an email or Google login can own an agent. The user signs in with [Privy](https://docs.privy.io), which creates an embedded NEAR wallet (an implicit account). `PrivyNearSigner` plugs that wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash. The page verifies both signatures locally. Nothing is sent to NEAR or the Agent API.
+
+```bash
+pnpm web:dev   # needs PRIVY_APP_ID in .env, then open http://localhost:5173
+```
+
 ## Quick Start
 
 Prerequisites: Node 24 and pnpm 11.
@@ -98,6 +106,8 @@ src/
 - **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
 - **[Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript)**: Claude Haiku 5.5 as the provisional brain
+- **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
+- **[near-api-js](https://github.com/near/near-api-js)**: NEP-413 and NEP-366 encoding
 - **[zod](https://zod.dev)**: intent schema validation
 - **[vitest](https://vitest.dev)**: tests
 - **[TypeScript](https://www.typescriptlang.org)**: language

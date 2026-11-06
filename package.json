@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "cycle": "tsx --env-file=.env src/cli/cycle.ts"
+    "cycle": "tsx --env-file=.env src/cli/cycle.ts",
+    "web:dev": "pnpm --filter inti-web dev",
+    "web:build": "pnpm --filter inti-web build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",
