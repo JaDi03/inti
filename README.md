@@ -39,6 +39,22 @@ The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-
 2. `describePolicy(policy, tokens)` writes the plain-language preview the owner reads before signing.
 3. `assertPolicyMatches(built, preview.policy)` compares the policy the API returns for signing with the one Inti built, and throws on any difference.
 
+### Agent cycle
+
+The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
+
+- `src/agent/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
+- `src/brains/anthropic.ts`: brain on Claude Haiku 5.5 through the Anthropic SDK (provisional).
+- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
+- Today the portfolio is simulated (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move.
+
+Run one cycle (needs `ANTHROPIC_API_KEY` in `.env`):
+
+```bash
+pnpm cycle "I want some NEAR exposure without much risk"
+pnpm cycle --propose "Put half of my USDC into NEAR"
+```
+
 ## Quick Start
 
 Prerequisites: Node 24 and pnpm 11.
@@ -50,7 +66,7 @@ pnpm install
 pnpm test
 ```
 
-Expected: 16 tests pass. `src/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
+Expected: 26 tests pass. `src/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
 
 To check the intent schema yourself:
 
@@ -81,6 +97,7 @@ src/
 
 - **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
+- **[Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript)**: Claude Haiku 5.5 as the provisional brain
 - **[zod](https://zod.dev)**: intent schema validation
 - **[vitest](https://vitest.dev)**: tests
 - **[TypeScript](https://www.typescriptlang.org)**: language
