@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
-import { useCreateWallet } from "@privy-io/react-auth/extended-chains";
-import { LogOut } from "lucide-react";
+import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
+import { KeyRound, LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ function Welcome({ onLogin }: { onLogin: () => void }) {
 export function App() {
   const { ready, authenticated, user, login, logout } = usePrivy();
   const { createWallet } = useCreateWallet();
+  const { exportWallet } = useExportWallet();
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const creating = useRef(false);
@@ -84,6 +85,18 @@ export function App() {
             <code className="rounded-full bg-muted px-3 py-1 text-xs" title={address}>
               {shortAddress(address)}
             </code>
+          )}
+          {address && (
+            // Privy's own modal shows the key; it never reaches Inti's code.
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Export wallet"
+              title="Export wallet"
+              onClick={() => void exportWallet({ address }).catch(() => undefined)}
+            >
+              <KeyRound />
+            </Button>
           )}
           <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
             <LogOut />
