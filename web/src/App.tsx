@@ -1,7 +1,16 @@
 import { usePrivy } from "@privy-io/react-auth";
-import { useCreateWallet, useSignRawHash } from "@privy-io/react-auth/extended-chains";
-import { useState } from "react";
-import { runSelfTest, type CheckResult } from "./selfTest";
+import { useCreateWallet } from "@privy-io/react-auth/extended-chains";
+import { LogOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { PromptInput } from "@/components/ui/ai-chat-input";
+import { Button } from "@/components/ui/button";
+import { IntiMascot } from "@/components/ui/inti-mascot";
+import { cn } from "@/lib/utils";
+
+type Message = { id: number; from: "user" | "inti"; text: string };
+
+/** Shown until the chat is wired to the agent (next step). */
+const NOT_CONNECTED = "Todavía no estoy conectado al agente. Pronto podré responderte y operar por ti.";
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -12,82 +21,107 @@ function nearAddress(accounts: readonly unknown[]): string | null {
   return null;
 }
 
-export function App() {
-  const { ready, authenticated, user, login, logout } = usePrivy();
-  const { createWallet } = useCreateWallet();
-  const { signRawHash } = useSignRawHash();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<CheckResult[] | null>(null);
+function shortAddress(address: string): string {
+  return address.length > 14 ? `${address.slice(0, 6)}...${address.slice(-6)}` : address;
+}
 
-  if (!ready) return <main style={styles.main}>Cargando...</main>;
+function Wordmark({ className }: { className?: string }) {
+  return <span className={cn("font-heading font-bold tracking-tight text-primary", className)}>Inti</span>;
+}
 
-  if (!authenticated || !user) {
-    return (
-      <main style={styles.main}>
-        <h1>Inti</h1>
-        <p>Prueba de acceso: entra con tu correo o Google. No se mueve dinero.</p>
-        <button style={styles.button} onClick={login}>Entrar</button>
-      </main>
-    );
-  }
-
-  const address = nearAddress(user.linkedAccounts);
-
-  const run = async (task: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await task();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function Welcome({ onLogin }: { onLogin: () => void }) {
   return (
-    <main style={styles.main}>
-      <h1>Inti</h1>
-      <p>Sesion: {user.email?.address ?? user.google?.email ?? user.id}</p>
-
-      {address === null ? (
-        <button style={styles.button} disabled={busy} onClick={() => run(async () => void (await createWallet({ chainType: "near" })))}>
-          Crear mi cuenta NEAR
-        </button>
-      ) : (
-        <>
-          <p>
-            Cuenta NEAR: <code style={styles.code}>{address}</code>
-          </p>
-          <button
-            style={styles.button}
-            disabled={busy}
-            onClick={() => run(async () => setResults(await runSelfTest(address, signRawHash)))}
-          >
-            Probar firmas (sin mover dinero)
-          </button>
-        </>
-      )}
-
-      {results && (
-        <ul>
-          {results.map((r) => (
-            <li key={r.name}>
-              {r.ok ? "OK" : "FALLO"} - {r.name}: {r.detail}
-            </li>
-          ))}
-        </ul>
-      )}
-      {error && <p style={{ color: "#c0392b" }}>{error}</p>}
-      <button style={styles.link} onClick={logout}>Salir</button>
+    <main className="flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center">
+      <IntiMascot size={220} />
+      <div>
+        <Wordmark className="text-6xl" />
+        <p className="mt-2 text-lg text-muted-foreground">La IA de tus Intents</p>
+      </div>
+      <Button size="lg" className="h-11 rounded-full px-8 text-base" onClick={onLogin}>
+        Entrar con correo o Google
+      </Button>
     </main>
   );
 }
 
-const styles = {
-  main: { fontFamily: "system-ui, sans-serif", maxWidth: 560, margin: "48px auto", padding: "0 16px", lineHeight: 1.5 },
-  button: { padding: "10px 16px", fontSize: 16, cursor: "pointer" },
-  link: { marginTop: 24, background: "none", border: "none", color: "#555", cursor: "pointer", padding: 0 },
-  code: { wordBreak: "break-all" as const, fontSize: 13 },
-};
+export function App() {
+  const { ready, authenticated, user, login, logout } = usePrivy();
+  const { createWallet } = useCreateWallet();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const creating = useRef(false);
+  const nextId = useRef(1);
+
+  const address = user ? nearAddress(user.linkedAccounts) : null;
+
+  // Every user needs a NEAR wallet; create it once, without asking.
+  useEffect(() => {
+    if (!authenticated || !user || address !== null || creating.current) return;
+    creating.current = true;
+    createWallet({ chainType: "near" }).catch((e: unknown) => {
+      creating.current = false;
+      setWalletError(e instanceof Error ? e.message : "No se pudo crear tu cuenta NEAR.");
+    });
+  }, [authenticated, user, address, createWallet]);
+
+  if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Cargando...</main>;
+  if (!authenticated || !user) return <Welcome onLogin={login} />;
+
+  const send = (text: string) => {
+    const userMsg: Message = { id: nextId.current++, from: "user", text };
+    const reply: Message = { id: nextId.current++, from: "inti", text: NOT_CONNECTED };
+    setMessages((prev) => [...prev, userMsg, reply]);
+  };
+
+  const empty = messages.length === 0;
+
+  return (
+    <div className="flex h-svh flex-col">
+      <header className="flex items-center justify-between px-4 py-3 sm:px-6">
+        <img src="/inti-logo-horizontal.svg" alt="Inti" className="h-8 w-auto" />
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {address && (
+            <code className="rounded-full bg-muted px-3 py-1 text-xs" title={address}>
+              {shortAddress(address)}
+            </code>
+          )}
+          <Button variant="ghost" size="icon" aria-label="Salir" onClick={() => void logout()}>
+            <LogOut />
+          </Button>
+        </div>
+      </header>
+
+      <main className="flex min-h-0 flex-1 flex-col items-center px-4">
+        <div className={cn("flex w-full max-w-2xl flex-col items-center transition-all duration-500", empty ? "mt-[12vh]" : "mt-2")}>
+          <IntiMascot size={empty ? 180 : 96} />
+          {empty && (
+            <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
+              ¿Qué quieres hacer con tu dinero?
+            </h1>
+          )}
+        </div>
+
+        {!empty && (
+          <ol className="flex w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-4" aria-live="polite">
+            {messages.map((m) => (
+              <li
+                key={m.id}
+                className={cn(
+                  "max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                  m.from === "user" ? "self-end bg-primary text-primary-foreground" : "self-start bg-muted text-foreground",
+                )}
+              >
+                {m.text}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <div className={cn("flex w-full justify-center pb-6", empty ? "mt-8" : "mt-auto")}>
+          <PromptInput onSubmit={send} placeholder="Ej: invierte 40 dólares en NEAR" />
+        </div>
+        {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
+      </main>
+    </div>
+  );
+}
