@@ -36,6 +36,8 @@ Today the engine validates two intent kinds, `swap` and `transfer`. Amounts are 
 Prerequisites: Node 24 and pnpm 11.
 
 ```bash
+git clone https://github.com/JaDi03/inti.git
+cd inti
 pnpm install
 pnpm test
 ```
