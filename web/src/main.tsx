@@ -2,6 +2,7 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "./index.css";
 
 const appId = import.meta.env.PRIVY_APP_ID as string | undefined;
 const root = document.getElementById("root");

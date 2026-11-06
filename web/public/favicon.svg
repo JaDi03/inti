@@ -1,0 +1,66 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="199 227 660 660" role="img" aria-label="Inti">
+
+  <path id="fv-body" fill="var(--inti-body, #00EB96)" d="
+    M 300 420
+    C 312 396, 400 372, 470 352
+    C 520 338, 560 325, 610 342
+    C 650 356, 690 360, 730 378
+    C 765 395, 778 430, 780 470
+    C 782 530, 798 580, 798 640
+    C 798 700, 790 750, 740 768
+    C 680 788, 620 780, 570 805
+    C 530 828, 500 845, 455 828
+    C 410 810, 385 775, 345 740
+    C 310 705, 305 650, 302 590
+    C 300 540, 289 444, 300 420 Z"/>
+  <clipPath id="fv-inti-body-clip"><use href="#fv-body"/></clipPath>
+
+  <g clip-path="url(#fv-inti-body-clip)">
+    <path id="fv-top" fill="var(--inti-top, #3DF5B0)" d="
+      M 240 392
+      C 300 426, 420 452, 488 448
+      C 570 428, 690 410, 840 382
+      L 840 250 L 240 250 Z"/>
+    <path id="fv-side" fill="var(--inti-side, #00BE79)" d="
+      M 240 392
+      C 300 426, 400 455, 445 450
+      C 470 447, 488 440, 488 450
+      C 486 462, 445 480, 436 520
+      C 428 580, 440 650, 450 720
+      C 456 770, 490 808, 545 860
+      L 240 860 Z"/>
+  </g>
+  <g id="fv-antennas" fill="var(--inti-body, #00EB96)" stroke="var(--inti-body, #00EB96)" stroke-width="32" stroke-linecap="round">
+    <g id="fv-antenna-1">
+      <line id="fv-antenna-1-stalk" x1="303" y1="365" x2="378" y2="420"/>
+      <circle id="fv-antenna-1-ball" cx="303" cy="365" r="42" stroke="none"/>
+    </g>
+    <g id="fv-antenna-2">
+      <line id="fv-antenna-2-stalk" x1="248" y1="503" x2="325" y2="510"/>
+      <circle id="fv-antenna-2-ball" cx="248" cy="503" r="42" stroke="none"/>
+    </g>
+    <g id="fv-antenna-3">
+      <line id="fv-antenna-3-stalk" x1="508" y1="295" x2="534" y2="362"/>
+      <circle id="fv-antenna-3-ball" cx="508" cy="295" r="42" stroke="none"/>
+    </g>
+    <g id="fv-antenna-4">
+      <line id="fv-antenna-4-stalk" x1="636" y1="323" x2="622" y2="370"/>
+      <circle id="fv-antenna-4-ball" cx="636" cy="323" r="42" stroke="none"/>
+    </g>
+    <g id="fv-antenna-5">
+      <line id="fv-antenna-5-stalk" x1="742" y1="333" x2="702" y2="402"/>
+      <circle id="fv-antenna-5-ball" cx="742" cy="333" r="42" stroke="none"/>
+    </g>
+    <g id="fv-antenna-6">
+      <line id="fv-antenna-6-stalk" x1="810" y1="465" x2="752" y2="487"/>
+      <circle id="fv-antenna-6-ball" cx="810" cy="465" r="42" stroke="none"/>
+    </g>
+  </g>
+  <g id="fv-eye-left">
+    <rect fill="var(--inti-eye, #000000)" x="538" y="526" width="52" height="108" rx="26" transform="rotate(-5 564 580)"/>
+  </g>
+  <g id="fv-eye-right">
+    <rect fill="var(--inti-eye, #000000)" x="644" y="509" width="52" height="108" rx="26" transform="rotate(-5 670 563)"/>
+  </g>
+
+</svg>
