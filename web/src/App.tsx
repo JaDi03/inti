@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 type Message = { id: number; from: "user" | "inti"; text: string };
 
 /** Shown until the chat is wired to the agent (next step). */
-const NOT_CONNECTED = "Todavía no estoy conectado al agente. Pronto podré responderte y operar por ti.";
+const NOT_CONNECTED = "I'm not connected to the agent yet. Soon I'll be able to answer you and act for you.";
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -35,10 +35,10 @@ function Welcome({ onLogin }: { onLogin: () => void }) {
       <IntiMascot size={220} />
       <div>
         <Wordmark className="text-6xl" />
-        <p className="mt-2 text-lg text-muted-foreground">La IA de tus Intents</p>
+        <p className="mt-2 text-lg text-muted-foreground">The AI for your Intents</p>
       </div>
       <Button size="lg" className="h-11 rounded-full px-8 text-base" onClick={onLogin}>
-        Entrar con correo o Google
+        Sign in with email or Google
       </Button>
     </main>
   );
@@ -60,11 +60,11 @@ export function App() {
     creating.current = true;
     createWallet({ chainType: "near" }).catch((e: unknown) => {
       creating.current = false;
-      setWalletError(e instanceof Error ? e.message : "No se pudo crear tu cuenta NEAR.");
+      setWalletError(e instanceof Error ? e.message : "Could not create your NEAR account.");
     });
   }, [authenticated, user, address, createWallet]);
 
-  if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Cargando...</main>;
+  if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Loading...</main>;
   if (!authenticated || !user) return <Welcome onLogin={login} />;
 
   const send = (text: string) => {
@@ -85,7 +85,7 @@ export function App() {
               {shortAddress(address)}
             </code>
           )}
-          <Button variant="ghost" size="icon" aria-label="Salir" onClick={() => void logout()}>
+          <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
             <LogOut />
           </Button>
         </div>
@@ -96,7 +96,7 @@ export function App() {
           <IntiMascot size={empty ? 180 : 96} />
           {empty && (
             <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
-              ¿Qué quieres hacer con tu dinero?
+              What do you want to do with your money?
             </h1>
           )}
         </div>
@@ -118,7 +118,7 @@ export function App() {
         )}
 
         <div className={cn("flex w-full justify-center pb-6", empty ? "mt-8" : "mt-auto")}>
-          <PromptInput onSubmit={send} placeholder="Ej: invierte 40 dólares en NEAR" />
+          <PromptInput onSubmit={send} placeholder="e.g. invest $40 in NEAR" />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
