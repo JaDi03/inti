@@ -128,12 +128,13 @@ export function App() {
         </div>
 
         {!empty && (
-          <ol className="flex w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-4" aria-live="polite">
+          <ol className="no-scrollbar flex w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-4" aria-live="polite">
             {messages.map((m) => (
               <li
                 key={m.id}
                 className={cn(
-                  "max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                  // pre-wrap keeps the line breaks the user typed with Shift+Enter.
+                  "max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words",
                   m.from === "user" ? "self-end bg-primary text-primary-foreground" : "self-start bg-muted text-foreground",
                 )}
               >

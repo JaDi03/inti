@@ -137,10 +137,9 @@
     }
 }
 
-/* Chat input scrollbar: hidden until hover. */
-.prompt-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; background: transparent; }
-.prompt-scrollbar::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
-.prompt-scrollbar:hover::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+/* Chat input and conversation: scrollable, with no visible scrollbar. */
+.prompt-scrollbar, .no-scrollbar { scrollbar-width: none; }
+.prompt-scrollbar::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* Inti mascot: the body breathes; antenna nodes show the agent state. */
 .inti-mascot .inti-body { transform-box: fill-box; transform-origin: 50% 100%; animation: inti-breathe 4s ease-in-out infinite; }
