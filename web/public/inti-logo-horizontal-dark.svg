@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="218 264 1532 586" role="img" aria-label="Inti">
+
+  <path id="lh-body" fill="var(--inti-body, #00EB96)" d="
+    M 300 420
+    C 312 396, 400 372, 470 352
+    C 520 338, 560 325, 610 342
+    C 650 356, 690 360, 730 378
+    C 765 395, 778 430, 780 470
+    C 782 530, 798 580, 798 640
+    C 798 700, 790 750, 740 768
+    C 680 788, 620 780, 570 805
+    C 530 828, 500 845, 455 828
+    C 410 810, 385 775, 345 740
+    C 310 705, 305 650, 302 590
+    C 300 540, 289 444, 300 420 Z"/>
+  <clipPath id="lh-inti-body-clip"><use href="#lh-body"/></clipPath>
+
+  <g clip-path="url(#lh-inti-body-clip)">
+    <path id="lh-top" fill="var(--inti-top, #3DF5B0)" d="
+      M 240 392
+      C 300 426, 420 452, 488 448
+      C 570 428, 690 410, 840 382
+      L 840 250 L 240 250 Z"/>
+    <path id="lh-side" fill="var(--inti-side, #00BE79)" d="
+      M 240 392
+      C 300 426, 400 455, 445 450
+      C 470 447, 488 440, 488 450
+      C 486 462, 445 480, 436 520
+      C 428 580, 440 650, 450 720
+      C 456 770, 490 808, 545 860
+      L 240 860 Z"/>
+  </g>
+  <g id="lh-antennas" fill="var(--inti-body, #00EB96)" stroke="var(--inti-body, #00EB96)" stroke-width="15" stroke-linecap="round">
+    <g id="lh-antenna-1">
+      <line id="lh-antenna-1-stalk" x1="303" y1="365" x2="378" y2="420"/>
+      <circle id="lh-antenna-1-ball" cx="303" cy="365" r="23" stroke="none"/>
+    </g>
+    <g id="lh-antenna-2">
+      <line id="lh-antenna-2-stalk" x1="248" y1="503" x2="325" y2="510"/>
+      <circle id="lh-antenna-2-ball" cx="248" cy="503" r="24" stroke="none"/>
+    </g>
+    <g id="lh-antenna-3">
+      <line id="lh-antenna-3-stalk" x1="508" y1="295" x2="534" y2="362"/>
+      <circle id="lh-antenna-3-ball" cx="508" cy="295" r="25" stroke="none"/>
+    </g>
+    <g id="lh-antenna-4">
+      <line id="lh-antenna-4-stalk" x1="636" y1="323" x2="622" y2="370"/>
+      <circle id="lh-antenna-4-ball" cx="636" cy="323" r="18" stroke="none"/>
+    </g>
+    <g id="lh-antenna-5">
+      <line id="lh-antenna-5-stalk" x1="742" y1="333" x2="702" y2="402"/>
+      <circle id="lh-antenna-5-ball" cx="742" cy="333" r="25" stroke="none"/>
+    </g>
+    <g id="lh-antenna-6">
+      <line id="lh-antenna-6-stalk" x1="810" y1="465" x2="752" y2="487"/>
+      <circle id="lh-antenna-6-ball" cx="810" cy="465" r="24" stroke="none"/>
+    </g>
+  </g>
+  <g id="lh-eye-left">
+    <rect fill="var(--inti-eye, #000000)" x="538" y="526" width="52" height="108" rx="26" transform="rotate(-5 564 580)"/>
+  </g>
+  <g id="lh-eye-right">
+    <rect fill="var(--inti-eye, #000000)" x="644" y="509" width="52" height="108" rx="26" transform="rotate(-5 670 563)"/>
+  </g>
+
+  <g transform="translate(-40 65)">
+  <g fill="var(--inti-text, #FFFFFF)">
+    <!-- I -->
+    <rect x="1020" y="333" width="150" height="67" rx="33.5"/>
+    <rect x="1053" y="333" width="84" height="335" rx="20"/>
+    <rect x="1020" y="601" width="150" height="67" rx="33.5"/>
+    <!-- n -->
+    <path d="
+      M 1210 462
+      A 32 32 0 0 1 1274 462
+      L 1274 466
+      C 1292 440, 1322 426, 1358 426
+      C 1416 426, 1450 462, 1450 524
+      L 1450 636
+      A 34 34 0 0 1 1382 636
+      L 1382 532
+      C 1382 500, 1364 486, 1334 486
+      C 1300 486, 1278 506, 1278 540
+      L 1278 636
+      A 34 34 0 0 1 1210 636 Z"/>
+    <!-- t -->
+    <rect x="1482" y="432" width="174" height="62" rx="31"/>
+    <path d="
+      M 1518 372
+      A 34 34 0 0 1 1586 372
+      L 1586 582
+      C 1586 602, 1596 608, 1618 608
+      L 1628 608
+      A 30 30 0 0 1 1628 668
+      L 1606 668
+      C 1546 668, 1518 640, 1518 584 Z"/>
+    <!-- i -->
+    <circle cx="1730" cy="360" r="42"/>
+    <rect x="1692" y="430" width="76" height="238" rx="36"/>
+  </g>
+  </g>
+</svg>
