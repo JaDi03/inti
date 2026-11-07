@@ -135,7 +135,8 @@ export function App() {
 
         {!empty && (
           // min-h-0 keeps the list inside its section (it scrolls) instead of growing under the prompt bar.
-          <ol className="no-scrollbar flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-4" aria-live="polite">
+          // The fade mask makes messages dissolve at both edges instead of cutting off against the prompt bar.
+          <ol className="chat-fade no-scrollbar mb-3 flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-6" aria-live="polite">
             {messages.map((m) => (
               <li
                 key={m.id}
