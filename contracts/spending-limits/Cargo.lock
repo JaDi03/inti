@@ -1027,7 +1027,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "inti-vault"
+name = "inti-spending-limits"
 version = "0.1.0"
 dependencies = [
  "near-sdk",

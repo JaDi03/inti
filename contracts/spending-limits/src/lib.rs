@@ -1,4 +1,5 @@
-//! Inti vault: a contract that runs on the user's own NEAR account.
+//! Inti Spending Limits: a contract that runs on the user's own NEAR account.
+//! It holds no funds of its own and has no custodian.
 //!
 //! Funds never leave the user's account except through `fund_agent`, which sends
 //! the amount of one order to the user's agent on NEAR Intents, within per-order
@@ -48,7 +49,7 @@ struct DailyUsage {
 }
 
 #[near(serializers = [json])]
-pub struct VaultConfig {
+pub struct LimitsConfig {
     pub intents: AccountId,
     pub agent: AccountId,
 }
@@ -67,7 +68,7 @@ trait FungibleToken {
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
-pub struct Vault {
+pub struct SpendingLimits {
     /// NEAR Intents verifier contract (intents.near on mainnet). Fixed at init.
     intents: AccountId,
     /// The user's agent account on NEAR Intents (Agent API `near_account_id`).
@@ -77,7 +78,7 @@ pub struct Vault {
 }
 
 #[near]
-impl Vault {
+impl SpendingLimits {
     /// Only the account itself can initialize, so nobody can set their own agent first.
     #[init]
     pub fn new(intents: AccountId, agent: AccountId) -> Self {
@@ -181,8 +182,8 @@ impl Vault {
 
     // ---------- Views ----------
 
-    pub fn get_config(&self) -> VaultConfig {
-        VaultConfig { intents: self.intents.clone(), agent: self.agent.clone() }
+    pub fn get_config(&self) -> LimitsConfig {
+        LimitsConfig { intents: self.intents.clone(), agent: self.agent.clone() }
     }
 
     pub fn get_limit(&self, token: AccountId) -> Option<TokenLimit> {
@@ -194,7 +195,7 @@ impl Vault {
     }
 }
 
-impl Vault {
+impl SpendingLimits {
     fn spent_on(&self, token: &AccountId, day: u64) -> u128 {
         match self.usage.get(token) {
             Some(usage) if usage.day == day => usage.spent,
@@ -242,91 +243,91 @@ mod tests {
         testing_env!(builder.build());
     }
 
-    fn vault_with_limit(per_order: u128, per_day: u128) -> Vault {
+    fn contract_with_limit(per_order: u128, per_day: u128) -> SpendingLimits {
         context(user(), 0, 1);
-        let mut vault = Vault::new("intents.near".parse().unwrap(), "agent.near".parse().unwrap());
+        let mut contract = SpendingLimits::new("intents.near".parse().unwrap(), "agent.near".parse().unwrap());
         context(user(), 1, 1);
-        vault.set_limit(usdc(), U128(per_order), U128(per_day));
+        contract.set_limit(usdc(), U128(per_order), U128(per_day));
         context(user(), 0, 1);
-        vault
+        contract
     }
 
     #[test]
     #[should_panic(expected = "only this account can call this method")]
     fn init_by_others_fails() {
         context("attacker.near".parse().unwrap(), 0, 1);
-        Vault::new("intents.near".parse().unwrap(), "attacker.near".parse().unwrap());
+        SpendingLimits::new("intents.near".parse().unwrap(), "attacker.near".parse().unwrap());
     }
 
     #[test]
     #[should_panic(expected = "only this account can call this method")]
     fn fund_agent_by_others_fails() {
-        let mut vault = vault_with_limit(100, 300);
+        let mut contract = contract_with_limit(100, 300);
         context("attacker.near".parse().unwrap(), 0, 1);
-        let _ = vault.fund_agent(usdc(), U128(10));
+        let _ = contract.fund_agent(usdc(), U128(10));
     }
 
     #[test]
     #[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
     fn owner_method_without_deposit_fails() {
-        let mut vault = vault_with_limit(100, 300);
+        let mut contract = contract_with_limit(100, 300);
         context(user(), 0, 1);
-        vault.set_agent("other.near".parse().unwrap());
+        contract.set_agent("other.near".parse().unwrap());
     }
 
     #[test]
     #[should_panic(expected = "token not allowed")]
     fn unknown_token_fails() {
-        let mut vault = vault_with_limit(100, 300);
-        let _ = vault.fund_agent("other-token.near".parse().unwrap(), U128(10));
+        let mut contract = contract_with_limit(100, 300);
+        let _ = contract.fund_agent("other-token.near".parse().unwrap(), U128(10));
     }
 
     #[test]
     #[should_panic(expected = "over the per-order limit")]
     fn per_order_limit() {
-        let mut vault = vault_with_limit(100, 300);
-        let _ = vault.fund_agent(usdc(), U128(101));
+        let mut contract = contract_with_limit(100, 300);
+        let _ = contract.fund_agent(usdc(), U128(101));
     }
 
     #[test]
     #[should_panic(expected = "over the daily limit")]
     fn daily_limit() {
-        let mut vault = vault_with_limit(100, 250);
-        let _ = vault.fund_agent(usdc(), U128(100));
-        let _ = vault.fund_agent(usdc(), U128(100));
-        let _ = vault.fund_agent(usdc(), U128(100));
+        let mut contract = contract_with_limit(100, 250);
+        let _ = contract.fund_agent(usdc(), U128(100));
+        let _ = contract.fund_agent(usdc(), U128(100));
+        let _ = contract.fund_agent(usdc(), U128(100));
     }
 
     #[test]
     fn daily_limit_resets_next_day() {
-        let mut vault = vault_with_limit(100, 100);
-        let _ = vault.fund_agent(usdc(), U128(100));
+        let mut contract = contract_with_limit(100, 100);
+        let _ = contract.fund_agent(usdc(), U128(100));
         context(user(), 0, 2);
-        let _ = vault.fund_agent(usdc(), U128(100));
-        assert_eq!(vault.get_spent_today(usdc()), U128(100));
+        let _ = contract.fund_agent(usdc(), U128(100));
+        assert_eq!(contract.get_spent_today(usdc()), U128(100));
     }
 
     #[test]
     fn unused_amount_is_released() {
-        let mut vault = vault_with_limit(100, 100);
-        let _ = vault.fund_agent(usdc(), U128(100));
-        let used = vault.on_fund_resolved(usdc(), U128(100), 1, Ok(U128(40)));
+        let mut contract = contract_with_limit(100, 100);
+        let _ = contract.fund_agent(usdc(), U128(100));
+        let used = contract.on_fund_resolved(usdc(), U128(100), 1, Ok(U128(40)));
         assert_eq!(used, U128(40));
-        assert_eq!(vault.get_spent_today(usdc()), U128(40));
+        assert_eq!(contract.get_spent_today(usdc()), U128(40));
     }
 
     #[test]
     fn failed_transfer_result_stays_counted() {
-        let mut vault = vault_with_limit(100, 100);
-        let _ = vault.fund_agent(usdc(), U128(100));
-        let used = vault.on_fund_resolved(usdc(), U128(100), 1, Err(PromiseError::Failed));
+        let mut contract = contract_with_limit(100, 100);
+        let _ = contract.fund_agent(usdc(), U128(100));
+        let used = contract.on_fund_resolved(usdc(), U128(100), 1, Err(PromiseError::Failed));
         assert_eq!(used, U128(100));
-        assert_eq!(vault.get_spent_today(usdc()), U128(100));
+        assert_eq!(contract.get_spent_today(usdc()), U128(100));
     }
 
     #[test]
     #[should_panic(expected = "per_order must not exceed per_day")]
     fn invalid_limit_rejected() {
-        vault_with_limit(200, 100);
+        contract_with_limit(200, 100);
     }
 }
