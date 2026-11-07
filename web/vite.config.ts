@@ -3,8 +3,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// The Privy App ID is public (it ships to the browser). It is read from the
-// root .env so there is one config file; only PRIVY_APP_ID is exposed.
+// The Privy App ID and INTI_* values are public (they ship to the browser). They are
+// read from the root .env so there is one config file; nothing else is exposed.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // shadcn/ui alias: "@/..." resolves to web/src.
@@ -13,6 +13,6 @@ export default defineConfig({
   // process.env.NODE_DEBUG at load time; browsers have no `process`.
   define: { "process.env": "{}" },
   envDir: "..",
-  envPrefix: ["PRIVY_APP_ID"],
+  envPrefix: ["PRIVY_APP_ID", "INTI_"],
   server: { port: 5173, strictPort: true },
 });
