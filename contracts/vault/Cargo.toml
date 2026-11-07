@@ -1,0 +1,23 @@
+[package]
+name = "inti-vault"
+version = "0.1.0"
+edition = "2021"
+description = "Per-user vault: lives on the user's own NEAR account and funds the user's agent within limits"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5.30.1"
+
+[dev-dependencies]
+near-sdk = { version = "5.30.1", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
