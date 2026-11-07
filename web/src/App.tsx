@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
+import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
 type Message = { id: number; from: "user" | "inti"; text: string };
 
@@ -32,7 +33,10 @@ function Wordmark({ className }: { className?: string }) {
 
 function Welcome({ onLogin }: { onLogin: () => void }) {
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center">
+    <main className="relative flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center">
+      <div className="absolute top-3 right-4">
+        <ThemeToggle />
+      </div>
       <IntiMascot size={220} />
       <div>
         <Wordmark className="text-6xl" />
@@ -47,6 +51,7 @@ function Welcome({ onLogin }: { onLogin: () => void }) {
 
 export function App() {
   const { ready, authenticated, user, login, logout } = usePrivy();
+  const { theme } = useTheme();
   const { createWallet } = useCreateWallet();
   const { exportWallet } = useExportWallet();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -81,7 +86,7 @@ export function App() {
   return (
     <div className="flex h-svh flex-col">
       <header className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <img src="/inti-logo-horizontal.svg" alt="Inti" className="h-8 w-auto" />
+        <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {address && (
             <code className="rounded-full bg-muted px-3 py-1 text-xs" title={address}>
@@ -105,6 +110,7 @@ export function App() {
               <KeyRound />
             </Button>
           )}
+          <ThemeToggle />
           <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
             <LogOut />
           </Button>
