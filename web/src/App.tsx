@@ -7,13 +7,19 @@ import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { ChatMessage, initialsOf } from "./chat/ChatMessage";
+import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
+import { useLimits } from "./limits/useLimits";
+import { NetworkSwitch } from "./network";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
 type Message = { id: number; from: "user" | "inti"; text: string };
 
 /** Shown until the chat is wired to the agent (next step). */
 const NOT_CONNECTED = "I'm not connected to the agent yet. Soon I'll be able to answer you and act for you.";
+/** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
+const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 2 steps, right here.";
+const MAINNET_SOON = "Mainnet is coming soon. Switch to Testnet to try me for free.";
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -87,6 +93,19 @@ export function App() {
   // Privy gives no profile photo for Google or email logins: the avatar shows initials.
   const userInitials = initialsOf(user?.google?.name ?? user?.google?.email ?? user?.email?.address);
 
+  // Spending Limits status on the selected network. Re-read every few seconds until it is active.
+  const [pollLimits, setPollLimits] = useState(false);
+  const limits = useLimits(address, pollLimits);
+  const needsActivation = limits.setup.kind !== "ready" || (limits.status !== null && limits.status.kind !== "installed");
+  // Shows the "ready" summary once, right after activating in this visit.
+  const [sawInactive, setSawInactive] = useState(false);
+  const [activationDone, setActivationDone] = useState(false);
+  useEffect(() => {
+    setPollLimits(limits.status !== null && limits.status.kind !== "installed");
+    if (needsActivation) setSawInactive(true);
+  }, [limits.status, needsActivation]);
+  const showActivation = address !== null && (needsActivation || (sawInactive && !activationDone && limits.status?.kind === "installed"));
+
   // Every user needs a NEAR wallet; create it once, without asking.
   useEffect(() => {
     if (!authenticated || !user || address !== null || creating.current) return;
@@ -102,19 +121,25 @@ export function App() {
 
   const send = (text: string) => {
     const userMsg: Message = { id: nextId.current++, from: "user", text };
-    const reply: Message = { id: nextId.current++, from: "inti", text: NOT_CONNECTED };
+    const replyText = limits.setup.kind === "not-ready" ? MAINNET_SOON : needsActivation ? ACTIVATE_FIRST : NOT_CONNECTED;
+    const reply: Message = { id: nextId.current++, from: "inti", text: replyText };
     setMessages((prev) => [...prev, userMsg, reply]);
   };
 
   const empty = messages.length === 0;
+  const activationCard =
+    showActivation && address ? (
+      <ActivationCard address={address} setup={limits.setup} status={limits.status} refresh={limits.refresh} onDone={() => setActivationDone(true)} />
+    ) : null;
 
   return (
     <div className="flex h-svh flex-col">
       <header className="flex items-center justify-between px-4 py-3 sm:px-6">
         <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <NetworkSwitch />
           {address && (
-            <code className="rounded-full bg-muted px-3 py-1 text-xs" title={address}>
+            <code className="hidden rounded-full bg-muted px-3 py-1 text-xs sm:inline" title={address}>
               {shortAddress(address)}
             </code>
           )}
@@ -143,14 +168,24 @@ export function App() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col items-center px-4">
-        <div className={cn("flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500", empty ? "mt-[12vh]" : "mt-2")}>
-          <IntiMascot size={empty ? 180 : 64} />
-          {empty && (
+        <div
+          className={cn(
+            "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
+            empty && !activationCard ? "mt-[12vh]" : "mt-2",
+          )}
+        >
+          <IntiMascot size={empty ? (activationCard ? 96 : 180) : 64} />
+          {empty && !activationCard && (
             <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
               What do you want to do with your money?
             </h1>
           )}
         </div>
+
+        {empty && activationCard && (
+          // First run: the activation card sits in its own scrollable section, above the prompt bar.
+          <div className="no-scrollbar mb-6 flex min-h-0 w-full flex-1 items-start justify-center overflow-y-auto py-4">{activationCard}</div>
+        )}
 
         {!empty && (
           // min-h-0 keeps the list inside its section (it scrolls) instead of growing under the prompt bar.
@@ -174,11 +209,12 @@ export function App() {
                 userInitials={userInitials}
               />
             ))}
+            {activationCard && <li className="mt-5 flex justify-center">{activationCard}</li>}
             <li ref={chatEnd} aria-hidden="true" />
           </ol>
         )}
 
-        <div className={cn("flex w-full shrink-0 justify-center pb-6", empty ? "mt-8" : "mt-auto")}>
+        <div className={cn("flex w-full shrink-0 justify-center pb-6", empty && !activationCard ? "mt-8" : "mt-auto")}>
           <PromptInput onSubmit={send} placeholder="e.g. invest $40 in NEAR" />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}

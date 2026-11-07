@@ -38,13 +38,19 @@ function required(name: string): string {
 
 const NEAR = 10n ** 24n;
 
-export function loadLimitsConfig(): LimitsConfig {
-  const networkId = (env.INTI_NETWORK ?? "testnet") as NetworkId;
+/** The network the app opens on when the user has not picked one (INTI_NETWORK, else testnet). */
+export function defaultNetwork(): NetworkId {
+  return env.INTI_NETWORK === "mainnet" ? "mainnet" : "testnet";
+}
+
+/** Thrown for a network the app cannot use yet; the UI shows it as "coming soon". */
+export class NetworkNotReadyError extends Error {}
+
+export function loadLimitsConfig(networkId: NetworkId): LimitsConfig {
   if (networkId === "mainnet") {
     // Mainnet needs the real agent from the Agent API and a verified USDC token id.
-    throw new Error("Spending Limits is not configured for mainnet yet.");
+    throw new NetworkNotReadyError("Mainnet is coming soon.");
   }
-  if (networkId !== "testnet") throw new Error(`Unknown INTI_NETWORK: ${String(networkId)}`);
   const standIn = required("INTI_TESTNET_AGENT_ACCOUNT");
   return {
     networkId,
