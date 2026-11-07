@@ -5,8 +5,8 @@ import { fromAtomic, toAtomic } from "../../../src/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PrivyNearSigner } from "../privySigner";
-import { VaultClient, type VaultLimit, type VaultStatus } from "./client";
-import { loadVaultConfig, type VaultConfig } from "./config";
+import { LimitsClient, type SpendLimit, type LimitsStatus } from "./client";
+import { loadLimitsConfig, type LimitsConfig } from "./config";
 
 /** Shows at most 4 decimals; display only, never used for math. */
 function display(atomic: bigint, decimals: number): string {
@@ -31,13 +31,13 @@ interface Props {
   onClose: () => void;
 }
 
-export function VaultPanel({ address, onClose }: Props) {
-  const setup = useMemo((): { config: VaultConfig; client: VaultClient } | { error: string } => {
+export function SpendingLimitsPanel({ address, onClose }: Props) {
+  const setup = useMemo((): { config: LimitsConfig; client: LimitsClient } | { error: string } => {
     try {
-      const config = loadVaultConfig();
-      return { config, client: new VaultClient(config) };
+      const config = loadLimitsConfig();
+      return { config, client: new LimitsClient(config) };
     } catch (e) {
-      return { error: e instanceof Error ? e.message : "The vault is not configured." };
+      return { error: e instanceof Error ? e.message : "Spending Limits is not configured." };
     }
   }, []);
 
@@ -59,17 +59,17 @@ export function VaultPanel({ address, onClose }: Props) {
         {"error" in setup ? (
           <p className="text-sm text-destructive">{setup.error}</p>
         ) : (
-          <VaultBody address={address} config={setup.config} client={setup.client} />
+          <LimitsBody address={address} config={setup.config} client={setup.client} />
         )}
       </section>
     </div>
   );
 }
 
-function VaultBody({ address, config, client }: { address: string; config: VaultConfig; client: VaultClient }) {
+function LimitsBody({ address, config, client }: { address: string; config: LimitsConfig; client: LimitsClient }) {
   const { signRawHash } = useSignRawHash();
   const signer = useMemo(() => new PrivyNearSigner(address, signRawHash), [address, signRawHash]);
-  const [status, setStatus] = useState<VaultStatus | null>(null);
+  const [status, setStatus] = useState<LimitsStatus | null>(null);
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,7 @@ function VaultBody({ address, config, client }: { address: string; config: Vault
 
   useEffect(() => {
     void refresh();
-    client.loadWasm().then(setWasm, (e: unknown) => setError(e instanceof Error ? e.message : "Could not load the vault code."));
+    client.loadWasm().then(setWasm, (e: unknown) => setError(e instanceof Error ? e.message : "Could not load the Spending Limits code."));
   }, [client, refresh]);
 
   const run = async (label: string, action: () => Promise<string | string[]>) => {
@@ -111,7 +111,7 @@ function VaultBody({ address, config, client }: { address: string; config: Vault
   if (!status || !wasm) {
     body = <p className="text-sm text-muted-foreground">Checking your account...</p>;
   } else if (status.kind !== "installed") {
-    const needs = VaultClient.activationNeeds(wasm.length, DEFAULT_FUND);
+    const needs = LimitsClient.activationNeeds(wasm.length, DEFAULT_FUND);
     if (status.available < needs) {
       body = <AddFunds address={address} needs={amount(needs)} has={amount(status.available)} onCheck={() => void refresh()} />;
     } else {
@@ -129,7 +129,7 @@ function VaultBody({ address, config, client }: { address: string; config: Vault
             onSubmit={(limit, fund) => void run("Activating...", () => client.activate(address, signer, wasm, limit, fund))}
           />
           <p className="mt-3 text-xs text-muted-foreground">
-            About {amount(VaultClient.storageCost(wasm.length))} stays locked in your account while the vault is installed (network storage). You confirm two
+            About {amount(LimitsClient.storageCost(wasm.length))} stays locked in your account while Spending Limits is installed (network storage). You confirm two
             transactions.
           </p>
         </>
@@ -249,11 +249,11 @@ function AddFunds({ address, needs, has, onCheck }: { address: string; needs: st
 interface LimitFormProps {
   decimals: number;
   symbol: string;
-  initial?: VaultLimit;
+  initial?: SpendLimit;
   withFunding?: boolean;
   submitLabel: string;
   busy: string | null;
-  onSubmit: (limit: VaultLimit, fund: bigint) => void;
+  onSubmit: (limit: SpendLimit, fund: bigint) => void;
   onCancel?: () => void;
 }
 

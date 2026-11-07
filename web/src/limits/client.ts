@@ -1,6 +1,6 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
 import type { Signer } from "near-api-js";
-import type { VaultConfig } from "./config";
+import type { LimitsConfig } from "./config";
 
 const TGAS = 10n ** 12n;
 /** Storage staking rate: 1E19 yoctoNEAR per byte (docs.near.org/protocol/storage/storage-staking). */
@@ -10,12 +10,12 @@ const NO_CODE = "11111111111111111111111111111111";
 /** Room for contract state, token registration and gas on top of the code storage. */
 const ACTIVATION_MARGIN = 10n ** 23n; // 0.1 NEAR
 
-export interface VaultLimit {
+export interface SpendLimit {
   perOrder: bigint;
   perDay: bigint;
 }
 
-export type VaultStatus =
+export type LimitsStatus =
   | { kind: "unfunded"; available: bigint }
   | { kind: "not-installed"; available: bigint }
   | {
@@ -23,32 +23,32 @@ export type VaultStatus =
       available: bigint;
       intiConnected: boolean;
       agent: string;
-      limit: VaultLimit | null;
+      limit: SpendLimit | null;
       spentToday: bigint;
       /** Token balance the agent can be funded from. */
       spendable: bigint;
     };
 
-export class VaultClient {
+export class LimitsClient {
   readonly provider: JsonRpcProvider;
 
-  constructor(readonly config: VaultConfig) {
+  constructor(readonly config: LimitsConfig) {
     this.provider = new JsonRpcProvider({ url: config.rpcUrl });
   }
 
-  /** NEAR locked while the vault code is on the account. */
+  /** NEAR locked while the Spending Limits code is on the account. */
   static storageCost(wasmBytes: number): bigint {
     return BigInt(wasmBytes) * YOCTO_PER_BYTE;
   }
 
   /** Available NEAR the account needs before activating with `fundAmount` of token. */
   static activationNeeds(wasmBytes: number, fundAmount: bigint): bigint {
-    return VaultClient.storageCost(wasmBytes) + ACTIVATION_MARGIN + fundAmount;
+    return LimitsClient.storageCost(wasmBytes) + ACTIVATION_MARGIN + fundAmount;
   }
 
   async loadWasm(): Promise<Uint8Array> {
     const res = await fetch(this.config.wasmUrl);
-    if (!res.ok) throw new Error(`Could not load the vault code (${res.status}).`);
+    if (!res.ok) throw new Error(`Could not load the Spending Limits code (${res.status}).`);
     return new Uint8Array(await res.arrayBuffer());
   }
 
@@ -56,7 +56,7 @@ export class VaultClient {
     return (await this.provider.callFunction({ contractId, method, args })) as T;
   }
 
-  async status(accountId: string): Promise<VaultStatus> {
+  async status(accountId: string): Promise<LimitsStatus> {
     let state;
     try {
       state = await new Account(accountId, this.provider).getState();
@@ -67,7 +67,7 @@ export class VaultClient {
     if (state.codeHash === NO_CODE) return { kind: "not-installed", available };
 
     const token = this.config.token.id;
-    const [vaultConfig, limit, spent, balance, intiConnected] = await Promise.all([
+    const [onChainConfig, limit, spent, balance, intiConnected] = await Promise.all([
       this.view<{ agent: string }>(accountId, "get_config"),
       this.view<{ per_order: string; per_day: string } | null>(accountId, "get_limit", { token }),
       this.view<string>(accountId, "get_spent_today", { token }),
@@ -78,7 +78,7 @@ export class VaultClient {
       kind: "installed",
       available,
       intiConnected,
-      agent: vaultConfig.agent,
+      agent: onChainConfig.agent,
       limit: limit ? { perOrder: BigInt(limit.per_order), perDay: BigInt(limit.per_day) } : null,
       spentToday: BigInt(spent),
       spendable: BigInt(balance),
@@ -113,7 +113,7 @@ export class VaultClient {
    * 2. on the token: register the user and wrap `fundAmount` NEAR so orders can be funded.
    * Returns the transaction hashes.
    */
-  async activate(accountId: string, signer: Signer, wasm: Uint8Array, limit: VaultLimit, fundAmount: bigint): Promise<string[]> {
+  async activate(accountId: string, signer: Signer, wasm: Uint8Array, limit: SpendLimit, fundAmount: bigint): Promise<string[]> {
     const account = this.account(accountId, signer);
     const { token } = this.config;
     const install = await account.signAndSendTransaction({
@@ -136,7 +136,7 @@ export class VaultClient {
     return [install.transaction.hash, funding.transaction.hash];
   }
 
-  async setLimit(accountId: string, signer: Signer, limit: VaultLimit): Promise<string> {
+  async setLimit(accountId: string, signer: Signer, limit: SpendLimit): Promise<string> {
     const res = await this.account(accountId, signer).signAndSendTransaction({
       receiverId: accountId,
       actions: [actions.functionCall("set_limit", limitArgs(this.config.token.id, limit), 30n * TGAS, 1n)],
@@ -161,6 +161,6 @@ export class VaultClient {
   }
 }
 
-function limitArgs(token: string, limit: VaultLimit) {
+function limitArgs(token: string, limit: SpendLimit) {
   return { token, per_order: limit.perOrder.toString(), per_day: limit.perDay.toString() };
 }

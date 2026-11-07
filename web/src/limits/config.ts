@@ -1,5 +1,5 @@
 /**
- * Per-network settings for the vault. Values that differ per environment come from
+ * Per-network settings for Spending Limits. Values that differ per environment come from
  * the root .env (INTI_* variables ship to the browser, so they must be public).
  */
 export type NetworkId = "testnet" | "mainnet";
@@ -12,7 +12,7 @@ export interface TokenConfig {
   decimals: number;
 }
 
-export interface VaultConfig {
+export interface LimitsConfig {
   networkId: NetworkId;
   rpcUrl: string;
   explorerTxUrl: (hash: string) => string;
@@ -38,11 +38,11 @@ function required(name: string): string {
 
 const NEAR = 10n ** 24n;
 
-export function loadVaultConfig(): VaultConfig {
+export function loadLimitsConfig(): LimitsConfig {
   const networkId = (env.INTI_NETWORK ?? "testnet") as NetworkId;
   if (networkId === "mainnet") {
     // Mainnet needs the real agent from the Agent API and a verified USDC token id.
-    throw new Error("The vault is not configured for mainnet yet.");
+    throw new Error("Spending Limits is not configured for mainnet yet.");
   }
   if (networkId !== "testnet") throw new Error(`Unknown INTI_NETWORK: ${String(networkId)}`);
   const standIn = required("INTI_TESTNET_AGENT_ACCOUNT");
@@ -57,6 +57,6 @@ export function loadVaultConfig(): VaultConfig {
     token: { id: "wrap.testnet", symbol: "NEAR", decimals: 24 },
     intiPublicKey: required("INTI_KEY_PUBLIC"),
     intiKeyAllowanceYocto: NEAR / 4n,
-    wasmUrl: "/inti-vault.wasm",
+    wasmUrl: "/inti-spending-limits.wasm",
   };
 }

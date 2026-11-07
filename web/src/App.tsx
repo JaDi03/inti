@@ -6,7 +6,7 @@ import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
-import { VaultPanel } from "./vault/VaultPanel";
+import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 
 type Message = { id: number; from: "user" | "inti"; text: string };
 
@@ -51,7 +51,7 @@ export function App() {
   const { exportWallet } = useExportWallet();
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
-  const [vaultOpen, setVaultOpen] = useState(false);
+  const [limitsOpen, setLimitsOpen] = useState(false);
   const creating = useRef(false);
   const nextId = useRef(1);
 
@@ -89,7 +89,7 @@ export function App() {
             </code>
           )}
           {address && (
-            <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setVaultOpen(true)}>
+            <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setLimitsOpen(true)}>
               <ShieldCheck />
             </Button>
           )}
@@ -142,7 +142,7 @@ export function App() {
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
-      {vaultOpen && address && <VaultPanel address={address} onClose={() => setVaultOpen(false)} />}
+      {limitsOpen && address && <SpendingLimitsPanel address={address} onClose={() => setLimitsOpen(false)} />}
     </div>
   );
 }
