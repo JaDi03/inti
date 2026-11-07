@@ -37,6 +37,8 @@
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
     --color-card: var(--card);
+    --color-chat-user: var(--chat-user);
+    --color-chat-user-foreground: var(--chat-user-foreground);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     --radius-sm: calc(var(--radius) * 0.6);
@@ -80,6 +82,9 @@
     --inti-side-right: #00d488;
     --inti-eye: #000000;
     --inti-glow: #f2b632;
+    /* User chat bubble: a mid gray with white text in both themes (green stays for actions). */
+    --chat-user: oklch(0.38 0 0);
+    --chat-user-foreground: oklch(0.985 0 0);
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -110,6 +115,8 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: #00be79;
+    --chat-user: oklch(0.42 0 0);
+    --chat-user-foreground: oklch(0.985 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -137,11 +144,22 @@
     }
 }
 
-/* Chat input scrollbar: hidden until hover. */
-.prompt-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; background: transparent; }
-.prompt-scrollbar::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
-.prompt-scrollbar:hover::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+/* Chat input and conversation: scrollable, with no visible scrollbar. */
+.prompt-scrollbar, .no-scrollbar { scrollbar-width: none; }
+.prompt-scrollbar::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
 
+/* Chat bubble tail on the first message of a turn (mobile chat style). It takes the bubble color. */
+.bubble-tail-left::before, .bubble-tail-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 13px;
+  height: 14px;
+  background: inherit;
+}
+/* Wide tail outside the bubble: full height at the bubble edge, curved inner edge, rounded tip. */
+.bubble-tail-right::before { right: -12px; clip-path: path("M0 0 L10 0 Q13 0 11.4 2.4 Q6 10 0 14 Z"); }
+.bubble-tail-left::before { left: -12px; clip-path: path("M13 0 L3 0 Q0 0 1.6 2.4 Q7 10 13 14 Z"); }
 /* Inti mascot: the body breathes; antenna nodes show the agent state. */
 .inti-mascot .inti-body { transform-box: fill-box; transform-origin: 50% 100%; animation: inti-breathe 4s ease-in-out infinite; }
 .inti-mascot[data-state="thinking"] .inti-node { animation: inti-node-pulse 1.2s ease-in-out infinite; }

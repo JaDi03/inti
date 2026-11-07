@@ -6,6 +6,7 @@ import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
+import { ChatMessage, initialsOf } from "./chat/ChatMessage";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
@@ -59,8 +60,32 @@ export function App() {
   const [limitsOpen, setLimitsOpen] = useState(false);
   const creating = useRef(false);
   const nextId = useRef(1);
+  const chatEnd = useRef<HTMLLIElement>(null);
+  const chatList = useRef<HTMLOListElement>(null);
+  // True while the user is reading the end of the conversation (not scrolled up).
+  const followingEnd = useRef(true);
+
+  // Keep the newest message in view.
+  useEffect(() => {
+    followingEnd.current = true;
+    chatEnd.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages]);
+
+  // When the prompt bar grows while typing, the list gets shorter: stay at the end if the user was there.
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    const list = chatList.current;
+    if (!list) return;
+    const observer = new ResizeObserver(() => {
+      if (followingEnd.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [hasMessages]);
 
   const address = user ? nearAddress(user.linkedAccounts) : null;
+  // Privy gives no profile photo for Google or email logins: the avatar shows initials.
+  const userInitials = initialsOf(user?.google?.name ?? user?.google?.email ?? user?.email?.address);
 
   // Every user needs a NEAR wallet; create it once, without asking.
   useEffect(() => {
@@ -118,8 +143,8 @@ export function App() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col items-center px-4">
-        <div className={cn("flex w-full max-w-2xl flex-col items-center transition-all duration-500", empty ? "mt-[12vh]" : "mt-2")}>
-          <IntiMascot size={empty ? 180 : 96} />
+        <div className={cn("flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500", empty ? "mt-[12vh]" : "mt-2")}>
+          <IntiMascot size={empty ? 180 : 64} />
           {empty && (
             <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
               What do you want to do with your money?
@@ -128,22 +153,32 @@ export function App() {
         </div>
 
         {!empty && (
-          <ol className="flex w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-4" aria-live="polite">
-            {messages.map((m) => (
-              <li
+          // min-h-0 keeps the list inside its section (it scrolls) instead of growing under the prompt bar.
+          // The list ends with a clear gap above the prompt bar: messages never look like they slide under it.
+          <ol
+            ref={chatList}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              followingEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+            }}
+            // Same width as the open prompt bar (560px), so the chat reads as one centered column.
+            className="no-scrollbar mb-6 flex min-h-0 w-full max-w-[560px] flex-1 flex-col overflow-y-auto py-4"
+            aria-live="polite"
+          >
+            {messages.map((m, i) => (
+              <ChatMessage
                 key={m.id}
-                className={cn(
-                  "max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-                  m.from === "user" ? "self-end bg-primary text-primary-foreground" : "self-start bg-muted text-foreground",
-                )}
-              >
-                {m.text}
-              </li>
+                from={m.from}
+                text={m.text}
+                firstOfTurn={i === 0 || messages[i - 1]?.from !== m.from}
+                userInitials={userInitials}
+              />
             ))}
+            <li ref={chatEnd} aria-hidden="true" />
           </ol>
         )}
 
-        <div className={cn("flex w-full justify-center pb-6", empty ? "mt-8" : "mt-auto")}>
+        <div className={cn("flex w-full shrink-0 justify-center pb-6", empty ? "mt-8" : "mt-auto")}>
           <PromptInput onSubmit={send} placeholder="e.g. invest $40 in NEAR" />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
