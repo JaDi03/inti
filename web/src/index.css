@@ -140,6 +140,18 @@
 /* Chat input and conversation: scrollable, with no visible scrollbar. */
 .prompt-scrollbar, .no-scrollbar { scrollbar-width: none; }
 .prompt-scrollbar::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Chat bubble tail on the first message of a turn (mobile chat style). It takes the bubble color. */
+.bubble-tail-left::before, .bubble-tail-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 10px;
+  height: 14px;
+  background: inherit;
+}
+.bubble-tail-left::before { left: -7px; clip-path: polygon(100% 0, 0 0, 100% 100%); }
+.bubble-tail-right::before { right: -7px; clip-path: polygon(0 0, 100% 0, 0 100%); }
 /* Inti mascot: the body breathes; antenna nodes show the agent state. */
 .inti-mascot .inti-body { transform-box: fill-box; transform-origin: 50% 100%; animation: inti-breathe 4s ease-in-out infinite; }
 .inti-mascot[data-state="thinking"] .inti-node { animation: inti-node-pulse 1.2s ease-in-out infinite; }
