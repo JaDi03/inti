@@ -105,6 +105,7 @@ export function App() {
     if (needsActivation) setSawInactive(true);
   }, [limits.status, needsActivation]);
   const showActivation = address !== null && (needsActivation || (sawInactive && !activationDone && limits.status?.kind === "installed"));
+  const [activating, setActivating] = useState(false);
 
   // Every user needs a NEAR wallet; create it once, without asking.
   useEffect(() => {
@@ -129,8 +130,20 @@ export function App() {
   const empty = messages.length === 0;
   const activationCard =
     showActivation && address ? (
-      <ActivationCard address={address} setup={limits.setup} status={limits.status} refresh={limits.refresh} onDone={() => setActivationDone(true)} />
+      <ActivationCard
+        address={address}
+        setup={limits.setup}
+        status={limits.status}
+        refresh={limits.refresh}
+        onDone={() => setActivationDone(true)}
+        onWorking={setActivating}
+      />
     ) : null;
+
+  // The mascot "thinks" (antennas light up) whenever the app is working for the user.
+  const creatingWallet = address === null && walletError === null;
+  const checkingAccount = address !== null && limits.setup.kind === "ready" && limits.status === null;
+  const working = creatingWallet || checkingAccount || activating;
 
   return (
     <div className="flex h-svh flex-col">
@@ -174,10 +187,16 @@ export function App() {
             empty && !activationCard ? "mt-[12vh]" : "mt-2",
           )}
         >
-          <IntiMascot size={empty ? (activationCard ? 96 : 180) : 64} />
-          {empty && !activationCard && (
+          <IntiMascot size={empty ? (activationCard ? 96 : 180) : 64} state={working ? "thinking" : "idle"} />
+          {empty && !activationCard && creatingWallet && (
+            <div className="mt-4 text-center" role="status">
+              <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">Creating your wallet...</h1>
+              <p className="mt-2 text-sm text-muted-foreground">Secured by your email or Google login. No seed phrase to write down.</p>
+            </div>
+          )}
+          {empty && !activationCard && !creatingWallet && (
             <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
-              What do you want to do with your money?
+              {checkingAccount ? "Checking your account..." : "What do you want to do with your money?"}
             </h1>
           )}
         </div>

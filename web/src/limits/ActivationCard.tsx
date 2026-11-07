@@ -19,6 +19,8 @@ interface Props {
   refresh: () => Promise<void>;
   /** Hides the card after the user has seen the "ready" summary. */
   onDone: () => void;
+  /** True while activation transactions are being signed and sent (the mascot shows it). */
+  onWorking?: (working: boolean) => void;
 }
 
 /**
@@ -26,7 +28,7 @@ interface Props {
  * 1. add funds (the app notices them by itself), 2. set spending limits and sign once,
  * 3. see where the money sits.
  */
-export function ActivationCard({ address, setup, status, refresh, onDone }: Props) {
+export function ActivationCard({ address, setup, status, refresh, onDone, onWorking }: Props) {
   const { setNetwork } = useNetwork();
 
   if (setup.kind === "not-ready") {
@@ -47,10 +49,19 @@ export function ActivationCard({ address, setup, status, refresh, onDone }: Prop
       </CardFrame>
     );
   }
-  return <ActivationSteps address={address} client={setup.client} status={status} refresh={refresh} onDone={onDone} />;
+  return <ActivationSteps address={address} client={setup.client} status={status} refresh={refresh} onDone={onDone} onWorking={onWorking} />;
 }
 
-function ActivationSteps({ address, client, status, refresh, onDone }: { address: string; client: LimitsClient; status: LimitsStatus | null; refresh: () => Promise<void>; onDone: () => void }) {
+interface StepsProps {
+  address: string;
+  client: LimitsClient;
+  status: LimitsStatus | null;
+  refresh: () => Promise<void>;
+  onDone: () => void;
+  onWorking?: (working: boolean) => void;
+}
+
+function ActivationSteps({ address, client, status, refresh, onDone, onWorking }: StepsProps) {
   const { config } = client;
   const { symbol, decimals } = config.token;
   const amount = (v: bigint) => `${display(v, decimals)} ${symbol}`;
@@ -78,8 +89,9 @@ function ActivationSteps({ address, client, status, refresh, onDone }: { address
   const active = status.kind === "installed";
 
   const activate = async (limit: Parameters<LimitsClient["activate"]>[3], fund: bigint) => {
-    setBusy("Confirm the two signatures...");
+    setBusy("Activating Inti: confirm the two signatures...");
     setError(null);
+    onWorking?.(true);
     try {
       const hashes = await client.activate(address, signer, wasm, limit, fund);
       setLastTx(hashes.at(-1) ?? null);
@@ -88,6 +100,7 @@ function ActivationSteps({ address, client, status, refresh, onDone }: { address
       setError(e instanceof Error ? e.message : "Activation failed.");
     } finally {
       setBusy(null);
+      onWorking?.(false);
     }
   };
 
@@ -142,7 +155,11 @@ function ActivationSteps({ address, client, status, refresh, onDone }: { address
         </>
       )}
 
-      {busy && <p className="mt-3 text-sm text-muted-foreground">{busy}</p>}
+      {busy && (
+        <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> {busy}
+        </p>
+      )}
       {error && <p className="mt-3 break-words text-sm text-destructive">{error}</p>}
       {lastTx && (
         <a className="mt-3 inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline" href={config.explorerTxUrl(lastTx)} target="_blank" rel="noreferrer">
