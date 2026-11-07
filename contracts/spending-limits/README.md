@@ -1,7 +1,9 @@
-# Inti vault contract
+# Inti Spending Limits contract
 
-A NEAR contract that runs on the user's own account. It holds no funds of its own: the user's
-tokens stay in the user's account. Inti gets a function-call key that can only call
+Give AI money without handing it the keys to everything.
+
+A NEAR contract that runs on the user's own account. It is not a vault and has no custodian:
+it holds no funds of its own, and the user's tokens stay in the user's account. Inti gets a function-call key that can only call
 `fund_agent`, which sends the amount of one order to the user's agent on NEAR Intents
 (`ft_transfer_call` to the verifier with the agent account as `msg`), within limits.
 

@@ -1,8 +1,8 @@
 [package]
-name = "inti-vault"
+name = "inti-spending-limits"
 version = "0.1.0"
 edition = "2021"
-description = "Per-user vault: lives on the user's own NEAR account and funds the user's agent within limits"
+description = "Spending limits for an AI agent: lives on the user's own NEAR account and funds the user's agent within limits"
 license = "MIT"
 
 [lib]
