@@ -1,11 +1,12 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { KeyRound, LogOut } from "lucide-react";
+import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
+import { VaultPanel } from "./vault/VaultPanel";
 
 type Message = { id: number; from: "user" | "inti"; text: string };
 
@@ -50,6 +51,7 @@ export function App() {
   const { exportWallet } = useExportWallet();
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [vaultOpen, setVaultOpen] = useState(false);
   const creating = useRef(false);
   const nextId = useRef(1);
 
@@ -85,6 +87,11 @@ export function App() {
             <code className="rounded-full bg-muted px-3 py-1 text-xs" title={address}>
               {shortAddress(address)}
             </code>
+          )}
+          {address && (
+            <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setVaultOpen(true)}>
+              <ShieldCheck />
+            </Button>
           )}
           {address && (
             // Privy's own modal shows the key; it never reaches Inti's code.
@@ -135,6 +142,7 @@ export function App() {
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
+      {vaultOpen && address && <VaultPanel address={address} onClose={() => setVaultOpen(false)} />}
     </div>
   );
 }
