@@ -60,11 +60,27 @@ export function App() {
   const creating = useRef(false);
   const nextId = useRef(1);
   const chatEnd = useRef<HTMLLIElement>(null);
+  const chatList = useRef<HTMLOListElement>(null);
+  // True while the user is reading the end of the conversation (not scrolled up).
+  const followingEnd = useRef(true);
 
   // Keep the newest message in view.
   useEffect(() => {
+    followingEnd.current = true;
     chatEnd.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages]);
+
+  // When the prompt bar grows while typing, the list gets shorter: stay at the end if the user was there.
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    const list = chatList.current;
+    if (!list) return;
+    const observer = new ResizeObserver(() => {
+      if (followingEnd.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [hasMessages]);
 
   const address = user ? nearAddress(user.linkedAccounts) : null;
 
@@ -136,7 +152,15 @@ export function App() {
         {!empty && (
           // min-h-0 keeps the list inside its section (it scrolls) instead of growing under the prompt bar.
           // The fade mask makes messages dissolve at both edges instead of cutting off against the prompt bar.
-          <ol className="chat-fade no-scrollbar mb-3 flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-6" aria-live="polite">
+          <ol
+            ref={chatList}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              followingEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+            }}
+            className="chat-fade no-scrollbar mb-3 flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-6"
+            aria-live="polite"
+          >
             {messages.map((m) => (
               <li
                 key={m.id}
