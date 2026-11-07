@@ -7,9 +7,10 @@ import { cn } from "@/lib/utils";
 import { PrivyNearSigner } from "../privySigner";
 import { LimitsClient, type SpendLimit, type LimitsStatus } from "./client";
 import { loadLimitsConfig, type LimitsConfig } from "./config";
+import { useNetwork } from "../network";
 
 /** Shows at most 4 decimals; display only, never used for math. */
-function display(atomic: bigint, decimals: number): string {
+export function display(atomic: bigint, decimals: number): string {
   const [whole, fraction] = fromAtomic(atomic.toString(), decimals).split(".");
   return fraction ? `${whole}.${fraction.slice(0, 4).replace(/0+$/, "") || "0"}` : (whole ?? "0");
 }
@@ -32,14 +33,15 @@ interface Props {
 }
 
 export function SpendingLimitsPanel({ address, onClose }: Props) {
+  const { network } = useNetwork();
   const setup = useMemo((): { config: LimitsConfig; client: LimitsClient } | { error: string } => {
     try {
-      const config = loadLimitsConfig();
+      const config = loadLimitsConfig(network);
       return { config, client: new LimitsClient(config) };
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Spending Limits is not configured." };
     }
-  }, []);
+  }, [network]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/70 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-label="Spending limits">
@@ -217,7 +219,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
   );
 }
 
-const DEFAULT_FUND = 10n ** 23n; // 0.1 NEAR
+export const DEFAULT_FUND = 10n ** 23n; // 0.1 NEAR
 
 function AddFunds({ address, needs, has, onCheck }: { address: string; needs: string; has: string; onCheck: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -257,7 +259,7 @@ interface LimitFormProps {
   onCancel?: () => void;
 }
 
-function LimitForm({ decimals, symbol, initial, withFunding, submitLabel, busy, onSubmit, onCancel }: LimitFormProps) {
+export function LimitForm({ decimals, symbol, initial, withFunding, submitLabel, busy, onSubmit, onCancel }: LimitFormProps) {
   const [perOrder, setPerOrder] = useState(initial ? fromAtomic(initial.perOrder.toString(), decimals) : "0.02");
   const [perDay, setPerDay] = useState(initial ? fromAtomic(initial.perDay.toString(), decimals) : "0.05");
   const [fund, setFund] = useState(fromAtomic(DEFAULT_FUND.toString(), decimals));
@@ -303,17 +305,17 @@ function LimitForm({ decimals, symbol, initial, withFunding, submitLabel, busy, 
 
 function AmountField({ label, symbol, value, onChange }: { label: string; symbol: string; value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <div className="flex items-center rounded-xl border border-input bg-background px-3 focus-within:ring-2 focus-within:ring-ring/40">
-        <input
-          className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none"
-          inputMode="decimal"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        <span className="text-muted-foreground">{symbol}</span>
-      </div>
+    // Label left, value right, in one field (card style: "Format Style · Interview Mode").
+    <label className="flex h-12 items-center gap-3 rounded-xl border border-border bg-background/60 px-4 text-sm focus-within:ring-2 focus-within:ring-ring/40">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <input
+        className="min-w-0 flex-1 bg-transparent text-right text-base font-medium outline-none"
+        inputMode="decimal"
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className="shrink-0 text-muted-foreground">{symbol}</span>
     </label>
   );
 }
