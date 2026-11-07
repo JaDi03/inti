@@ -151,14 +151,14 @@ export function App() {
 
         {!empty && (
           // min-h-0 keeps the list inside its section (it scrolls) instead of growing under the prompt bar.
-          // The fade mask makes messages dissolve at both edges instead of cutting off against the prompt bar.
+          // The list ends with a clear gap above the prompt bar: messages never look like they slide under it.
           <ol
             ref={chatList}
             onScroll={(e) => {
               const el = e.currentTarget;
               followingEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
             }}
-            className="chat-fade no-scrollbar mb-3 flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-6"
+            className="no-scrollbar mb-6 flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-3 overflow-y-auto py-2"
             aria-live="polite"
           >
             {messages.map((m) => (
