@@ -6,9 +6,12 @@
  *   pnpm cycle --propose "..."
  */
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { runCycle } from "../agent/loop.js";
 import { SimulatedPortfolio, type PricedToken } from "../agent/portfolio.js";
+import type { Brain } from "../agent/types.js";
 import { AnthropicBrain } from "../brains/anthropic.js";
+import { NearAiBrain } from "../brains/nearai.js";
 import { buildPolicy } from "../policy/build.js";
 import { describePolicy } from "../policy/preview.js";
 
@@ -31,8 +34,12 @@ async function main(): Promise<void> {
     console.error('Usage: pnpm cycle [--propose] "<goal in plain words>"');
     process.exit(2);
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("ANTHROPIC_API_KEY is not set in .env");
+  // NEAR AI Cloud (TEE) is the default brain; Anthropic stays as a fallback.
+  let brain: Brain;
+  if (process.env.NEAR_AI_API_KEY) brain = NearAiBrain.fromApiKey(process.env.NEAR_AI_API_KEY);
+  else if (process.env.ANTHROPIC_API_KEY) brain = new AnthropicBrain();
+  else {
+    console.error("Set NEAR_AI_API_KEY (or ANTHROPIC_API_KEY) in .env");
     process.exit(2);
   }
 
@@ -52,9 +59,9 @@ async function main(): Promise<void> {
 
   console.log("Policy (signed by the owner):");
   for (const line of describePolicy(policy, tokens)) console.log(`  ${line}`);
-  console.log(`\nGoal: ${goal}\nMode: ${mode} (simulated portfolio, live prices)\n`);
+  console.log(`\nGoal: ${goal}\nMode: ${mode} (simulated portfolio, live prices)\nBrain: ${brain.name}\n`);
 
-  const result = await runCycle({ brain: new AnthropicBrain(), goal, policy, portfolio, mode });
+  const result = await runCycle({ brain, goal, policy, portfolio, mode });
 
   for (const turn of result.history) {
     if (turn.role === "assistant") {
@@ -63,6 +70,8 @@ async function main(): Promise<void> {
       for (const r of turn.results) console.log(`  ${r.isError ? "ERROR " : ""}${r.content.slice(0, 300)}`);
     }
   }
+  const responseIds = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit.responseId] : []));
+  if (responseIds.length > 0) console.log(`\nResponse ids (signed by the provider): ${responseIds.join(", ")}`);
   console.log(`\nEvents: ${JSON.stringify(result.events)}`);
   console.log(`Stop: ${result.stopReason}\n\nReport:\n${result.report}`);
   console.log(`\nPortfolio after: ${JSON.stringify(portfolio.holdings())}`);
@@ -72,6 +81,9 @@ main().catch((error: unknown) => {
   if (error instanceof Anthropic.AuthenticationError) console.error("Anthropic rejected the API key (401).");
   else if (error instanceof Anthropic.RateLimitError) console.error("Anthropic rate limit (429), try again later.");
   else if (error instanceof Anthropic.APIError) console.error(`Anthropic API error ${error.status}`);
+  else if (error instanceof OpenAI.AuthenticationError) console.error("NEAR AI rejected the API key (401).");
+  else if (error instanceof OpenAI.RateLimitError) console.error("NEAR AI rate limit (429), try again later.");
+  else if (error instanceof OpenAI.APIError) console.error(`NEAR AI API error ${error.status}`);
   else console.error(error instanceof Error ? error.message : "unexpected error");
   process.exit(1);
 });

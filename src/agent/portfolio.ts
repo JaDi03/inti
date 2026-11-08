@@ -1,5 +1,6 @@
 import { fromAtomic } from "../policy/units.js";
 import { microToUsd, priceToMicro, usdMicroOf } from "./money.js";
+import { safeLabel } from "./sanitize.js";
 
 /** Token data as returned by GET /v1/tokens, price in USD or null. */
 export interface PricedToken {
@@ -28,7 +29,9 @@ export class SimulatedPortfolio {
   private readonly tokens: Map<string, PricedToken>;
 
   constructor(tokens: readonly PricedToken[], initial: Record<string, bigint>) {
-    this.tokens = new Map(tokens.map((t) => [t.asset_id, t]));
+    this.tokens = new Map(
+      tokens.map((t) => [t.asset_id, { ...t, symbol: safeLabel(t.symbol), blockchain: safeLabel(t.blockchain) }]),
+    );
     for (const [assetId, atomic] of Object.entries(initial)) {
       this.token(assetId);
       this.balances.set(assetId, atomic);
