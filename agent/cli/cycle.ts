@@ -2,7 +2,7 @@
  * Runs one agent cycle against live prices from the Agent API token list,
  * on a simulated portfolio. No funds move.
  *
- *   pnpm cycle "Quiero tener algo de NEAR sin arriesgar mucho"
+ *   pnpm cycle "I want some NEAR exposure without much risk"
  *   pnpm cycle --propose "..."
  */
 import OpenAI from "openai";

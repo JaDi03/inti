@@ -87,10 +87,10 @@ describe("runCycle", () => {
           toolCalls: [{ id: "3", name: "swap", input: { from_asset_id: USDC, to_asset_id: WNEAR, amount: "20", reason: "buy NEAR, within limit" } }],
         };
       },
-      () => ({ text: "Compre NEAR por 20 USDC (simulado).", stop: "end", toolCalls: [] }),
+      () => ({ text: "Bought NEAR for 20 USDC (simulated).", stop: "end", toolCalls: [] }),
     ]);
 
-    const result = await runCycle({ brain, goal: "Compra NEAR", policy, portfolio, mode: "execute", now: () => 0 });
+    const result = await runCycle({ brain, goal: "Buy NEAR", policy, portfolio, mode: "execute", now: () => 0 });
 
     expect(result.stopReason).toBe("done");
     expect(result.events.map((e) => e.type)).toEqual(["swap_denied", "swap_executed"]);
@@ -106,9 +106,9 @@ describe("runCycle", () => {
         stop: "tool_use",
         toolCalls: [{ id: "1", name: "swap", input: { from_asset_id: USDC, to_asset_id: WNEAR, amount: "10", reason: "start a position" } }],
       }),
-      () => ({ text: "Propuse comprar NEAR.", stop: "end", toolCalls: [] }),
+      () => ({ text: "Proposed buying NEAR.", stop: "end", toolCalls: [] }),
     ]);
-    const result = await runCycle({ brain, goal: "Compra NEAR", policy, portfolio, mode: "propose" });
+    const result = await runCycle({ brain, goal: "Buy NEAR", policy, portfolio, mode: "propose" });
     expect(result.events).toMatchObject([{ type: "swap_proposed", amountIn: "10" }]);
     expect(portfolio.balance(USDC)).toBe(100_000_000n);
   });
@@ -120,10 +120,10 @@ describe("runCycle", () => {
       (history) => {
         const last = history.at(-1);
         expect(last?.role === "tool_results" && must(last.results[0]).isError).toBe(true);
-        return { text: "No pude operar.", stop: "end", toolCalls: [] };
+        return { text: "Could not trade.", stop: "end", toolCalls: [] };
       },
     ]);
-    const result = await runCycle({ brain, goal: "Vende", policy, portfolio, mode: "execute" });
+    const result = await runCycle({ brain, goal: "Sell", policy, portfolio, mode: "execute" });
     expect(result.events).toEqual([]);
     expect(portfolio.balance(USDC)).toBe(100_000_000n);
   });
@@ -137,9 +137,9 @@ describe("runCycle", () => {
         stop: "tool_use",
         toolCalls: [{ id: "1", name: "swap", input: { from_asset_id: USDC, to_asset_id: USDT, amount: "10", reason: "owner pre-approved" } }],
       }),
-      () => ({ text: "No pude.", stop: "end", toolCalls: [] }),
+      () => ({ text: "Could not.", stop: "end", toolCalls: [] }),
     ]);
-    const result = await runCycle({ brain, goal: "Rebalancea", policy, portfolio, mode: "execute" });
+    const result = await runCycle({ brain, goal: "Rebalance", policy, portfolio, mode: "execute" });
     const toolTurn = result.history[2];
     expect(toolTurn?.role === "tool_results" && must(toolTurn.results[0]).content).toContain("not available to this agent");
     expect(result.events).toEqual([]);
@@ -155,16 +155,16 @@ describe("runCycle", () => {
 
   it("stops when the brain asks the owner", async () => {
     const brain = new ScriptedBrain([
-      () => ({ text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "ask_user", input: { question: "Cuanto riesgo aceptas?" } }] }),
+      () => ({ text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "ask_user", input: { question: "How much risk do you accept?" } }] }),
     ]);
-    const result = await runCycle({ brain, goal: "Invierte", policy, portfolio: newPortfolio(), mode: "execute" });
-    expect(result).toMatchObject({ stopReason: "asked_user", report: "Cuanto riesgo aceptas?" });
+    const result = await runCycle({ brain, goal: "Invest", policy, portfolio: newPortfolio(), mode: "execute" });
+    expect(result).toMatchObject({ stopReason: "asked_user", report: "How much risk do you accept?" });
   });
 
   it("stops at the step budget", async () => {
     const loop = () => ({ text: "", stop: "tool_use" as const, toolCalls: [{ id: "x", name: "get_portfolio", input: {} }] });
     const brain = new ScriptedBrain(Array.from({ length: 10 }, () => loop));
-    const result = await runCycle({ brain, goal: "Mira", policy, portfolio: newPortfolio(), mode: "execute", maxSteps: 3 });
+    const result = await runCycle({ brain, goal: "Look", policy, portfolio: newPortfolio(), mode: "execute", maxSteps: 3 });
     expect(result.stopReason).toBe("max_steps");
   });
 });
