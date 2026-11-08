@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 import { describe, expect, it } from "vitest";
-import type { ToolSpec, Turn } from "../agent/types.js";
+import type { ToolSpec, Turn } from "../core/types.js";
 import { NearAiBrain } from "./nearai.js";
 
 type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming;
