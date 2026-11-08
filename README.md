@@ -44,12 +44,10 @@ The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-
 The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
 
 - `agent/core/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
-- `agent/brains/nearai.ts`: default brain on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
-- `agent/brains/anthropic.ts`: fallback brain on Claude Haiku 5.5 through the Anthropic SDK, used only when `NEAR_AI_API_KEY` is not set.
-- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
+- `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
 - Today the portfolio is simulated (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move.
 
-Run one cycle (needs `NEAR_AI_API_KEY`, or `ANTHROPIC_API_KEY` as a fallback, in `.env`):
+Run one cycle (needs `NEAR_AI_API_KEY` in `.env`):
 
 ```bash
 pnpm cycle "I want some NEAR exposure without much risk"
@@ -98,7 +96,7 @@ Configuration lives in `.env` (copy `.env.example`). No variable is read by the 
 ```
 agent/                 the investment agent (TypeScript)
   core/                loop, tools, limit checks, portfolio
-  brains/              model adapters: NEAR AI Cloud (default), Anthropic (fallback)
+  brains/              model adapters: NEAR AI Cloud, scripted brain for tests
   policy/              Agent API policy: build, preview, verify
   engine/              Intent schema and parseIntent
   cli/cycle.ts         run one agent cycle from the terminal
@@ -112,9 +110,7 @@ web/                   app: login, Spending Limits, chat (React)
 
 - **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
-- **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)
-- **[Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript)**: Claude Haiku 5.5 as the fallback brain
-- **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
+- **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)- **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
 - **[near-api-js](https://github.com/near/near-api-js)**: NEP-413 and NEP-366 encoding
 - **[zod](https://zod.dev)**: intent schema validation
 - **[vitest](https://vitest.dev)**: tests
