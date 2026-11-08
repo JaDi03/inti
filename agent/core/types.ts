@@ -1,6 +1,6 @@
 /**
- * Provider-neutral agent types. The loop only speaks these, so a brain can be
- * Anthropic today and NEAR AI Cloud later without touching the loop.
+ * Provider-neutral agent types. The loop only speaks these, so the brain (NEAR AI
+ * Cloud, or the scripted brain in tests) can change without touching the loop.
  */
 export interface ToolSpec {
   name: string;

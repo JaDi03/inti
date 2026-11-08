@@ -5,12 +5,9 @@
  *   pnpm cycle "Quiero tener algo de NEAR sin arriesgar mucho"
  *   pnpm cycle --propose "..."
  */
-import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { runCycle } from "../core/loop.js";
 import { SimulatedPortfolio, type PricedToken } from "../core/portfolio.js";
-import type { Brain } from "../core/types.js";
-import { AnthropicBrain } from "../brains/anthropic.js";
 import { NearAiBrain } from "../brains/nearai.js";
 import { buildPolicy } from "../policy/build.js";
 import { describePolicy } from "../policy/preview.js";
@@ -34,14 +31,11 @@ async function main(): Promise<void> {
     console.error('Usage: pnpm cycle [--propose] "<goal in plain words>"');
     process.exit(2);
   }
-  // NEAR AI Cloud (TEE) is the default brain; Anthropic stays as a fallback.
-  let brain: Brain;
-  if (process.env.NEAR_AI_API_KEY) brain = NearAiBrain.fromApiKey(process.env.NEAR_AI_API_KEY);
-  else if (process.env.ANTHROPIC_API_KEY) brain = new AnthropicBrain();
-  else {
-    console.error("Set NEAR_AI_API_KEY (or ANTHROPIC_API_KEY) in .env");
+  if (!process.env.NEAR_AI_API_KEY) {
+    console.error("NEAR_AI_API_KEY is not set in .env");
     process.exit(2);
   }
+  const brain = NearAiBrain.fromApiKey(process.env.NEAR_AI_API_KEY);
 
   const baseUrl = process.env.NEAR_INTENTS_AGENT_API_URL ?? "https://api.demo.agentsonintents.com";
   const tokens = await fetchTokens(baseUrl);
@@ -78,10 +72,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  if (error instanceof Anthropic.AuthenticationError) console.error("Anthropic rejected the API key (401).");
-  else if (error instanceof Anthropic.RateLimitError) console.error("Anthropic rate limit (429), try again later.");
-  else if (error instanceof Anthropic.APIError) console.error(`Anthropic API error ${error.status}`);
-  else if (error instanceof OpenAI.AuthenticationError) console.error("NEAR AI rejected the API key (401).");
+  if (error instanceof OpenAI.AuthenticationError) console.error("NEAR AI rejected the API key (401).");
   else if (error instanceof OpenAI.RateLimitError) console.error("NEAR AI rate limit (429), try again later.");
   else if (error instanceof OpenAI.APIError) console.error(`NEAR AI API error ${error.status}`);
   else console.error(error instanceof Error ? error.message : "unexpected error");
