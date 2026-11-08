@@ -43,9 +43,9 @@ The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-
 
 The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
 
-- `src/agent/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
-- `src/brains/nearai.ts`: default brain on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
-- `src/brains/anthropic.ts`: fallback brain on Claude Haiku 5.5 through the Anthropic SDK, used only when `NEAR_AI_API_KEY` is not set.
+- `agent/core/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
+- `agent/brains/nearai.ts`: default brain on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
+- `agent/brains/anthropic.ts`: fallback brain on Claude Haiku 5.5 through the Anthropic SDK, used only when `NEAR_AI_API_KEY` is not set.
 - `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
 - Today the portfolio is simulated (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move.
 
@@ -75,12 +75,12 @@ pnpm install
 pnpm test
 ```
 
-Expected: 26 tests pass. `src/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
+Expected: 32 tests pass. `agent/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
 
 To check the intent schema yourself:
 
 ```ts
-import { parseIntent } from "./src/index.js";
+import { parseIntent } from "./agent/index.js";
 
 parseIntent({
   kind: "swap",
@@ -96,17 +96,24 @@ Configuration lives in `.env` (copy `.env.example`). No variable is read by the 
 ## Project Structure
 
 ```
-src/
-  engine/intent.ts       Intent schema and parseIntent
-  engine/intent.test.ts  schema tests
-  index.ts               public exports
+agent/                 the investment agent (TypeScript)
+  core/                loop, tools, limit checks, portfolio
+  brains/              model adapters: NEAR AI Cloud (default), Anthropic (fallback)
+  policy/              Agent API policy: build, preview, verify
+  engine/              Intent schema and parseIntent
+  cli/cycle.ts         run one agent cycle from the terminal
+  index.ts             public exports
+contracts/
+  spending-limits/     NEAR contract on the user's own account (Rust)
+web/                   app: login, Spending Limits, chat (React)
 ```
 
 ## Tech Stack
 
 - **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
-- **[Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript)**: Claude Haiku 5.5 as the provisional brain
+- **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)
+- **[Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript)**: Claude Haiku 5.5 as the fallback brain
 - **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
 - **[near-api-js](https://github.com/near/near-api-js)**: NEP-413 and NEP-366 encoding
 - **[zod](https://zod.dev)**: intent schema validation

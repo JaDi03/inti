@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { AssistantTurn, Brain, ToolCall, ToolSpec, Turn } from "../agent/types.js";
+import type { AssistantTurn, Brain, ToolCall, ToolSpec, Turn } from "../core/types.js";
 
 /** NEAR AI Cloud gateway, OpenAI-compatible (docs.near.ai/cloud/quickstart). */
 export const NEAR_AI_BASE_URL = "https://cloud-api.near.ai/v1";

@@ -1,7 +1,7 @@
 import { useSignRawHash } from "@privy-io/react-auth/extended-chains";
 import { Copy, ExternalLink, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fromAtomic, toAtomic } from "../../../src/policy/units";
+import { fromAtomic, toAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PrivyNearSigner } from "../privySigner";

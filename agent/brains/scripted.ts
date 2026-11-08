@@ -1,4 +1,4 @@
-import type { AssistantTurn, Brain, Turn } from "../agent/types.js";
+import type { AssistantTurn, Brain, Turn } from "../core/types.js";
 
 /**
  * Test brain: each step is a function of the history so far, so a script can

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AssistantTurn, Brain, ToolSpec, Turn } from "../agent/types.js";
+import type { AssistantTurn, Brain, ToolSpec, Turn } from "../core/types.js";
 
 /** Provisional brain until NEAR AI Cloud credits are available. */
 export const ANTHROPIC_MODEL = "claude-haiku-5-5";

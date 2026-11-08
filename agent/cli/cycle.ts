@@ -7,9 +7,9 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { runCycle } from "../agent/loop.js";
-import { SimulatedPortfolio, type PricedToken } from "../agent/portfolio.js";
-import type { Brain } from "../agent/types.js";
+import { runCycle } from "../core/loop.js";
+import { SimulatedPortfolio, type PricedToken } from "../core/portfolio.js";
+import type { Brain } from "../core/types.js";
 import { AnthropicBrain } from "../brains/anthropic.js";
 import { NearAiBrain } from "../brains/nearai.js";
 import { buildPolicy } from "../policy/build.js";
