@@ -81,6 +81,13 @@ function requireKnown(ctx: ToolContext, id: string): void {
   if (!tradableIds(ctx).includes(id)) throw new ToolInputError(`asset_id not available to this agent: ${id}`);
 }
 
+/** What is left of today's USD budget, or null when the policy has no budget. */
+function dailyUsdLeft(ctx: ToolContext, budget: string | null): string | null {
+  if (budget === null) return null;
+  const cap = usdStringToMicro(budget);
+  return microToUsd(cap > ctx.spend.dailyUsdMicro ? cap - ctx.spend.dailyUsdMicro : 0n);
+}
+
 /** Runs one tool call. Returns a JSON string for the model. Throws ToolInputError on bad input. */
 export function runTool(name: string, rawInput: unknown, ctx: ToolContext): string {
   if (!(name in inputs)) throw new ToolInputError(`unknown tool: ${name}`);
@@ -104,12 +111,7 @@ export function runTool(name: string, rawInput: unknown, ctx: ToolContext): stri
               return [t.symbol, fromAtomic(atomic, t.decimals)];
             }),
           ),
-          daily_usd_left:
-            budget === null
-              ? null
-              : microToUsd(
-                  usdStringToMicro(budget) > ctx.spend.dailyUsdMicro ? usdStringToMicro(budget) - ctx.spend.dailyUsdMicro : 0n,
-                ),
+          daily_usd_left: dailyUsdLeft(ctx, budget),
         },
       });
     }
@@ -146,7 +148,14 @@ export function runTool(name: string, rawInput: unknown, ctx: ToolContext): stri
       ctx.portfolio.swap(from.asset_id, to.asset_id, atomicIn);
       recordSpend(ctx.spend, from.asset_id, atomicIn, verdict.usdMicro, now);
       ctx.events.push({ type: "swap_executed", ...base });
-      return JSON.stringify({ status: "executed", simulated: true, ...base });
+      // Fresh numbers after the swap, so the report never repeats the ones read before it.
+      return JSON.stringify({
+        status: "executed",
+        simulated: true,
+        ...base,
+        balance_left: { [from.symbol]: fromAtomic(ctx.portfolio.balance(from.asset_id).toString(), from.decimals) },
+        daily_usd_left: dailyUsdLeft(ctx, ctx.policy.budget.daily_usd),
+      });
     }
     case "ask_user": {
       const input = parsed.data as z.infer<typeof inputs.ask_user>;

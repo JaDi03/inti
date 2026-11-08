@@ -50,6 +50,7 @@ describe("NearAiBrain", () => {
     const turn = await new NearAiBrain(client, "test-model").step("system text", [{ role: "user", text: "hi" }], tools);
 
     expect(requests[0]?.model).toBe("test-model");
+    expect(requests[0]?.temperature).toBe(0.2);
     expect(requests[0]?.messages[0]).toEqual({ role: "system", content: "system text" });
     expect(requests[0]?.tools?.[0]).toEqual({
       type: "function",
