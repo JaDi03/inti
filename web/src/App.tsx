@@ -6,17 +6,16 @@ import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
-import { ChatMessage, initialsOf } from "./chat/ChatMessage";
+import { AgentError, askAgent } from "./chat/agentClient";
+import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { useLimits } from "./limits/useLimits";
 import { NetworkSwitch } from "./network";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
-type Message = { id: number; from: "user" | "inti"; text: string };
+type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean };
 
-/** Shown until the chat is wired to the agent (next step). */
-const NOT_CONNECTED = "I'm not connected to the agent yet. Soon I'll be able to answer you and act for you.";
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
 const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 2 steps, right here.";
 const MAINNET_SOON = "Mainnet is coming soon. Switch to Testnet to try me for free.";
@@ -57,13 +56,15 @@ function Welcome({ onLogin }: { onLogin: () => void }) {
 }
 
 export function App() {
-  const { ready, authenticated, user, login, logout } = usePrivy();
+  const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const { theme } = useTheme();
   const { createWallet } = useCreateWallet();
   const { exportWallet } = useExportWallet();
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
+  // True while the agent works on the user's message.
+  const [thinking, setThinking] = useState(false);
   const creating = useRef(false);
   const nextId = useRef(1);
   const chatEnd = useRef<HTMLLIElement>(null);
@@ -71,11 +72,11 @@ export function App() {
   // True while the user is reading the end of the conversation (not scrolled up).
   const followingEnd = useRef(true);
 
-  // Keep the newest message in view.
+  // Keep the newest message (or the typing dots) in view.
   useEffect(() => {
     followingEnd.current = true;
     chatEnd.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages]);
+  }, [messages, thinking]);
 
   // When the prompt bar grows while typing, the list gets shorter: stay at the end if the user was there.
   const hasMessages = messages.length > 0;
@@ -120,11 +121,24 @@ export function App() {
   if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Loading...</main>;
   if (!authenticated || !user) return <Welcome onLogin={login} />;
 
-  const send = (text: string) => {
-    const userMsg: Message = { id: nextId.current++, from: "user", text };
-    const replyText = limits.setup.kind === "not-ready" ? MAINNET_SOON : needsActivation ? ACTIVATE_FIRST : NOT_CONNECTED;
-    const reply: Message = { id: nextId.current++, from: "inti", text: replyText };
-    setMessages((prev) => [...prev, userMsg, reply]);
+  const addMessage = (from: Message["from"], text: string, simulated = false) =>
+    setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated }]);
+
+  const send = async (text: string) => {
+    addMessage("user", text);
+    if (limits.setup.kind === "not-ready") return addMessage("inti", MAINNET_SOON);
+    if (needsActivation) return addMessage("inti", ACTIVATE_FIRST);
+    setThinking(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new AgentError("Your session expired. Sign in again and retry.");
+      const reply = await askAgent(token, text);
+      addMessage("inti", reply.report || "Done.", reply.simulated);
+    } catch (error) {
+      addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
+    } finally {
+      setThinking(false);
+    }
   };
 
   const empty = messages.length === 0;
@@ -143,7 +157,7 @@ export function App() {
   // The mascot "thinks" (antennas light up) whenever the app is working for the user.
   const creatingWallet = address === null && walletError === null;
   const checkingAccount = address !== null && limits.setup.kind === "ready" && limits.status === null;
-  const working = creatingWallet || checkingAccount || activating;
+  const working = creatingWallet || checkingAccount || activating || thinking;
 
   return (
     <div className="flex h-svh flex-col">
@@ -187,7 +201,7 @@ export function App() {
             empty && !activationCard ? "mt-[12vh]" : "mt-2",
           )}
         >
-          <IntiMascot size={empty ? (activationCard ? 96 : 180) : 64} state={working ? "thinking" : "idle"} />
+          <IntiMascot size={empty ? (activationCard ? 96 : 180) : 104} state={working ? "thinking" : "idle"} />
           {empty && !activationCard && creatingWallet && (
             <div className="mt-4 text-center" role="status">
               <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">Creating your wallet...</h1>
@@ -226,15 +240,17 @@ export function App() {
                 text={m.text}
                 firstOfTurn={i === 0 || messages[i - 1]?.from !== m.from}
                 userInitials={userInitials}
+                simulated={m.simulated}
               />
             ))}
+            {thinking && <TypingIndicator firstOfTurn={messages.at(-1)?.from !== "inti"} />}
             {activationCard && <li className="mt-5 flex justify-center">{activationCard}</li>}
             <li ref={chatEnd} aria-hidden="true" />
           </ol>
         )}
 
         <div className={cn("flex w-full shrink-0 justify-center pb-6", empty && !activationCard ? "mt-8" : "mt-auto")}>
-          <PromptInput onSubmit={send} placeholder="e.g. invest $40 in NEAR" />
+          <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. invest $40 in NEAR" disabled={thinking} />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>

@@ -9,6 +9,8 @@ export const NEAR_AI_BASE_URL = "https://cloud-api.near.ai/v1";
  */
 export const NEAR_AI_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 const MAX_OUTPUT_TOKENS = 4000;
+/** Low sampling temperature: an agent that moves money should answer the same way each time. */
+const TEMPERATURE = 0.2;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 function toMessages(system: string, history: readonly Turn[]): OpenAI.ChatCompletionMessageParam[] {
@@ -66,6 +68,7 @@ export class NearAiBrain implements Brain {
     const response = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: MAX_OUTPUT_TOKENS,
+      temperature: TEMPERATURE,
       messages: toMessages(system, history),
       tools: tools.map((t) => ({
         type: "function" as const,

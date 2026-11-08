@@ -177,7 +177,15 @@
   0% { fill: var(--inti-glow); }
   100% { fill: var(--inti-body); }
 }
+/* "Inti is typing" dots, mobile chat style: each dot rises in turn. */
+.typing-dot { animation: typing-dot 1.2s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .inti-mascot .inti-body, .inti-mascot .inti-node { animation: none !important; }
+  .inti-mascot .inti-body, .inti-mascot .inti-node, .typing-dot { animation: none !important; }
 }

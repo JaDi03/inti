@@ -14,10 +14,10 @@ export function initialsOf(nameOrEmail: string | null | undefined): string {
 
 function Avatar({ from, initials }: { from: Sender; initials: string }) {
   if (from === "inti") {
-    return <img src="/favicon.svg" alt="Inti" className="size-8 shrink-0 rounded-full bg-muted p-1" />;
+    return <img src="/favicon.svg" alt="Inti" className="size-10 shrink-0 rounded-full bg-muted p-1.5" />;
   }
   return (
-    <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground">
+    <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-sm font-semibold text-foreground">
       {initials}
     </span>
   );
@@ -29,22 +29,41 @@ interface Props {
   /** First message of a turn: shows the avatar and the bubble tail, like mobile chat apps. */
   firstOfTurn: boolean;
   userInitials: string;
+  /** The agent ran on a simulated portfolio: a small label under the bubble says so. */
+  simulated?: boolean;
 }
 
-export function ChatMessage({ from, text, firstOfTurn, userInitials }: Props) {
+/** Inti's bubble with three moving dots while the agent works, like mobile chat apps. */
+export function TypingIndicator({ firstOfTurn }: { firstOfTurn: boolean }) {
+  return (
+    <li className={cn("flex items-start gap-3.5 self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")} role="status" aria-label="Inti is typing">
+      {firstOfTurn ? <Avatar from="inti" initials="" /> : <span className="w-10 shrink-0" aria-hidden="true" />}
+      <div className={cn("relative flex h-[46px] items-center gap-1.5 rounded-2xl bg-muted px-[18px]", firstOfTurn && "bubble-tail-left rounded-tl-[4px]")}>
+        {[0, 1, 2].map((i) => (
+          <span key={i} className="typing-dot size-2 rounded-full bg-muted-foreground" aria-hidden="true" />
+        ))}
+      </div>
+    </li>
+  );
+}
+
+export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated = false }: Props) {
   const mine = from === "user";
   return (
     <li className={cn("flex max-w-full items-start gap-3.5", mine ? "flex-row-reverse self-end" : "self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")}>
-      {firstOfTurn ? <Avatar from={from} initials={userInitials} /> : <span className="w-8 shrink-0" aria-hidden="true" />}
-      <div
-        className={cn(
-          // pre-wrap keeps the line breaks the user typed with Shift+Enter.
-          "relative max-w-[min(85%,420px)] rounded-2xl px-[18px] py-3 text-[15px] leading-relaxed whitespace-pre-wrap break-words",
-          mine ? "bg-chat-user text-chat-user-foreground" : "bg-muted text-foreground",
-          firstOfTurn && (mine ? "bubble-tail-right rounded-tr-[4px]" : "bubble-tail-left rounded-tl-[4px]"),
-        )}
-      >
-        {text}
+      {firstOfTurn ? <Avatar from={from} initials={userInitials} /> : <span className="w-10 shrink-0" aria-hidden="true" />}
+      <div className={cn("flex max-w-[min(85%,420px)] flex-col", mine ? "items-end" : "items-start")}>
+        <div
+          className={cn(
+            // pre-wrap keeps the line breaks the user typed with Shift+Enter.
+            "relative max-w-full rounded-2xl px-[18px] py-3 text-[15px] leading-relaxed whitespace-pre-wrap break-words",
+            mine ? "bg-chat-user text-chat-user-foreground" : "bg-muted text-foreground",
+            firstOfTurn && (mine ? "bubble-tail-right rounded-tr-[4px]" : "bubble-tail-left rounded-tl-[4px]"),
+          )}
+        >
+          {text}
+        </div>
+        {simulated && <span className="mt-1 px-2 text-xs text-muted-foreground">Simulated portfolio, no real funds moved</span>}
       </div>
     </li>
   );

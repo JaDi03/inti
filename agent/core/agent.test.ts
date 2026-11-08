@@ -98,6 +98,20 @@ describe("runCycle", () => {
     expect(portfolio.balance(WNEAR)).toBeGreaterThan(0n);
   });
 
+  it("tells the brain the budget and balance left right after a swap", async () => {
+    const swap = { from_asset_id: USDC, to_asset_id: WNEAR, amount: "10", reason: "buy NEAR" };
+    const brain = new ScriptedBrain([
+      () => ({ text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "swap", input: swap }] }),
+      (history) => {
+        const result = lastResult(history);
+        expect(result).toMatchObject({ status: "executed", balance_left: { USDC: "90" } });
+        expect(Number(result.daily_usd_left)).toBeLessThan(31);
+        return { text: "Bought.", stop: "end", toolCalls: [] };
+      },
+    ]);
+    await runCycle({ brain, goal: "Buy NEAR", policy, portfolio: newPortfolio(), mode: "execute" });
+  });
+
   it("in propose mode records the swap and moves nothing", async () => {
     const portfolio = newPortfolio();
     const brain = new ScriptedBrain([

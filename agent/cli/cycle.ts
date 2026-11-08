@@ -6,22 +6,10 @@
  *   pnpm cycle --propose "..."
  */
 import OpenAI from "openai";
+import { DEFAULT_AGENT_API_URL, demoPolicy, demoPortfolio, fetchTokens } from "../core/demo.js";
 import { runCycle } from "../core/loop.js";
-import { SimulatedPortfolio, type PricedToken } from "../core/portfolio.js";
 import { NearAiBrain } from "../brains/nearai.js";
-import { buildPolicy } from "../policy/build.js";
 import { describePolicy } from "../policy/preview.js";
-
-const USDC_BASE = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
-const USDT_NEAR = "nep141:usdt.tether-token.near";
-const WNEAR = "nep141:wrap.near";
-
-async function fetchTokens(baseUrl: string): Promise<PricedToken[]> {
-  const res = await fetch(new URL("/v1/tokens", baseUrl), { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`GET /v1/tokens failed with HTTP ${res.status}`);
-  const body = (await res.json()) as { data: PricedToken[] };
-  return body.data;
-}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -37,19 +25,9 @@ async function main(): Promise<void> {
   }
   const brain = NearAiBrain.fromApiKey(process.env.NEAR_AI_API_KEY);
 
-  const baseUrl = process.env.NEAR_INTENTS_AGENT_API_URL ?? "https://api.demo.agentsonintents.com";
-  const tokens = await fetchTokens(baseUrl);
-
-  const policy = buildPolicy({
-    actions: ["swap"],
-    assets: [
-      { assetId: USDC_BASE, symbol: "USDC", decimals: 6, perTransaction: "25" },
-      { assetId: USDT_NEAR, symbol: "USDT", decimals: 6, perTransaction: "25" },
-      { assetId: WNEAR, symbol: "wNEAR", decimals: 24 },
-    ],
-    budget: { dailyUsd: "40" },
-  });
-  const portfolio = new SimulatedPortfolio(tokens, { [USDC_BASE]: 100_000_000n, [WNEAR]: 0n });
+  const tokens = await fetchTokens(process.env.NEAR_INTENTS_AGENT_API_URL ?? DEFAULT_AGENT_API_URL);
+  const policy = demoPolicy();
+  const portfolio = demoPortfolio(tokens);
 
   console.log("Policy (signed by the owner):");
   for (const line of describePolicy(policy, tokens)) console.log(`  ${line}`);
