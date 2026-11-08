@@ -44,11 +44,12 @@ The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-
 The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
 
 - `src/agent/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
-- `src/brains/anthropic.ts`: brain on Claude Haiku 5.5 through the Anthropic SDK (provisional).
+- `src/brains/nearai.ts`: default brain on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
+- `src/brains/anthropic.ts`: fallback brain on Claude Haiku 5.5 through the Anthropic SDK, used only when `NEAR_AI_API_KEY` is not set.
 - `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
 - Today the portfolio is simulated (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move.
 
-Run one cycle (needs `ANTHROPIC_API_KEY` in `.env`):
+Run one cycle (needs `NEAR_AI_API_KEY`, or `ANTHROPIC_API_KEY` as a fallback, in `.env`):
 
 ```bash
 pnpm cycle "I want some NEAR exposure without much risk"
