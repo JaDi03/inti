@@ -30,8 +30,11 @@ export interface LimitsConfig {
   wasmSha256: string;
 }
 
-/** sha256 of web/public/inti-spending-limits.wasm, the only build the app installs. */
-export const SPENDING_LIMITS_WASM_SHA256 = "de6841e344c045684cb3647141aaca7bef48ff5a0d87a19dfdff1efeaedd7ed7";
+/**
+ * sha256 of web/public/inti-spending-limits.wasm, the only build the app installs. Rebuild it
+ * with `cargo near build reproducible-wasm` in contracts/spending-limits to get the same hash.
+ */
+export const SPENDING_LIMITS_WASM_SHA256 = "0b4bb0fc69cc41920dd4670479269045fdd18038c9bfa99c4c1f383c5278bc6e";
 
 const env = import.meta.env as Record<string, string | undefined>;
 

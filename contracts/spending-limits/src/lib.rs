@@ -111,12 +111,23 @@ impl SpendingLimits {
             .unwrap_or_else(|| env::panic_str("amount overflow"));
         require!(new_spent <= limit.per_day.0, "over the daily limit");
         // Reserve before the transfer so concurrent orders cannot pass the limit.
-        self.usage.insert(token.clone(), DailyUsage { day: today, spent: new_spent });
+        self.usage.insert(
+            token.clone(),
+            DailyUsage {
+                day: today,
+                spent: new_spent,
+            },
+        );
 
         ext_ft::ext(token.clone())
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_FOR_FT_TRANSFER_CALL)
-            .ft_transfer_call(self.intents.clone(), U128(amount), None, self.agent.to_string())
+            .ft_transfer_call(
+                self.intents.clone(),
+                U128(amount),
+                None,
+                self.agent.to_string(),
+            )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_RESOLVE)
@@ -161,7 +172,10 @@ impl SpendingLimits {
     pub fn set_limit(&mut self, token: AccountId, per_order: U128, per_day: U128) {
         assert_owner();
         require!(per_order.0 > 0, "per_order must be positive");
-        require!(per_order.0 <= per_day.0, "per_order must not exceed per_day");
+        require!(
+            per_order.0 <= per_day.0,
+            "per_order must not exceed per_day"
+        );
         self.limits.insert(token, TokenLimit { per_order, per_day });
     }
 
@@ -175,7 +189,12 @@ impl SpendingLimits {
 
     /// Accepts every incoming `ft_transfer_call` (for example the agent sending
     /// results back), so tokens sent to this account are never refunded.
-    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
+    pub fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
         let _ = (sender_id, amount, msg);
         PromiseOrValue::Value(U128(0))
     }
@@ -183,7 +202,10 @@ impl SpendingLimits {
     // ---------- Views ----------
 
     pub fn get_config(&self) -> LimitsConfig {
-        LimitsConfig { intents: self.intents.clone(), agent: self.agent.clone() }
+        LimitsConfig {
+            intents: self.intents.clone(),
+            agent: self.agent.clone(),
+        }
     }
 
     pub fn get_limit(&self, token: AccountId) -> Option<TokenLimit> {
@@ -245,7 +267,10 @@ mod tests {
 
     fn contract_with_limit(per_order: u128, per_day: u128) -> SpendingLimits {
         context(user(), 0, 1);
-        let mut contract = SpendingLimits::new("intents.near".parse().unwrap(), "agent.near".parse().unwrap());
+        let mut contract = SpendingLimits::new(
+            "intents.near".parse().unwrap(),
+            "agent.near".parse().unwrap(),
+        );
         context(user(), 1, 1);
         contract.set_limit(usdc(), U128(per_order), U128(per_day));
         context(user(), 0, 1);
@@ -256,7 +281,10 @@ mod tests {
     #[should_panic(expected = "only this account can call this method")]
     fn init_by_others_fails() {
         context("attacker.near".parse().unwrap(), 0, 1);
-        SpendingLimits::new("intents.near".parse().unwrap(), "attacker.near".parse().unwrap());
+        SpendingLimits::new(
+            "intents.near".parse().unwrap(),
+            "attacker.near".parse().unwrap(),
+        );
     }
 
     #[test]
