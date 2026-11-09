@@ -1,11 +1,10 @@
-import { useSignRawHash } from "@privy-io/react-auth/extended-chains";
 import { Check, Copy, ExternalLink, Loader2, ShieldCheck, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useNetwork } from "../network";
-import { PrivyNearSigner } from "../privySigner";
 import { LimitsClient, type LimitsStatus } from "./client";
+import { useOwnerSigner } from "./ConfirmSigning";
 import { DEFAULT_FUND, display, LimitForm } from "./SpendingLimitsPanel";
 import type { LimitsSetup } from "./useLimits";
 
@@ -65,8 +64,7 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
   const { config } = client;
   const { symbol, decimals } = config.token;
   const amount = (v: bigint) => `${display(v, decimals)} ${symbol}`;
-  const { signRawHash } = useSignRawHash();
-  const signer = useMemo(() => new PrivyNearSigner(address, signRawHash), [address, signRawHash]);
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +153,7 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
         </>
       )}
 
+      {confirmDialog}
       {busy && (
         <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" /> {busy}

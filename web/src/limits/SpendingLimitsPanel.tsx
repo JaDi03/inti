@@ -1,11 +1,11 @@
-import { useSignRawHash } from "@privy-io/react-auth/extended-chains";
 import { Copy, ExternalLink, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fromAtomic, toAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PrivyNearSigner } from "../privySigner";
 import { LimitsClient, type SpendLimit, type LimitsStatus } from "./client";
+import { useOwnerSigner } from "./ConfirmSigning";
+import { PasskeyProtection } from "./PasskeyProtection";
 import { loadLimitsConfig, type LimitsConfig } from "./config";
 import { useNetwork } from "../network";
 
@@ -69,8 +69,7 @@ export function SpendingLimitsPanel({ address, onClose }: Props) {
 }
 
 function LimitsBody({ address, config, client }: { address: string; config: LimitsConfig; client: LimitsClient }) {
-  const { signRawHash } = useSignRawHash();
-  const signer = useMemo(() => new PrivyNearSigner(address, signRawHash), [address, signRawHash]);
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
   const [status, setStatus] = useState<LimitsStatus | null>(null);
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -201,6 +200,9 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             </Button>
           </div>
         )}
+        <div className="mt-5">
+          <PasskeyProtection />
+        </div>
       </>
     );
   }
@@ -208,6 +210,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
   return (
     <div>
       {body}
+      {confirmDialog}
       {busy && <p className="mt-3 text-sm text-muted-foreground">{busy}</p>}
       {error && <p className="mt-3 break-words text-sm text-destructive">{error}</p>}
       {lastTx && (

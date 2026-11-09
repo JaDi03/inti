@@ -26,7 +26,12 @@ export interface LimitsConfig {
   /** Allowance for Inti's key: it only pays gas, and cannot be raised later. */
   intiKeyAllowanceYocto: bigint;
   wasmUrl: string;
+  /** sha256 (hex) of the contract build the app may install; any other code is never deployed. */
+  wasmSha256: string;
 }
+
+/** sha256 of web/public/inti-spending-limits.wasm, the only build the app installs. */
+export const SPENDING_LIMITS_WASM_SHA256 = "de6841e344c045684cb3647141aaca7bef48ff5a0d87a19dfdff1efeaedd7ed7";
 
 const env = import.meta.env as Record<string, string | undefined>;
 
@@ -64,5 +69,6 @@ export function loadLimitsConfig(networkId: NetworkId): LimitsConfig {
     intiPublicKey: required("INTI_KEY_PUBLIC"),
     intiKeyAllowanceYocto: NEAR / 4n,
     wasmUrl: "/inti-spending-limits.wasm",
+    wasmSha256: SPENDING_LIMITS_WASM_SHA256,
   };
 }

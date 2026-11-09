@@ -1,6 +1,7 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
 import type { Signer } from "near-api-js";
 import type { LimitsConfig } from "./config";
+import { wasmSha256 } from "./ownerActions";
 
 const TGAS = 10n ** 12n;
 /** Storage staking rate: 1E19 yoctoNEAR per byte (docs.near.org/protocol/storage/storage-staking). */
@@ -49,7 +50,9 @@ export class LimitsClient {
   async loadWasm(): Promise<Uint8Array> {
     const res = await fetch(this.config.wasmUrl);
     if (!res.ok) throw new Error(`Could not load the Spending Limits code (${res.status}).`);
-    return new Uint8Array(await res.arrayBuffer());
+    const wasm = new Uint8Array(await res.arrayBuffer());
+    if (wasmSha256(wasm) !== this.config.wasmSha256) throw new Error("The Spending Limits code does not match the expected build, so it will not be installed.");
+    return wasm;
   }
 
   private async view<T>(contractId: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
