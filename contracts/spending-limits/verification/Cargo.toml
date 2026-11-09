@@ -1,0 +1,12 @@
+[package]
+name = "spending-limits-verification"
+version = "0.0.0"
+edition = "2021"
+description = "Formal proofs of the Spending Limits limit arithmetic (Kani)"
+license = "MIT"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
