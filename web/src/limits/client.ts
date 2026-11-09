@@ -73,7 +73,7 @@ export class LimitsClient {
     const [onChainConfig, limit, spent, balance, intiConnected] = await Promise.all([
       this.view<{ agent: string }>(accountId, "get_config"),
       this.view<{ per_order: string; per_day: string } | null>(accountId, "get_limit", { token }),
-      this.view<string>(accountId, "get_spent_today", { token }),
+      this.view<string>(accountId, "get_spent_last_24h", { token }),
       this.view<string>(token, "ft_balance_of", { account_id: accountId }),
       this.hasIntiKey(accountId),
     ]);
