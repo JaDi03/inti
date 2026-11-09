@@ -1,6 +1,6 @@
 [package]
 name = "inti-spending-limits"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Spending limits for an AI agent: lives on the user's own NEAR account and funds the user's agent within limits"
 license = "MIT"
@@ -23,11 +23,15 @@ container_build_command = [
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-near-sdk = "5.30.1"
+near-sdk = { version = "=5.29.1", default-features = false }
 
 [dev-dependencies]
-near-sdk = { version = "5.30.1", features = ["unit-testing"] }
+near-sdk = { version = "=5.29.1", default-features = false, features = ["unit-testing"] }
 proptest = "=1.12.0"
+
+[lints.rust]
+# The property tests include the Kani model, which uses `cfg(kani)`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
 
 [profile.release]
 codegen-units = 1

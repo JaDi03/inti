@@ -4,6 +4,7 @@
 //! in `tests/invariants.rs` runs both side by side on random call sequences to check that.
 
 pub const NANOS_PER_DAY: u64 = 86_400 * 1_000_000_000;
+pub const MAX_ORDERS_PER_DAY: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limit {
@@ -11,10 +12,13 @@ pub struct Limit {
     pub per_day: u128,
 }
 
+/// `Order`: one order and what still counts of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Usage {
-    pub day: u64,
-    pub spent: u128,
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub struct Order {
+    pub id: u64,
+    pub at: u64,
+    pub amount: u128,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,21 +26,30 @@ pub enum Refusal {
     ZeroAmount,
     TokenNotAllowed,
     OverPerOrder,
+    TooManyOrders,
     AmountOverflow,
     OverDaily,
 }
 
-/// `current_day()`: the UTC calendar day of a block timestamp.
-pub fn day_of(timestamp: u64) -> u64 {
-    timestamp / NANOS_PER_DAY
+/// `orders_in_window()`: the orders sent less than 24 hours before `now`.
+pub fn in_window(orders: &[Order], now: u64) -> Vec<Order> {
+    orders
+        .iter()
+        .filter(|order| now.saturating_sub(order.at) < NANOS_PER_DAY)
+        .copied()
+        .collect()
 }
 
-/// `spent_on()`: what is counted for `day`; another day's record counts as zero.
-pub fn spent_on(usage: Option<Usage>, day: u64) -> u128 {
-    match usage {
-        Some(usage) if usage.day == day => usage.spent,
-        _ => 0,
-    }
+/// `total()`: None where the contract panics with "amount overflow".
+pub fn total(orders: &[Order]) -> Option<u128> {
+    orders
+        .iter()
+        .try_fold(0u128, |sum, order| sum.checked_add(order.amount))
+}
+
+/// `get_spent_last_24h()`.
+pub fn spent(orders: &[Order], now: u64) -> Option<u128> {
+    total(&in_window(orders, now))
 }
 
 /// `set_limit()` checks.
@@ -47,25 +60,16 @@ pub fn check_limit(per_order: u128, per_day: u128) -> Option<Limit> {
     Some(Limit { per_order, per_day })
 }
 
-/// `fund_agent()` checks and reservation: the usage record to store when the order passes.
-/// The contract reads the day once (`current_day()`) and uses it for both the count and the
-/// stored record, as `fund_on_day` does with `today`.
+/// `fund_agent()` checks and reservation (the gas check comes first in the contract and is
+/// not modelled): the order list to store when the order passes, with the new order `id`
+/// sent at `now` added last.
 pub fn fund(
     limit: Option<Limit>,
-    usage: Option<Usage>,
+    orders: &[Order],
     amount: u128,
-    timestamp: u64,
-) -> Result<Usage, Refusal> {
-    fund_on_day(limit, usage, amount, day_of(timestamp))
-}
-
-/// `fund_agent()` for an order whose block falls on calendar day `today`.
-pub fn fund_on_day(
-    limit: Option<Limit>,
-    usage: Option<Usage>,
-    amount: u128,
-    today: u64,
-) -> Result<Usage, Refusal> {
+    now: u64,
+    id: u64,
+) -> Result<Vec<Order>, Refusal> {
     if amount == 0 {
         return Err(Refusal::ZeroAmount);
     }
@@ -73,37 +77,43 @@ pub fn fund_on_day(
     if amount > limit.per_order {
         return Err(Refusal::OverPerOrder);
     }
-    let spent = spent_on(usage, today);
-    let new_spent = spent.checked_add(amount).ok_or(Refusal::AmountOverflow)?;
+    let mut next = in_window(orders, now);
+    if next.len() >= MAX_ORDERS_PER_DAY {
+        return Err(Refusal::TooManyOrders);
+    }
+    let new_spent = total(&next)
+        .and_then(|spent| spent.checked_add(amount))
+        .ok_or(Refusal::AmountOverflow)?;
     if new_spent > limit.per_day {
         return Err(Refusal::OverDaily);
     }
-    Ok(Usage {
-        day: today,
-        spent: new_spent,
-    })
+    next.push(Order {
+        id,
+        at: now,
+        amount,
+    });
+    Ok(next)
 }
 
 /// `on_fund_resolved()`: `result` is the token's reported used amount, or None when the
-/// transfer promise failed. Returns the used amount and the usage record afterwards.
+/// transfer promise failed or its result could not be read. Returns the used amount and
+/// the order list afterwards.
 pub fn resolve(
-    usage: Option<Usage>,
+    orders: &[Order],
     amount: u128,
-    day: u64,
+    id: u64,
     result: Option<u128>,
-) -> (u128, Option<Usage>) {
+) -> (u128, Vec<Order>) {
     let used = match result {
         Some(value) => value.min(amount),
         None => amount,
     };
     let unused = amount - used;
-    let mut usage = usage;
+    let mut orders = orders.to_vec();
     if unused > 0 {
-        if let Some(record) = usage.as_mut() {
-            if record.day == day {
-                record.spent = record.spent.saturating_sub(unused);
-            }
+        if let Some(order) = orders.iter_mut().find(|order| order.id == id) {
+            order.amount = order.amount.saturating_sub(unused);
         }
     }
-    (used, usage)
+    (used, orders)
 }

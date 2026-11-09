@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2789363bbce5373746b928f2d99312b5735b8d7defb1ae9e8afce3acf94cb517 # shrinks to (per_order, per_day, seq) = (4, 8, [Order { amount: 2 }]), start_day = 12816
+cc d515715432a179146051d91886a07cda330ae726220f16ec7ee5b3ed2e553ace # shrinks to (per_order, per_day, seq) = (595, 611, [Order { amount: 131 }, Order { amount: 501 }, Wait { nanos: 130227173968819 }, Callback { pick: 15, outcome: OverReported(885) }, Callback { pick: 32, outcome: Moved(8) }, Wait { nanos: 8748699119 }, Order { amount: 1701 }, Order { amount: 1170 }, Order { amount: 1257 }, Order { amount: 190 }, Order { amount: 70 }, Callback { pick: 43, outcome: OverReported(705) }, Callback { pick: 1, outcome: FailedNothingMoved }, Order { amount: 186 }, Wait { nanos: 6883780753 }, Order { amount: 132 }, Callback { pick: 44, outcome: FailedNothingMoved }, Order { amount: 1324 }, Callback { pick: 54, outcome: FailedNothingMoved }, Order { amount: 492 }, Callback { pick: 13, outcome: Moved(60) }, Order { amount: 263 }, Order { amount: 1523 }]), start_day = 16998
