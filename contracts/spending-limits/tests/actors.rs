@@ -228,7 +228,7 @@ fn removing_and_adding_back_a_limit_keeps_todays_spending_counted() {
     contract.remove_limit(usdc());
     contract.set_limit(usdc(), U128(100), U128(100));
     own_call(0, day_start(1) + 3);
-    assert_eq!(contract.get_spent_today(usdc()), U128(100));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(100));
     assert_panics_with(
         || drop(contract.fund_agent(usdc(), U128(1))),
         "over the daily limit",
@@ -259,7 +259,7 @@ fn an_order_sends_exactly_one_transfer_to_the_verifier_for_the_agent() {
     assert_eq!(callback.method, "on_fund_resolved");
     assert_eq!(
         callback.args,
-        json!({ "token": "usdc.near", "amount": "42", "day": 1 })
+        json!({ "token": "usdc.near", "amount": "42", "order_id": 0 })
     );
     assert_eq!(callback.deposit, NearToken::from_yoctonear(0));
     assert_eq!(callback.gas, Gas::from_tgas(10));
@@ -272,14 +272,14 @@ fn an_order_of_zero_is_refused() {
         || drop(contract.fund_agent(usdc(), U128(0))),
         "amount must be positive",
     );
-    assert_eq!(contract.get_spent_today(usdc()), U128(0));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(0));
 }
 
 #[test]
 fn an_order_of_exactly_the_per_order_limit_is_accepted() {
     let mut contract = installed(100, 300);
     drop(contract.fund_agent(usdc(), U128(100)));
-    assert_eq!(contract.get_spent_today(usdc()), U128(100));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(100));
     assert_panics_with(
         || drop(contract.fund_agent(usdc(), U128(101))),
         "over the per-order limit",
@@ -292,12 +292,12 @@ fn orders_up_to_exactly_the_daily_limit_pass_and_one_more_unit_is_refused() {
     drop(contract.fund_agent(usdc(), U128(100)));
     drop(contract.fund_agent(usdc(), U128(100)));
     drop(contract.fund_agent(usdc(), U128(50)));
-    assert_eq!(contract.get_spent_today(usdc()), U128(250));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(250));
     assert_panics_with(
         || drop(contract.fund_agent(usdc(), U128(1))),
         "over the daily limit",
     );
-    assert_eq!(contract.get_spent_today(usdc()), U128(250));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(250));
 }
 
 #[test]
@@ -308,11 +308,11 @@ fn a_refund_from_the_verifier_frees_only_that_order() {
     // The second order was fully refunded by the receiver.
     let used = contract.on_fund_resolved(usdc(), U128(100), 1, Ok(U128(0)));
     assert_eq!(used, U128(0));
-    assert_eq!(contract.get_spent_today(usdc()), U128(100));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(100));
     // The first order was fully used.
-    let used = contract.on_fund_resolved(usdc(), U128(100), 1, Ok(U128(100)));
+    let used = contract.on_fund_resolved(usdc(), U128(100), 0, Ok(U128(100)));
     assert_eq!(used, U128(100));
-    assert_eq!(contract.get_spent_today(usdc()), U128(100));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(100));
 }
 
 /// Limits as large as the type allows: the daily count never wraps around to let more through.
@@ -320,12 +320,12 @@ fn a_refund_from_the_verifier_frees_only_that_order() {
 fn the_largest_possible_limits_never_wrap_around() {
     let mut contract = installed(u128::MAX, u128::MAX);
     drop(contract.fund_agent(usdc(), U128(u128::MAX)));
-    assert_eq!(contract.get_spent_today(usdc()), U128(u128::MAX));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(u128::MAX));
     assert_panics_with(
         || drop(contract.fund_agent(usdc(), U128(1))),
         "amount overflow",
     );
-    assert_eq!(contract.get_spent_today(usdc()), U128(u128::MAX));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(u128::MAX));
 }
 
 // ---------- Agent key stolen ----------
@@ -342,7 +342,7 @@ fn a_stolen_key_sending_in_a_loop_stops_at_the_daily_limit() {
         }
     }
     assert_eq!(sent, 49);
-    assert_eq!(contract.get_spent_today(usdc()), U128(49));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(49));
 }
 
 #[test]
@@ -352,10 +352,10 @@ fn a_late_callback_from_yesterday_does_not_free_todays_budget() {
     drop(contract.fund_agent(usdc(), U128(100)));
     own_call(0, day_start(2) + 5);
     drop(contract.fund_agent(usdc(), U128(100)));
-    // Yesterday's order is refunded only now.
-    let used = contract.on_fund_resolved(usdc(), U128(100), 1, Ok(U128(0)));
+    // The order of 24 hours ago is refunded only now: it no longer counts, so nothing is freed.
+    let used = contract.on_fund_resolved(usdc(), U128(100), 0, Ok(U128(0)));
     assert_eq!(used, U128(0));
-    assert_eq!(contract.get_spent_today(usdc()), U128(100));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(100));
     assert_panics_with(
         || drop(contract.fund_agent(usdc(), U128(1))),
         "over the daily limit",
@@ -363,12 +363,87 @@ fn a_late_callback_from_yesterday_does_not_free_todays_budget() {
 }
 
 #[test]
+fn a_stolen_key_cannot_send_twice_the_daily_limit_across_utc_midnight() {
+    let mut contract = installed(100, 100);
+    own_call(0, day_start(2) - 1);
+    drop(contract.fund_agent(usdc(), U128(100)));
+    own_call(0, day_start(2) + 1);
+    assert_panics_with(
+        || drop(contract.fund_agent(usdc(), U128(1))),
+        "over the daily limit",
+    );
+    own_call(0, day_start(3) - 2);
+    assert_panics_with(
+        || drop(contract.fund_agent(usdc(), U128(1))),
+        "over the daily limit",
+    );
+    own_call(0, day_start(3) - 1);
+    drop(contract.fund_agent(usdc(), U128(100)));
+}
+
+#[test]
+fn a_stolen_key_cannot_send_more_than_the_daily_number_of_orders() {
+    let mut contract = installed(1, 1_000);
+    for order in 0..24u64 {
+        own_call(0, day_start(1) + 1 + order);
+        drop(contract.fund_agent(usdc(), U128(1)));
+    }
+    own_call(0, day_start(1) + 100);
+    assert_panics_with(
+        || drop(contract.fund_agent(usdc(), U128(1))),
+        "over the daily number of orders",
+    );
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(24));
+}
+
+#[test]
+fn an_order_with_too_little_gas_is_refused_and_counts_nothing() {
+    let mut contract = installed(100, 300);
+    let mut builder = VMContextBuilder::new();
+    builder
+        .current_account_id(user())
+        .predecessor_account_id(user())
+        .signer_account_id(user())
+        .prepaid_gas(Gas::from_tgas(79))
+        .block_timestamp(day_start(1) + 2);
+    testing_env!(builder.build());
+    assert_panics_with(
+        || drop(contract.fund_agent(usdc(), U128(10))),
+        "not enough gas for the order",
+    );
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(0));
+}
+
+#[test]
+fn every_order_and_owner_change_is_logged_as_an_event() {
+    let mut contract = installed(100, 300);
+    drop(contract.fund_agent(usdc(), U128(42)));
+    let logs = near_sdk::test_utils::get_logs();
+    assert_eq!(logs.len(), 1);
+    let event: Value =
+        near_sdk::serde_json::from_str(logs[0].strip_prefix("EVENT_JSON:").unwrap()).unwrap();
+    assert_eq!(
+        event,
+        json!({
+            "standard": "inti_spending_limits",
+            "version": "1.0.0",
+            "event": "order_sent",
+            "data": [{ "token": "usdc.near", "amount": "42", "order_id": 0, "agent": "agent.near" }]
+        })
+    );
+    own_call(1, day_start(1) + 2);
+    contract.set_agent(stranger());
+    let logs = near_sdk::test_utils::get_logs();
+    assert!(logs[0].contains("\"event\":\"agent_set\""), "{logs:?}");
+}
+
+#[test]
 fn a_callback_never_frees_more_than_its_own_order() {
     let mut contract = installed(100, 100);
     drop(contract.fund_agent(usdc(), U128(60)));
-    let used = contract.on_fund_resolved(usdc(), U128(60), 1, Ok(U128(u128::MAX)));
+    let used = contract.on_fund_resolved(usdc(), U128(60), 0, Ok(U128(u128::MAX)));
     assert_eq!(used, U128(60));
-    assert_eq!(contract.get_spent_today(usdc()), U128(60));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(60));
 }
 
 // ---------- Stranger and any other contract ----------
@@ -404,7 +479,7 @@ fn a_stranger_cannot_call_any_method_that_changes_state() {
             per_day: U128(300)
         })
     );
-    assert_eq!(contract.get_spent_today(usdc()), U128(0));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(0));
 }
 
 /// The check uses the direct caller, not the signer: a contract the user calls cannot act
@@ -438,5 +513,5 @@ fn incoming_token_transfers_from_anyone_are_accepted_and_change_nothing() {
             per_day: U128(300)
         })
     );
-    assert_eq!(contract.get_spent_today(usdc()), U128(0));
+    assert_eq!(contract.get_spent_last_24h(usdc()), U128(0));
 }

@@ -72,6 +72,11 @@ impl MockFt {
     pub fn not_an_amount(&self) -> String {
         "not an amount".to_string()
     }
+
+    /// A 100-digit amount: longer than any real `U128` result.
+    pub fn too_long_amount(&self) -> String {
+        "9".repeat(100)
+    }
 }
 
 #[near]
@@ -97,6 +102,9 @@ impl FungibleTokenCore for MockFt {
             }
             "garbage" => {
                 PromiseOrValue::Promise(Self::ext(env::current_account_id()).not_an_amount())
+            }
+            "too_long" => {
+                PromiseOrValue::Promise(Self::ext(env::current_account_id()).too_long_amount())
             }
             _ => self.token.ft_transfer_call(receiver_id, amount, memo, msg),
         }

@@ -4,8 +4,8 @@
 //! verifier. These tests show what unit tests cannot: access-key rules, `#[private]`,
 //! deposits, failed promises and callbacks, gas, and orders in flight at the same time.
 //!
-//! The contract wasm is the file the app deploys (`web/public/inti-spending-limits.wasm`).
-//! The mock wasm path comes from `MOCK_FT_WASM`.
+//! The contract wasm path comes from `SPENDING_LIMITS_WASM` and the mock wasm path from
+//! `MOCK_FT_WASM`; both are required, so the tests never run against a stale build.
 
 use near_workspaces::network::Sandbox;
 use near_workspaces::operations::Function;
@@ -17,12 +17,8 @@ use serde_json::{json, Value};
 const SUPPLY: u128 = 1_000_000;
 
 fn contract_wasm() -> Vec<u8> {
-    let path = std::env::var("SPENDING_LIMITS_WASM").unwrap_or_else(|_| {
-        format!(
-            "{}/../../../../web/public/inti-spending-limits.wasm",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    });
+    let path = std::env::var("SPENDING_LIMITS_WASM")
+        .expect("set SPENDING_LIMITS_WASM to the contract wasm built from this code");
     std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
 }
 
@@ -151,11 +147,11 @@ impl Setup {
             .json::<Value>()?)
     }
 
-    async fn spent_today(&self) -> anyhow::Result<u128> {
+    async fn spent_last_24h(&self) -> anyhow::Result<u128> {
         let value = self
             .view(
                 self.user.id(),
-                "get_spent_today",
+                "get_spent_last_24h",
                 json!({ "token": self.token.id() }),
             )
             .await?;
@@ -250,7 +246,7 @@ async fn inti_key_funds_the_agent_within_limits_and_nowhere_else() -> anyhow::Re
     assert_eq!(received["sender_id"], json!(s.user.id()));
     assert_eq!(received["msg"], json!(s.agent));
     assert_eq!(received["amount"], json!("100"));
-    assert_eq!(s.spent_today().await?, 100);
+    assert_eq!(s.spent_last_24h().await?, 100);
 
     assert!(s.fund(100).await?.is_success());
     let over_day = refused(s.fund(100).await);
@@ -258,7 +254,7 @@ async fn inti_key_funds_the_agent_within_limits_and_nowhere_else() -> anyhow::Re
     let over_order = refused(s.fund(101).await);
     assert_contains(&over_order, "over the per-order limit");
     assert_eq!(s.balance(s.intents.id()).await?, 200);
-    assert_eq!(s.spent_today().await?, 200);
+    assert_eq!(s.spent_last_24h().await?, 200);
     Ok(())
 }
 
@@ -314,7 +310,7 @@ async fn inti_key_cannot_do_anything_but_fund_agent() -> anyhow::Result<()> {
             refused(
                 s.inti
                     .call(&user_id, "on_fund_resolved")
-                    .args_json(json!({ "token": s.token.id(), "amount": "100", "day": 0 }))
+                    .args_json(json!({ "token": s.token.id(), "amount": "100", "order_id": 0 }))
                     .transact()
                     .await,
             ),
@@ -472,7 +468,7 @@ async fn strangers_cannot_change_anything_or_fake_a_callback() -> anyhow::Result
     let callback = refused(
         s.stranger
             .call(&user_id, "on_fund_resolved")
-            .args_json(json!({ "token": s.token.id(), "amount": "100", "day": 0 }))
+            .args_json(json!({ "token": s.token.id(), "amount": "100", "order_id": 0 }))
             .transact()
             .await,
     );
@@ -496,7 +492,7 @@ async fn strangers_cannot_change_anything_or_fake_a_callback() -> anyhow::Result
         s.view(&user_id, "get_config", json!({})).await?["agent"],
         json!(s.agent)
     );
-    assert_eq!(s.spent_today().await?, 0);
+    assert_eq!(s.spent_last_24h().await?, 0);
     Ok(())
 }
 
@@ -525,7 +521,7 @@ async fn a_refund_by_the_verifier_frees_the_budget() -> anyhow::Result<()> {
     let result = s.fund(100).await?;
     assert!(result.is_success(), "{result:?}");
     assert_eq!(used(&result), 0);
-    assert_eq!(s.spent_today().await?, 0);
+    assert_eq!(s.spent_last_24h().await?, 0);
     assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
     s.set_modes(&s.intents, "standard", "accept").await?;
     assert!(s.fund(100).await?.is_success());
@@ -540,7 +536,7 @@ async fn a_failing_verifier_frees_the_budget() -> anyhow::Result<()> {
     let result = s.fund(100).await?;
     assert!(result.is_success(), "{result:?}");
     assert_eq!(used(&result), 0);
-    assert_eq!(s.spent_today().await?, 0);
+    assert_eq!(s.spent_last_24h().await?, 0);
     assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
     Ok(())
 }
@@ -555,8 +551,63 @@ async fn a_malformed_token_result_keeps_the_budget_used() -> anyhow::Result<()> 
     let failure = format!("{:?}", result.receipt_failures());
     println!("callback failure: {failure}");
     assert_contains(&failure, "Failed to deserialize callback");
-    assert_eq!(s.spent_today().await?, 100);
+    assert_eq!(s.spent_last_24h().await?, 100);
     assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
+    Ok(())
+}
+
+/// A token result longer than 64 bytes is not read: the callback runs and counts the full
+/// order, so the limit errs on the safe side.
+#[tokio::test]
+async fn a_token_result_longer_than_64_bytes_counts_the_full_order() -> anyhow::Result<()> {
+    let s = setup(100, 100).await?;
+    s.set_modes(&s.token, "too_long", "accept").await?;
+    let result = s.fund(100).await?;
+    assert!(result.is_success(), "{:?}", result.receipt_failures());
+    assert_eq!(used(&result), 100);
+    assert_eq!(s.spent_last_24h().await?, 100);
+    assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_order_logs_its_sent_and_resolved_events() -> anyhow::Result<()> {
+    let s = setup(100, 100).await?;
+    let result = s.fund(40).await?;
+    assert!(result.is_success(), "{:?}", result.receipt_failures());
+    let events: Vec<Value> = result
+        .logs()
+        .iter()
+        .filter_map(|log| log.strip_prefix("EVENT_JSON:"))
+        .map(|json| serde_json::from_str(json).unwrap())
+        .filter(|event: &Value| event["standard"] == "inti_spending_limits")
+        .collect();
+    let names: Vec<&str> = events
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["order_sent", "order_resolved"], "{events:?}");
+    assert_eq!(events[0]["data"][0]["amount"], "40");
+    assert_eq!(events[1]["data"][0]["used"], "40");
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_25th_order_in_24_hours_is_refused() -> anyhow::Result<()> {
+    let s = setup(1, 1_000).await?;
+    // The full-access key signs, so the 25 orders do not depend on Inti's gas allowance.
+    for order in 1..=24 {
+        let result = s.fund_with(&s.user, 1, 80).await?;
+        assert!(
+            result.is_success(),
+            "order {order}: {:?}",
+            result.receipt_failures()
+        );
+    }
+    let refused_order = refused(s.fund_with(&s.user, 1, 80).await);
+    assert_contains(&refused_order, "over the daily number of orders");
+    assert_eq!(s.spent_last_24h().await?, 24);
+    assert_eq!(s.balance(s.intents.id()).await?, 24);
     Ok(())
 }
 
@@ -593,32 +644,32 @@ async fn two_orders_in_flight_never_pass_the_daily_limit() -> anyhow::Result<()>
     }
     assert_eq!(passed, 1);
     assert_eq!(s.balance(s.intents.id()).await?, 10);
-    assert_eq!(s.spent_today().await?, 10);
+    assert_eq!(s.spent_last_24h().await?, 10);
     Ok(())
 }
 
 #[tokio::test]
-async fn too_little_gas_fails_the_order_and_counts_nothing() -> anyhow::Result<()> {
+async fn too_little_gas_is_refused_before_the_order_counts() -> anyhow::Result<()> {
     let s = setup(100, 1_000).await?;
-    let low = refused(s.fund_with(&s.inti, 10, 50).await);
-    println!("order with 50 Tgas: {low}");
-    assert_eq!(s.spent_today().await?, 0);
-    assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
-    for tgas in [60u64, 70, 72, 75, 100, 300] {
-        match s.fund_with(&s.inti, 10, tgas).await {
-            Ok(result) => println!(
-                "order with {tgas} Tgas: success={} failures={} receipts={:?}",
-                result.is_success(),
-                result.receipt_failures().len(),
-                receipt_gas(&result)
-            ),
-            Err(error) => println!("order with {tgas} Tgas: rejected: {error:?}"),
-        }
+    for tgas in [50u64, 60, 70, 75, 79] {
+        let low = refused(s.fund_with(&s.inti, 10, tgas).await);
+        assert_contains(&low, "not enough gas for the order");
     }
-    let spent = s.spent_today().await?;
-    let moved = s.balance(s.intents.id()).await?;
-    println!("after the gas sweep: spent today {spent}, received by the verifier {moved}");
-    assert!(moved <= spent);
+    assert_eq!(s.spent_last_24h().await?, 0);
+    assert_eq!(s.balance(s.user.id()).await?, SUPPLY);
+    // Inti's key allows 0.25 NEAR of gas per transaction, so 150 Tgas is the most it can attach.
+    for tgas in [80u64, 100, 150] {
+        let result = s.fund_with(&s.inti, 10, tgas).await?;
+        println!(
+            "order with {tgas} Tgas: success={} failures={} receipts={:?}",
+            result.is_success(),
+            result.receipt_failures().len(),
+            receipt_gas(&result)
+        );
+        assert!(result.is_success(), "order with {tgas} Tgas failed");
+    }
+    assert_eq!(s.spent_last_24h().await?, 30);
+    assert_eq!(s.balance(s.intents.id()).await?, 30);
     Ok(())
 }
 
@@ -671,47 +722,30 @@ async fn the_full_access_key_removes_inti_and_can_replace_the_code() -> anyhow::
 }
 
 #[tokio::test]
-async fn the_gas_allowance_caps_what_a_stolen_key_can_burn() -> anyhow::Result<()> {
+async fn a_full_day_of_orders_burns_a_small_part_of_the_gas_allowance() -> anyhow::Result<()> {
+    // Inti's own key, with the 0.25 NEAR allowance the app gives it, sending the smallest
+    // orders with the least gas the contract accepts. Only the gas an order burns comes out of
+    // the account, so the 24 orders of a day pass and the order cap stops the next one.
     let s = setup(1, 1_000_000).await?;
-    let secret = SecretKey::from_random(KeyType::ED25519);
-    s.user
-        .batch(s.user.id())
-        .add_key(
-            secret.public_key(),
-            AccessKey::function_call_access(
-                s.user.id(),
-                &["fund_agent"],
-                Some(NearToken::from_millinear(50)),
-            ),
-        )
-        .transact()
-        .await?
-        .into_result()?;
-    let small_key = secret.public_key();
-    let small = Account::from_secret_key(s.user.id().clone(), secret, &s.worker);
     let before = s.user.view_account().await?.balance.as_yoctonear() as i128;
-    let mut sent = 0;
-    let mut stop = String::from("no refusal");
-    for _ in 0..200 {
-        match s.fund_with(&small, 1, 100).await {
-            Ok(result) if result.is_success() => sent += 1,
-            Ok(result) => {
-                stop = format!("failed: {:?}", result.receipt_failures());
-                break;
-            }
-            Err(error) => {
-                stop = format!("rejected: {error:?}");
-                break;
-            }
-        }
+    for order in 1..=24 {
+        let result = s.fund_with(&s.inti, 1, 80).await?;
+        assert!(
+            result.is_success(),
+            "order {order}: {:?}",
+            result.receipt_failures()
+        );
     }
+    let refused_order = refused(s.fund_with(&s.inti, 1, 80).await);
+    assert_contains(&refused_order, "over the daily number of orders");
     let after = s.user.view_account().await?.balance.as_yoctonear() as i128;
-    let key = s.worker.view_access_key(s.user.id(), &small_key).await;
-    println!(
-        "key with 0.05 NEAR allowance: {sent} orders of 100 Tgas, then {stop}; \
-         account NEAR change: {} yocto; key now: {key:?}",
-        after - before
+    let burned = before - after;
+    println!("Inti key with 0.25 NEAR allowance: 24 orders of 80 Tgas burned {burned} yocto");
+    let half_the_allowance = 125 * 10i128.pow(21);
+    assert!(
+        burned > 0 && burned < half_the_allowance,
+        "burned {burned} yocto"
     );
-    assert!(sent < 200, "the allowance never ran out");
+    assert_eq!(s.spent_last_24h().await?, 24);
     Ok(())
 }

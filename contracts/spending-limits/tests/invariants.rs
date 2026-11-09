@@ -1,7 +1,7 @@
 //! Property tests over random sequences of orders, callbacks and time, written from what
 //! the product promises the user, not from the contract's own variables:
 //! - Inti never sends more than the per-order limit in one order.
-//! - Within one UTC day the agent never receives more than the daily limit, whatever each
+//! - In any 24 hours the agent never receives more than the daily limit, whatever each
 //!   token call did and in whatever order the callbacks arrive.
 //! - Every order goes to the NEAR Intents verifier for the user's own agent, and nowhere else.
 //! - Nobody but the account itself can change anything.
@@ -19,7 +19,6 @@ use near_sdk::serde_json::{self, Value};
 use near_sdk::test_utils::{get_created_receipts, VMContextBuilder};
 use near_sdk::{testing_env, AccountId, NearToken, PromiseError};
 use proptest::prelude::*;
-use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Once;
 
@@ -38,6 +37,12 @@ fn call_from(predecessor: &str, deposit_yocto: u128, timestamp: u64) {
     testing_env!(builder.build());
 }
 
+/// Each case starts on an account with empty storage: the mocked blockchain otherwise keeps
+/// the previous case's storage, and its orders would still count.
+fn fresh_account() {
+    near_sdk::mock::with_mocked_blockchain(|chain| drop(chain.take_storage()));
+}
+
 fn quiet_panics() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| std::panic::set_hook(Box::new(|_| {})));
@@ -45,6 +50,17 @@ fn quiet_panics() {
 
 fn ok<F: FnOnce() -> R, R>(f: F) -> Option<R> {
     catch_unwind(AssertUnwindSafe(f)).ok()
+}
+
+/// Runs `f` and returns its panic message as the error.
+fn run_call<F: FnOnce()>(f: F) -> Result<(), String> {
+    catch_unwind(AssertUnwindSafe(f)).map_err(|payload| {
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -101,7 +117,8 @@ fn scenario() -> impl Strategy<Value = (u128, u128, Vec<Step>)> {
 
 struct Pending {
     amount: u128,
-    day: u64,
+    id: u64,
+    at: u64,
 }
 
 fn check_order_receipts(amount: u128) {
@@ -150,6 +167,7 @@ proptest! {
     #[test]
     fn the_agent_never_receives_more_than_the_limits((per_order, per_day, seq) in scenario(), start_day in 1u64..30_000) {
         quiet_panics();
+        fresh_account();
         let mut now = start_day * model::NANOS_PER_DAY + 1;
         call_from("user.near", 0, now);
         let mut contract = SpendingLimits::new(id("intents.near"), id("agent.near"));
@@ -158,26 +176,28 @@ proptest! {
 
         let limit = model::check_limit(per_order, per_day);
         prop_assert!(limit.is_some());
-        let mut usage: Option<model::Usage> = None;
+        let mut orders: Vec<model::Order> = Vec::new();
+        let mut next_id = 0u64;
         let mut pending: Vec<Pending> = Vec::new();
-        // What the agent actually received, per day the order was counted on.
-        let mut received: BTreeMap<u64, u128> = BTreeMap::new();
+        // What the agent actually received from each order, with the order's time.
+        let mut received: Vec<(u64, u128)> = Vec::new();
 
         for step in seq {
             match step {
                 Step::Order { amount } => {
                     call_from("user.near", 0, now);
-                    let before = contract.get_spent_today(id("usdc.near")).0;
-                    let accepted = ok(|| drop(contract.fund_agent(id("usdc.near"), U128(amount)))).is_some();
-                    let expected = model::fund(limit, usage, amount, now);
-                    prop_assert_eq!(accepted, expected.is_ok(), "contract and model disagree on an order of {}", amount);
+                    let before = contract.get_spent_last_24h(id("usdc.near")).0;
+                    let result = run_call(|| drop(contract.fund_agent(id("usdc.near"), U128(amount))));
+                    let expected = model::fund(limit, &orders, amount, now, next_id);
+                    prop_assert_eq!(result.is_ok(), expected.is_ok(), "contract and model disagree on an order of {}: contract {:?}, model {:?}", amount, result, expected);
                     if let Ok(next) = expected {
                         prop_assert!(amount <= per_order, "an order above the per-order limit passed");
                         check_order_receipts(amount);
-                        usage = Some(next);
-                        pending.push(Pending { amount, day: model::day_of(now) });
+                        orders = next;
+                        pending.push(Pending { amount, id: next_id, at: now });
+                        next_id += 1;
                     } else {
-                        prop_assert_eq!(contract.get_spent_today(id("usdc.near")).0, before);
+                        prop_assert_eq!(contract.get_spent_last_24h(id("usdc.near")).0, before);
                     }
                 }
                 Step::Callback { pick, outcome } => {
@@ -196,32 +216,34 @@ proptest! {
                     };
                     call_from("user.near", 0, now);
                     let model_result = result.as_ref().ok().map(|v| v.0);
-                    let used = contract.on_fund_resolved(id("usdc.near"), U128(order.amount), order.day, result);
-                    let (model_used, next) = model::resolve(usage, order.amount, order.day, model_result);
+                    let used = contract.on_fund_resolved(id("usdc.near"), U128(order.amount), order.id, result);
+                    let (model_used, next) = model::resolve(&orders, order.amount, order.id, model_result);
                     prop_assert_eq!(used.0, model_used);
                     prop_assert!(used.0 <= order.amount);
-                    usage = next;
-                    *received.entry(order.day).or_default() += moved;
+                    orders = next;
+                    received.push((order.at, moved));
                 }
                 Step::Wait { nanos } => {
                     now = now.saturating_add(nanos);
                 }
             }
             call_from("stranger.near", 0, now);
-            prop_assert_eq!(contract.get_spent_today(id("usdc.near")).0, model::spent_on(usage, model::day_of(now)));
-            prop_assert!(contract.get_spent_today(id("usdc.near")).0 <= per_day);
+            let spent = contract.get_spent_last_24h(id("usdc.near")).0;
+            prop_assert_eq!(Some(spent), model::spent(&orders, now));
+            prop_assert!(spent <= per_day);
         }
         // Orders still in flight count as fully received.
         for order in &pending {
-            *received.entry(order.day).or_default() += order.amount;
+            received.push((order.at, order.amount));
         }
-        for (day, total) in &received {
-            prop_assert!(*total <= per_day, "day {}: the agent received {} with a daily limit of {}", day, total, per_day);
-        }
-        // Any two consecutive calendar days together stay within twice the daily limit.
-        for (day, total) in &received {
-            let next = received.get(&(day + 1)).copied().unwrap_or(0);
-            prop_assert!(total + next <= 2 * per_day);
+        // The busiest 24 hours end at the time of some order: check every one of them.
+        for (end, _) in &received {
+            let total: u128 = received
+                .iter()
+                .filter(|(at, _)| at <= end && end - at < model::NANOS_PER_DAY)
+                .map(|(_, moved)| moved)
+                .sum();
+            prop_assert!(total <= per_day, "the 24 hours up to {} sent {} with a daily limit of {}", end, total, per_day);
         }
     }
 
@@ -229,6 +251,7 @@ proptest! {
     fn nobody_but_the_account_itself_can_change_anything(caller in "[a-z]{2,20}\\.near", deposit in prop_oneof![Just(0u128), Just(1u128), 2u128..1_000], amount in 0u128..1_000, per_order in 1u128..1_000) {
         prop_assume!(caller != "user.near");
         quiet_panics();
+        fresh_account();
         call_from("user.near", 0, 1);
         let mut contract = SpendingLimits::new(id("intents.near"), id("agent.near"));
         call_from("user.near", 1, 1);
@@ -246,6 +269,6 @@ proptest! {
         prop_assert_eq!(contract.get_config().intents, id("intents.near"));
         let limit = contract.get_limit(id("usdc.near")).unwrap();
         prop_assert_eq!((limit.per_order.0, limit.per_day.0), (500, 1_000));
-        prop_assert_eq!(contract.get_spent_today(id("usdc.near")).0, 0);
+        prop_assert_eq!(contract.get_spent_last_24h(id("usdc.near")).0, 0);
     }
 }
