@@ -27,7 +27,7 @@ function diff(expected: unknown, received: unknown, path: string, out: string[])
 }
 
 /** Paths where the received policy differs from the one Inti built. Empty means identical. */
-export function policyDifferences(expected: Policy, received: unknown): string[] {
+export function policyDifferences(expected: Policy | object, received: unknown): string[] {
   const out: string[] = [];
   diff(expected, received, "", out);
   return out;
