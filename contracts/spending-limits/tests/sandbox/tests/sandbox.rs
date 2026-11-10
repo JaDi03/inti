@@ -788,12 +788,22 @@ async fn the_owner_can_remove_spending_limits_and_free_its_storage() -> anyhow::
         .gas(Gas::from_tgas(80))
         .transact()
         .await;
-    assert!(order.map(|r| !r.is_success()).unwrap_or(true), "Inti's key still acts");
+    assert!(
+        order.map(|r| !r.is_success()).unwrap_or(true),
+        "Inti's key still acts"
+    );
 
     // The released NEAR is spendable: send all but what the remaining storage and fees need.
     let locked = after.storage_usage as u128 * 10u128.pow(19);
-    let spendable = after.balance.as_yoctonear() - locked - NearToken::from_millinear(10).as_yoctonear();
-    let out = s.user.transfer_near(s.stranger.id(), NearToken::from_yoctonear(spendable)).await?;
-    assert!(out.is_success(), "sending the released NEAR failed: {out:?}");
+    let spendable =
+        after.balance.as_yoctonear() - locked - NearToken::from_millinear(10).as_yoctonear();
+    let out = s
+        .user
+        .transfer_near(s.stranger.id(), NearToken::from_yoctonear(spendable))
+        .await?;
+    assert!(
+        out.is_success(),
+        "sending the released NEAR failed: {out:?}"
+    );
     Ok(())
 }
