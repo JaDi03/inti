@@ -1,6 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { Action } from "near-api-js";
+import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
 import type { LimitsConfig } from "./config";
 
@@ -141,6 +142,26 @@ function describeTokenAction(action: Action, config: LimitsConfig, accountId: st
   refuse(`the method ${call.methodName} on the token is not one Inti uses.`);
 }
 
+/** The token contract behind each asset the agent may buy. */
+export function assetContract(key: AssetKey): string {
+  return ASSETS[key].assetId.replace(/^nep141:/, "");
+}
+
+function assetByContract(contract: string): { key: AssetKey; name: string } | null {
+  const key = ASSET_KEYS.find((k) => assetContract(k) === contract);
+  return key ? { key, name: ASSETS[key].name } : null;
+}
+
+/** Enabling an asset: registering the user's own account with its token, so it can receive it. */
+function describeAssetEnable(action: Action, name: string, accountId: string): string {
+  const call = action.functionCall;
+  if (call?.methodName !== "storage_deposit") refuse(`only enabling ${name} is allowed on its token.`);
+  const a = argsOf(call.args, call.methodName, ["account_id", "registration_only"]);
+  if (a.account_id !== accountId || a.registration_only !== true) refuse(`enabling ${name} is for another account.`);
+  if (call.deposit > MAX_REGISTRATION_YOCTO) refuse(`enabling ${name} costs more than expected.`);
+  return `Enable ${name} in your wallet so Inti can deliver it to you (one-time fee ${near(call.deposit)}).`;
+}
+
 /** The one call that creates an agent: storing its rules, unlocked, for a small one-time cost. */
 function agentCreation(delegate: OwnerDelegate, config: LimitsConfig): { agentAccount: string; cost: bigint } {
   if (delegate.receiverId !== config.agentRulesContract) refuse(`the request is addressed to ${delegate.receiverId}.`);
@@ -222,5 +243,7 @@ export function describeOwnerTransaction(tx: OwnerTransaction, config: LimitsCon
   if (tx.actions.length === 0) refuse("the transaction is empty.");
   if (tx.receiverId === accountId) return tx.actions.flatMap((action) => describeOwnAccountAction(action, config, accountId));
   if (tx.receiverId === config.token.id) return tx.actions.map((action) => describeTokenAction(action, config, accountId));
+  const asset = assetByContract(tx.receiverId);
+  if (asset) return tx.actions.map((action) => describeAssetEnable(action, asset.name, accountId));
   return refuse(`the transaction is addressed to ${tx.receiverId}.`);
 }

@@ -1,7 +1,8 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
 import type { Signer } from "near-api-js";
+import { ASSET_KEYS, type AssetKey } from "../../../agent/policy/assets";
 import type { LimitsConfig } from "./config";
-import { EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
+import { assetContract, EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
 
 const TGAS = 10n ** 12n;
 /** Storage staking rate: 1E19 yoctoNEAR per byte (docs.near.org/protocol/storage/storage-staking). */
@@ -113,6 +114,31 @@ export class LimitsClient {
       ["fund_agent"],
       this.config.intiKeyAllowanceYocto,
     );
+  }
+
+  /** For each asset the agent may buy: whether the user's wallet can receive it, and how much it holds. */
+  async assets(accountId: string): Promise<{ key: AssetKey; enabled: boolean; balance: bigint }[]> {
+    return Promise.all(
+      ASSET_KEYS.map(async (key) => {
+        const contract = assetContract(key);
+        const [registration, balance] = await Promise.all([
+          this.view<unknown>(contract, "storage_balance_of", { account_id: accountId }),
+          this.view<string | null>(contract, "ft_balance_of", { account_id: accountId }),
+        ]);
+        return { key, enabled: registration != null, balance: BigInt(balance ?? "0") };
+      }),
+    );
+  }
+
+  /** Registers the user's account with an asset's token, for its own one-time fee, so purchases can reach the wallet. */
+  async enableAsset(accountId: string, signer: Signer, key: AssetKey): Promise<string> {
+    const contract = assetContract(key);
+    const bounds = await this.view<{ min: string }>(contract, "storage_balance_bounds");
+    const sent = await this.account(accountId, signer).signAndSendTransaction({
+      receiverId: contract,
+      actions: [actions.functionCall("storage_deposit", { account_id: accountId, registration_only: true }, 10n * TGAS, BigInt(bounds.min))],
+    });
+    return sent.transaction.hash;
   }
 
   /**

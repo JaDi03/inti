@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
-import { agentAccountOf, EMPTY_CONTRACT, RefusedSigningError, wasmSha256 } from "./ownerActions";
+import { agentAccountOf, assetContract, EMPTY_CONTRACT, RefusedSigningError, wasmSha256 } from "./ownerActions";
 import { OwnerSigner, SigningCancelledError } from "./ownerSigner";
 
 const expectedWasm = new Uint8Array(readFileSync(new URL("../../public/inti-spending-limits.wasm", import.meta.url)));
@@ -155,6 +155,21 @@ describe("signing with the user's account key", () => {
     const wallet = userWallet();
     await expect(sign(wallet, wallet.accountId, [actions.deleteKey(intiKey), actions.transfer(1n)])).rejects.toThrow(RefusedSigningError);
     expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("enables an asset only by registering the user's own account with that asset's token", async () => {
+    const wallet = userWallet();
+    const gold = assetContract("gold");
+    const register = (account: string, deposit = 1_250_000_000_000_000_000_000n) =>
+      actions.functionCall("storage_deposit", { account_id: account, registration_only: true }, 10n ** 13n, deposit);
+    await sign(wallet, gold, [register(wallet.accountId)]);
+    expect(wallet.shown[0]).toEqual(["Enable Gold in your wallet so Inti can deliver it to you (one-time fee 0.00125 NEAR)."]);
+
+    await expect(sign(wallet, gold, [register("cd".repeat(32))])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, gold, [register(wallet.accountId, 10n ** 23n)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, gold, [actions.functionCall("ft_transfer", { receiver_id: "attacker.near", amount: "1" }, 10n ** 13n, 1n)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, "usdt.tether-token.near", [register(wallet.accountId)])).rejects.toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(1);
   });
 
   /** A grant message shaped exactly like the Agent API's (fields read from a live grant_issue). */

@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { Coins, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard } from "./agent/TradeGrantCard";
+import { AssetsPanel } from "./assets/AssetsPanel";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -62,6 +63,7 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
   const creating = useRef(false);
@@ -179,6 +181,11 @@ export function App() {
             </Button>
           )}
           {address && (
+            <Button variant="ghost" size="icon" aria-label="Assets" title="Assets" onClick={() => setAssetsOpen(true)}>
+              <Coins />
+            </Button>
+          )}
+          {address && (
             // Privy's own modal shows the key; it never reaches Inti's code.
             <Button
               variant="ghost"
@@ -258,6 +265,7 @@ export function App() {
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
       {limitsOpen && address && <SpendingLimitsPanel address={address} onClose={() => setLimitsOpen(false)} />}
+      {assetsOpen && address && <AssetsPanel address={address} onClose={() => setAssetsOpen(false)} />}
     </div>
   );
 }
