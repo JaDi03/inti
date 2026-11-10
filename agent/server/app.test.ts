@@ -8,6 +8,7 @@ import type { Brain } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
+import type { GrantRecord, GrantStore } from "./grants.js";
 import { DailyQuota } from "./quota.js";
 
 // Real tokens and prices copied from GET /v1/tokens.
@@ -46,19 +47,43 @@ const OWNER = { accountId: "ab".repeat(32), publicKey: `ed25519:${"1".repeat(44)
 
 /** An Agent API stand-in that records what the server asked it for. */
 function fakeAgents(existing: AgentLookup = { status: "none" }) {
-  const calls: { prepared: string[]; submitted: string[] } = { prepared: [], submitted: [] };
+  const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[] } = {
+    prepared: [],
+    submitted: [],
+    grantBodies: [],
+    submittedTypes: [],
+  };
   const agents: AgentAccounts = {
+    prepareGrant: (body) => {
+      calls.grantBodies.push(body);
+      return Promise.resolve({ correlationId: `grant_${calls.grantBodies.length}`, intent: { standard: "nep413", payload: {} }, preview: { summary: "g" } });
+    },
     find: () => Promise.resolve(existing),
     prepare: (userId, owner) => {
       calls.prepared.push(userId);
       return Promise.resolve({ correlationId: `intent_${calls.prepared.length}`, intent: { standard: "nep366", owner: owner.accountId }, preview: { summary: "s", policy: {} } });
     },
-    submit: (correlationId) => {
+    submit: (correlationId, _signed, type = "agent_create") => {
       calls.submitted.push(correlationId);
+      calls.submittedTypes.push(type);
       return Promise.resolve("success");
     },
   };
   return { agents, calls };
+}
+
+/** Grants kept in memory, for tests. */
+function memoryGrants(): GrantStore & { records: Map<string, GrantRecord> } {
+  const records = new Map<string, GrantRecord>();
+  return {
+    records,
+    get: (userId) => records.get(userId) ?? null,
+    users: () => [...records.keys()],
+    put: (userId, record) => {
+      records.set(userId, record);
+      return Promise.resolve();
+    },
+  };
 }
 
 async function app(overrides: Partial<AppDeps> = {}) {
@@ -67,6 +92,7 @@ async function app(overrides: Partial<AppDeps> = {}) {
     brain: reportOnly(),
     tokens: () => Promise.resolve(tokens),
     agents: fakeAgents().agents,
+    grants: memoryGrants(),
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
     allowedOrigins: [ORIGIN],
@@ -231,14 +257,14 @@ describe("the user's own agent", () => {
   });
 
   it("returns the agent a user already has instead of creating another", async () => {
-    const existing: AgentLookup = { status: "active", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
+    const existing: AgentLookup = { status: "active", agentId: "agent_1", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
     const { agents, calls } = fakeAgents(existing);
     const server = await app({ agents });
     const auth = `Bearer ${await token()}`;
     expect((await post(server, "/api/agent/prepare", auth, OWNER)).json()).toEqual(existing);
     expect(calls.prepared).toEqual([]);
     const read = await server.inject({ method: "GET", url: "/api/agent", headers: { origin: ORIGIN, authorization: auth } });
-    expect(read.json()).toEqual(existing);
+    expect(read.json()).toEqual({ ...existing, grant: null });
   });
 
   it("refuses requests without a token, with a malformed owner or with unknown fields", async () => {
@@ -270,11 +296,85 @@ describe("the user's own agent", () => {
       find: () => Promise.reject(new AgentsUnavailableError("agents_unavailable")),
       prepare: () => Promise.reject(new Error("unused")),
       submit: () => Promise.reject(new Error("unused")),
+      prepareGrant: () => Promise.reject(new Error("unused")),
     };
     const server = await app({ agents });
     const res = await post(server, "/api/agent/prepare", `Bearer ${await token()}`, OWNER);
     expect(res.statusCode).toBe(502);
     expect(res.json()).toEqual({ error: "agents_unavailable" });
+  });
+});
+
+describe("/api/agent/grant", () => {
+  const ACTIVE: AgentLookup = { status: "active", agentId: "agent_1", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
+  const NOW = Date.parse("2026-11-10T12:00:00Z");
+  const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
+    server.inject({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json", origin: ORIGIN, ...(auth ? { authorization: auth } : {}) },
+      payload: JSON.stringify(payload),
+    });
+
+  it("issues a 90-day grant, keeps the token on the server and shows only its expiry", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const grants = memoryGrants();
+    const server = await app({ agents, grants, now: () => NOW });
+    const auth = `Bearer ${await token()}`;
+
+    const prepared = await post(server, "/api/agent/grant/prepare", auth, {});
+    expect(prepared.statusCode).toBe(200);
+    expect(prepared.body).not.toContain("ngt_");
+    const body = calls.grantBodies[0];
+    expect(body).toMatchObject({ type: "grant_issue", agent_id: "agent_1", expires_at: "2027-02-08T12:00:00.000Z" });
+    expect(body?.credential).toMatch(/^[0-9a-f]{64}$/);
+
+    const submitted = await post(server, "/api/agent/grant/submit", auth, { correlationId: "grant_1", signedData: { standard: "nep413" } });
+    expect(submitted.json()).toEqual({ status: "success", expiresAt: "2027-02-08T12:00:00.000Z" });
+    expect(calls.submittedTypes).toEqual(["grant_issue"]);
+    expect(grants.get("did:privy:alice")?.token).toMatch(/^ngt_/);
+
+    const read = await server.inject({ method: "GET", url: "/api/agent", headers: { origin: ORIGIN, authorization: auth } });
+    expect(read.json()).toEqual({ ...ACTIVE, grant: { expiresAt: "2027-02-08T12:00:00.000Z" } });
+    expect(read.body).not.toContain("ngt_");
+  });
+
+  it("refuses a grant without sign-in, without an agent, with a body, or sent by another user", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const grants = memoryGrants();
+    const server = await app({ agents, grants });
+    const alice = `Bearer ${await token()}`;
+    const mallory = `Bearer ${await token({ sub: "did:privy:mallory" })}`;
+    expect((await post(server, "/api/agent/grant/prepare", null, {})).statusCode).toBe(401);
+    expect((await post(server, "/api/agent/grant/prepare", alice, { agentId: "agent_2" })).statusCode).toBe(400);
+    expect((await post(server, "/api/agent/grant/prepare", alice, {})).statusCode).toBe(200);
+    const stolen = await post(server, "/api/agent/grant/submit", mallory, { correlationId: "grant_1", signedData: {} });
+    expect(stolen.statusCode).toBe(404);
+    expect(calls.submitted).toEqual([]);
+    expect(grants.records.size).toBe(0);
+
+    const none = await app({ agents: fakeAgents().agents, grants });
+    expect((await post(none, "/api/agent/grant/prepare", alice, {})).statusCode).toBe(409);
+  });
+
+  it("does not show a grant that has less than a day left, or that belongs to an older agent", async () => {
+    const grants = memoryGrants();
+    const server = await app({ agents: fakeAgents(ACTIVE).agents, grants, now: () => NOW });
+    const auth = `Bearer ${await token()}`;
+    const read = () => server.inject({ method: "GET", url: "/api/agent", headers: { origin: ORIGIN, authorization: auth } });
+    await grants.put("did:privy:alice", { agentId: "agent_1", token: "ngt_x", expiresAt: "2026-11-11T06:00:00.000Z" });
+    expect((await read()).json()).toMatchObject({ grant: null });
+    await grants.put("did:privy:alice", { agentId: "agent_0", token: "ngt_x", expiresAt: "2027-02-08T12:00:00.000Z" });
+    expect((await read()).json()).toMatchObject({ grant: null });
+  });
+
+  it("stops at the per-user daily cap of grant documents", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const server = await app({ agents });
+    const auth = `Bearer ${await token()}`;
+    for (let i = 0; i < 5; i++) expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(200);
+    expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(429);
+    expect(calls.grantBodies).toHaveLength(5);
   });
 });
 
