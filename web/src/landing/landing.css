@@ -1,0 +1,59 @@
+@import "@fontsource-variable/fredoka";
+@import "@fontsource-variable/nunito";
+
+/* The landing has its own look: dark teal, Inti green, rounded type like the logo. */
+.landing {
+  --landing-bg: #01303c;
+  --landing-bg-deep: #02242e;
+  --landing-green: #00eb96;
+  --landing-green-light: #3df5b0;
+  --landing-green-dark: #00be79;
+  --landing-yellow: #ffea00;
+  --landing-pink: #ff287c;
+  --landing-ink: #04212a;
+  background-color: var(--landing-bg);
+  color: #ffffff;
+  font-family: "Nunito Variable", sans-serif;
+}
+
+.landing-heading {
+  font-family: "Fredoka Variable", sans-serif;
+}
+
+/* Faint grid, like graph paper under the notes pinned on it. */
+.landing-grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+@keyframes landing-wiggle {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+.landing-wiggle:hover {
+  animation: landing-wiggle 0.4s ease-in-out infinite;
+}
+
+/* Tilted notes straighten when you point at them or reach them with the keyboard. */
+.landing-tilt {
+  transform: rotate(var(--tilt, 0deg));
+  transition: transform 300ms ease-in-out;
+}
+
+.landing-tilt:hover,
+.landing-tilt:focus-within {
+  transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wiggle:hover {
+    animation: none;
+  }
+
+  .landing-tilt {
+    transition: none;
+  }
+}
