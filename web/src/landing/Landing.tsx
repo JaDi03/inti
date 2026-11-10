@@ -34,22 +34,24 @@ const BARRIERS: readonly Barrier[] = [
   },
 ];
 
-function Header({ onLogin }: { onLogin: () => void }) {
+/** Where the app lives; the landing only links to it. */
+const APP_PATH = "/app";
+
+function Header() {
   return (
     <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
       <img src="/inti-logo-horizontal-dark.svg" alt="Inti" className="h-9 w-auto sm:h-10" />
-      <button
-        type="button"
-        onClick={onLogin}
+      <a
+        href={APP_PATH}
         className="rounded-full border-2 border-white/70 px-4 py-1.5 text-sm font-bold transition-colors hover:border-(--landing-green) hover:text-(--landing-green)"
       >
-        Sign in
-      </button>
+        Open app
+      </a>
     </header>
   );
 }
 
-function Hero({ onLogin }: { onLogin: () => void }) {
+function Hero() {
   return (
     <section className="relative px-4 pt-8 pb-20 text-center sm:pt-16 sm:pb-28">
       <IntiMascot size={150} className="mx-auto" />
@@ -65,13 +67,12 @@ function Hero({ onLogin }: { onLogin: () => void }) {
         stay in control.
       </p>
       <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <button
-          type="button"
-          onClick={onLogin}
+        <a
+          href={APP_PATH}
           className="landing-wiggle rounded-full bg-(--landing-green) px-7 py-3 text-lg font-bold text-(--landing-ink) shadow-xl"
         >
-          Sign in with email or Google
-        </button>
+          Open app
+        </a>
         <a
           href="#barriers"
           className="rounded-full border-2 border-dashed border-white/60 px-6 py-3 font-bold transition-colors hover:border-white"
@@ -129,13 +130,13 @@ function Barriers() {
 }
 
 /** The public page people see before signing in. */
-export function Landing({ onLogin }: { onLogin: () => void }) {
+export function Landing() {
   return (
     <div className="landing relative min-h-svh w-full overflow-x-hidden">
       <div className="landing-grid pointer-events-none absolute inset-0" aria-hidden="true" />
-      <Header onLogin={onLogin} />
+      <Header />
       <main className="relative z-10 mx-auto max-w-6xl px-4 pb-16 sm:px-6">
-        <Hero onLogin={onLogin} />
+        <Hero />
         <Barriers />
       </main>
     </div>

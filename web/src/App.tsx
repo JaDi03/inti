@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
-import { Landing } from "./landing/Landing";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
@@ -30,6 +29,28 @@ function nearAddress(accounts: readonly unknown[]): string | null {
 
 function shortAddress(address: string): string {
   return address.length > 14 ? `${address.slice(0, 6)}...${address.slice(-6)}` : address;
+}
+
+function Wordmark({ className }: { className?: string }) {
+  return <span className={cn("font-heading font-bold tracking-tight text-primary", className)}>Inti</span>;
+}
+
+function Welcome({ onLogin }: { onLogin: () => void }) {
+  return (
+    <main className="relative flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center">
+      <div className="absolute top-3 right-4">
+        <ThemeToggle />
+      </div>
+      <IntiMascot size={220} />
+      <div>
+        <Wordmark className="text-6xl" />
+        <p className="mt-2 text-lg text-muted-foreground">The AI for your Intents</p>
+      </div>
+      <Button size="lg" className="h-11 rounded-full px-8 text-base" onClick={onLogin}>
+        Sign in with email or Google
+      </Button>
+    </main>
+  );
 }
 
 export function App() {
@@ -96,7 +117,7 @@ export function App() {
   }, [authenticated, user, address, createWallet]);
 
   if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Loading...</main>;
-  if (!authenticated || !user) return <Landing onLogin={login} />;
+  if (!authenticated || !user) return <Welcome onLogin={login} />;
 
   const addMessage = (from: Message["from"], text: string, simulated = false) =>
     setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated }]);
