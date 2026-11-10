@@ -169,7 +169,7 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
                 <KeyLimits />
                 <LimitForm decimals={decimals} symbol={symbol} withFunding submitLabel="Activate Inti" busy={busy} onSubmit={(limit, fund) => void activate(limit, fund)} />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  About {amount(LimitsClient.storageCost(wasm.length))} stays locked in your account while Spending Limits is installed (network storage).
+                  About {amount(LimitsClient.storageCost(wasm.length))} is set aside in your account while Inti is on. It comes back when you turn Inti off.
                 </p>
               </>
             )}

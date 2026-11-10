@@ -1,7 +1,7 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
 import type { Signer } from "near-api-js";
 import type { LimitsConfig } from "./config";
-import { wasmSha256 } from "./ownerActions";
+import { EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
 
 const TGAS = 10n ** 12n;
 /** Storage staking rate: 1E19 yoctoNEAR per byte (docs.near.org/protocol/storage/storage-staking). */
@@ -143,6 +143,39 @@ export class LimitsClient {
       ],
     });
     return [install.transaction.hash, funding.transaction.hash];
+  }
+
+  /**
+   * "Turn off Inti": turn the wrapped NEAR back into NEAR, then remove Inti's key and replace
+   * Spending Limits with an empty contract, which frees the code's storage. Everything stays as
+   * plain NEAR in the user's account.
+   */
+  releasePlan(accountId: string, wrapped: bigint, intiConnected: boolean): OwnerTransaction[] {
+    const plan: OwnerTransaction[] = [];
+    if (wrapped > 0n) {
+      plan.push({
+        signerId: accountId,
+        receiverId: this.config.token.id,
+        actions: [actions.functionCall("near_withdraw", { amount: wrapped.toString() }, 30n * TGAS, 1n)],
+      });
+    }
+    plan.push({
+      signerId: accountId,
+      receiverId: accountId,
+      actions: [...(intiConnected ? [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey))] : []), actions.deployContract(EMPTY_CONTRACT)],
+    });
+    return plan;
+  }
+
+  /** Signs and sends the transactions in order, stopping at the first failure. Returns their hashes. */
+  async send(accountId: string, signer: Signer, plan: readonly OwnerTransaction[]): Promise<string[]> {
+    const account = this.account(accountId, signer);
+    const hashes: string[] = [];
+    for (const tx of plan) {
+      const res = await account.signAndSendTransaction({ receiverId: tx.receiverId, actions: [...tx.actions] });
+      hashes.push(res.transaction.hash);
+    }
+    return hashes;
   }
 
   async setLimit(accountId: string, signer: Signer, limit: SpendLimit): Promise<string> {

@@ -19,9 +19,15 @@ export function PasskeyProtection() {
 
   if (methods.length > 0) {
     return (
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Fingerprint className="size-4 text-primary" /> Every signature asks for your {methods.includes("passkey") ? "passkey" : "authenticator code"}.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+        <p className="flex items-center gap-2">
+          <Fingerprint className="size-4 text-primary" /> Every signature asks for your {methods.includes("passkey") ? "passkey" : "authenticator code"}.
+        </p>
+        {/* Privy's window to add or remove methods, so a lost device never locks the user out. */}
+        <Button size="sm" variant="ghost" onClick={showMfaEnrollmentModal}>
+          Manage
+        </Button>
+      </div>
     );
   }
   return (
