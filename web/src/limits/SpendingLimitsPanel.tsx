@@ -7,7 +7,7 @@ import { LimitsClient, type SpendLimit, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
 import { PasskeyProtection } from "./PasskeyProtection";
 import { loadLimitsConfig, type LimitsConfig } from "./config";
-import { useNetwork } from "../network";
+import { UNAVAILABLE } from "./useLimits";
 
 /** Shows at most 4 decimals; display only, never used for math. */
 export function display(atomic: bigint, decimals: number): string {
@@ -33,15 +33,15 @@ interface Props {
 }
 
 export function SpendingLimitsPanel({ address, onClose }: Props) {
-  const { network } = useNetwork();
   const setup = useMemo((): { config: LimitsConfig; client: LimitsClient } | { error: string } => {
     try {
-      const config = loadLimitsConfig(network);
+      const config = loadLimitsConfig();
       return { config, client: new LimitsClient(config) };
     } catch (e) {
-      return { error: e instanceof Error ? e.message : "Spending Limits is not configured." };
+      console.error(e);
+      return { error: UNAVAILABLE };
     }
-  }, [network]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/70 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-label="Spending limits">
@@ -50,9 +50,6 @@ export function SpendingLimitsPanel({ address, onClose }: Props) {
           <div className="flex items-center gap-2">
             <ShieldCheck className="size-5 text-primary" />
             <h2 className="text-lg font-semibold">Spending limits</h2>
-            {"config" in setup && setup.config.networkId === "testnet" && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Testnet</span>
-            )}
           </div>
           <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
             <X />

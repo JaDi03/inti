@@ -2,14 +2,11 @@ import { Check, Copy, ExternalLink, Loader2, ShieldCheck, X } from "lucide-react
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useNetwork } from "../network";
 import { LimitsClient, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
+import { PasskeyProtection, useHasPasskey } from "./PasskeyProtection";
 import { DEFAULT_FUND, display, LimitForm } from "./SpendingLimitsPanel";
 import type { LimitsSetup } from "./useLimits";
-
-/** NEAR's official testnet faucet (docs.near.org/getting-started/faucet). */
-const TESTNET_FAUCET_URL = "https://docs.near.org/getting-started/faucet";
 
 interface Props {
   address: string;
@@ -24,23 +21,10 @@ interface Props {
 
 /**
  * First-run activation, inline on the home screen (not behind the shield icon):
- * 1. add funds (the app notices them by itself), 2. set spending limits and sign once,
- * 3. see where the money sits.
+ * 1. add a passkey, 2. add funds (the app notices them by itself), 3. set spending limits and
+ * sign, 4. see where the money sits.
  */
 export function ActivationCard({ address, setup, status, refresh, onDone, onWorking }: Props) {
-  const { setNetwork } = useNetwork();
-
-  if (setup.kind === "not-ready") {
-    return (
-      <CardFrame title="Mainnet is coming soon" subtitle="On mainnet Inti uses real money and NEAR Intents. Try everything for free on Testnet.">
-        <div className="flex justify-end">
-          <Button size="lg" className="rounded-xl px-5" onClick={() => setNetwork("testnet")}>
-            Switch to Testnet
-          </Button>
-        </div>
-      </CardFrame>
-    );
-  }
   if (setup.kind === "error") {
     return (
       <CardFrame title="Spending Limits is unavailable" subtitle={setup.message}>
@@ -65,6 +49,7 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
   const { symbol, decimals } = config.token;
   const amount = (v: bigint) => `${display(v, decimals)} ${symbol}`;
   const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const hasPasskey = useHasPasskey();
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,22 +93,27 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
       subtitle={
         active
           ? "Your money stays in your account. Inti can only fund your own agent, within your limits."
-          : "Set up in 2 steps. Your money never leaves your account: Inti only gets a key that funds your own agent, within the limits you sign."
+          : "Set up in 3 steps. Your money never leaves your account: Inti only gets a key that funds your own agent, within the limits you sign."
       }
       onClose={active ? onDone : undefined}
     >
       {!active && (
         <>
-          <Step n={1} title="Add funds" done={funded}>
-            {funded ? (
-              <p className="text-sm text-muted-foreground">Your account has {amount(status.available)}.</p>
-            ) : (
-              <AddFundsStep address={address} needs={amount(needs)} has={amount(status.available)} testnet={config.networkId === "testnet"} />
-            )}
+          <Step n={1} title="Protect your account with a passkey" done={hasPasskey}>
+            <PasskeyProtection />
           </Step>
 
-          <Step n={2} title="Set your spending limits" done={false} disabled={!funded}>
-            {funded && (
+          <Step n={2} title="Add funds" done={funded} disabled={!hasPasskey}>
+            {hasPasskey &&
+              (funded ? (
+                <p className="text-sm text-muted-foreground">Your account has {amount(status.available)}.</p>
+              ) : (
+                <AddFundsStep address={address} needs={amount(needs)} has={amount(status.available)} />
+              ))}
+          </Step>
+
+          <Step n={3} title="Set your spending limits" done={false} disabled={!funded || !hasPasskey}>
+            {funded && hasPasskey && (
               <>
                 <KeyLimits />
                 <LimitForm decimals={decimals} symbol={symbol} withFunding submitLabel="Activate Inti" busy={busy} onSubmit={(limit, fund) => void activate(limit, fund)} />
@@ -211,7 +201,7 @@ function Step({ n, title, done, disabled, children }: { n: number; title: string
   );
 }
 
-function AddFundsStep({ address, needs, has, testnet }: { address: string; needs: string; has: string; testnet: boolean }) {
+function AddFundsStep({ address, needs, has }: { address: string; needs: string; has: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="text-sm">
@@ -229,13 +219,6 @@ function AddFundsStep({ address, needs, has, testnet }: { address: string; needs
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
-      {testnet && (
-        <Button asChild variant="outline" className="mt-3 rounded-xl">
-          <a href={TESTNET_FAUCET_URL} target="_blank" rel="noreferrer">
-            Get free test NEAR <ExternalLink />
-          </a>
-        </Button>
-      )}
       <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" /> Waiting for funds. This step completes by itself.
       </p>

@@ -1,31 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNetwork } from "../network";
 import { LimitsClient, type LimitsStatus } from "./client";
-import { loadLimitsConfig, NetworkNotReadyError, type LimitsConfig } from "./config";
+import { loadLimitsConfig, type LimitsConfig } from "./config";
 
 export type LimitsSetup =
   | { kind: "ready"; config: LimitsConfig; client: LimitsClient }
-  | { kind: "not-ready"; message: string }
   | { kind: "error"; message: string };
+
+/** Shown instead of the app when its settings are incomplete. */
+export const UNAVAILABLE = "Inti is not available right now. Please try again later.";
 
 /** How often the account is re-read while the app waits for funds to arrive. */
 const POLL_MS = 5000;
 
 /**
- * Spending Limits state for the user's account on the selected network.
+ * Spending Limits state for the user's account.
  * `poll` re-reads the account every few seconds (used while waiting for funds).
  */
 export function useLimits(address: string | null, poll: boolean) {
-  const { network } = useNetwork();
   const setup = useMemo((): LimitsSetup => {
     try {
-      const config = loadLimitsConfig(network);
+      const config = loadLimitsConfig();
       return { kind: "ready", config, client: new LimitsClient(config) };
     } catch (e) {
-      if (e instanceof NetworkNotReadyError) return { kind: "not-ready", message: e.message };
-      return { kind: "error", message: e instanceof Error ? e.message : "Spending Limits is not configured." };
+      // The missing setting is for the operator; the user only sees that Inti is unavailable.
+      console.error(e);
+      return { kind: "error", message: UNAVAILABLE };
     }
-  }, [network]);
+  }, []);
 
   const [status, setStatus] = useState<LimitsStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export function useLimits(address: string | null, poll: boolean) {
     }
   }, [client, address]);
 
-  // A new network or account starts from an unknown status.
+  // A new account starts from an unknown status.
   useEffect(() => {
     setStatus(null);
     void refresh();

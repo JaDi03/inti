@@ -12,7 +12,6 @@ const expectedWasm = new Uint8Array(readFileSync(new URL("../../public/inti-spen
 const intiKey = KeyPair.fromRandom("ed25519").getPublicKey();
 
 const config: LimitsConfig = {
-  networkId: "testnet",
   rpcUrl: "http://127.0.0.1:1",
   explorerTxUrl: (hash) => hash,
   intentsAccount: "intents.testnet",
@@ -25,7 +24,7 @@ const config: LimitsConfig = {
 };
 
 /** A user wallet whose key really signs, plus a record of every hash it was asked to sign. */
-function userWallet(answer = true) {
+function userWallet(answer = true, hasPasskey = true) {
   const keyPair = KeyPair.fromRandom("ed25519") as KeyPairEd25519;
   const publicKey = keyPair.getPublicKey();
   const accountId = Buffer.from(publicKey.data).toString("hex");
@@ -40,7 +39,7 @@ function userWallet(answer = true) {
     shown.push(lines);
     return Promise.resolve(answer);
   };
-  const signer = new OwnerSigner(new PrivyNearSigner(accountId, signRawHash), config, confirm);
+  const signer = new OwnerSigner(new PrivyNearSigner(accountId, signRawHash), config, confirm, () => hasPasskey);
   return { publicKey, accountId, signed, shown, signer };
 }
 
@@ -110,6 +109,14 @@ describe("signing with the user's account key", () => {
     const client = clientSigningThrough(wallet);
     await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow(SigningCancelledError);
     expect(wallet.shown).toHaveLength(1);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("signs nothing and shows no dialog while the account has no passkey", async () => {
+    const wallet = userWallet(true, false);
+    const client = clientSigningThrough(wallet);
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow("add a passkey");
+    expect(wallet.shown).toHaveLength(0);
     expect(wallet.signed).toHaveLength(0);
   });
 

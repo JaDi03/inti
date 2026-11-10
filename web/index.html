@@ -5,18 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Inti</title>
-    <script>
-      // Apply the theme before first paint (same key as src/theme.tsx) to avoid a light flash.
-      (function () {
-        var theme;
-        try { theme = localStorage.getItem("inti-theme"); } catch (e) {}
-        if (theme !== "light" && theme !== "dark") {
-          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
-        if (theme === "dark") document.documentElement.classList.add("dark");
-        document.documentElement.style.colorScheme = theme;
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>
