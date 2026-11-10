@@ -9,26 +9,28 @@ interface Props {
   address: string;
   config: LimitsConfig;
   getAccessToken: () => Promise<string | null>;
+  /** Hides the card once the user has read that Inti can trade. */
+  onDone: () => void;
 }
 
 /**
  * Asks once for the user's permission to let Inti trade on its own, inside the limits already
- * signed. Hidden while the user has no agent and once a grant is live.
+ * signed. The app shows it only while useGrantNeeded is true.
  */
-export function TradeGrantCard({ address, config, getAccessToken }: Props) {
-  const { signer, confirmDialog } = useOwnerSigner(address, config);
+/**
+ * True when the user has their agent but has not let Inti trade yet (or the permission expired).
+ * False until Inti's server answers, so nothing flashes on screen.
+ */
+export function useGrantNeeded(agentAccount: string | null, getAccessToken: () => Promise<string | null>): boolean {
   const [needed, setNeeded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [until, setUntil] = useState<string | null>(null);
-
   useEffect(() => {
+    if (!agentAccount) return setNeeded(false);
     let current = true;
     void (async () => {
       try {
         const token = await getAccessToken();
         const state = token ? await grantState(token) : null;
-        if (current) setNeeded(state?.status === "active" && state.grant === null && state.agentAccount === config.agentAccount);
+        if (current) setNeeded(state?.status === "active" && state.grant === null && state.agentAccount === agentAccount);
       } catch {
         // Without an answer the card stays hidden; the chat keeps working in practice mode.
       }
@@ -36,9 +38,15 @@ export function TradeGrantCard({ address, config, getAccessToken }: Props) {
     return () => {
       current = false;
     };
-  }, [getAccessToken, config.agentAccount]);
+  }, [agentAccount, getAccessToken]);
+  return needed;
+}
 
-  if (!needed && until === null) return null;
+export function TradeGrantCard({ address, config, getAccessToken, onDone }: Props) {
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [until, setUntil] = useState<string | null>(null);
 
   const allow = async () => {
     setBusy(true);
@@ -47,7 +55,6 @@ export function TradeGrantCard({ address, config, getAccessToken }: Props) {
       const token = await getAccessToken();
       if (!token) throw new Error("Your session expired. Sign in again and retry.");
       setUntil(await issueGrant({ accessToken: token, accountId: address, signer }));
-      setNeeded(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Inti could not be allowed to trade.");
     } finally {
@@ -87,6 +94,13 @@ export function TradeGrantCard({ address, config, getAccessToken }: Props) {
             {busy ? <Loader2 className="animate-spin" /> : null} Let Inti trade
           </Button>
         </>
+      )}
+      {until && (
+        <div className="flex justify-end">
+          <Button size="lg" className="rounded-xl px-5" onClick={onDone}>
+            Start chatting
+          </Button>
+        </div>
       )}
       {error && <p className="mt-3 break-words text-sm text-destructive">{error}</p>}
       {confirmDialog}

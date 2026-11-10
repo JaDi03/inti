@@ -8,7 +8,7 @@ import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
-import { TradeGrantCard } from "./agent/TradeGrantCard";
+import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
 import { AssetsPanel } from "./assets/AssetsPanel";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
@@ -108,6 +108,8 @@ export function App() {
   }, [limits.status, needsActivation]);
   const showActivation = address !== null && (needsActivation || (sawInactive && !activationDone && limits.status?.kind === "installed"));
   const [activating, setActivating] = useState(false);
+  const grantNeeded = useGrantNeeded(limits.status?.kind === "installed" ? limits.agentAccount : null, getAccessToken);
+  const [grantDone, setGrantDone] = useState(false);
 
   // Every user needs a NEAR wallet; create it once, without asking.
   useEffect(() => {
@@ -155,9 +157,9 @@ export function App() {
         onDone={() => setActivationDone(true)}
         onWorking={setActivating}
       />
-    ) : address && limits.setup.kind === "ready" && limits.status?.kind === "installed" && limits.agentAccount ? (
-      // After activation: one more signature lets Inti trade on its own; the card hides itself once given.
-      <TradeGrantCard address={address} config={limits.setup.config} getAccessToken={getAccessToken} />
+    ) : address && limits.setup.kind === "ready" && limits.status?.kind === "installed" && grantNeeded && !grantDone ? (
+      // After activation: one more signature lets Inti trade on its own.
+      <TradeGrantCard address={address} config={limits.setup.config} getAccessToken={getAccessToken} onDone={() => setGrantDone(true)} />
     ) : null;
 
   // The mascot "thinks" (antennas light up) whenever the app is working for the user.
