@@ -374,6 +374,30 @@ describe("how much NEAR activation asks for", () => {
   });
 });
 
+describe("adding NEAR for orders after activation", () => {
+  it("wraps the amount in one transaction to the token, shown in plain words before signing", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    await client.addForOrders(wallet.accountId, wallet.signer, 3n * 10n ** 23n);
+
+    expect(wallet.signed).toHaveLength(1);
+    expect(wallet.shown).toEqual([["Turn 0.3 NEAR into NEAR your agent can be funded from. It stays in your account."]]);
+  });
+
+  it("signs nothing when the user cancels", async () => {
+    const wallet = userWallet(false);
+    const client = clientSigningThrough(wallet);
+    await expect(client.addForOrders(wallet.accountId, wallet.signer, 10n ** 23n)).rejects.toThrow(SigningCancelledError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("leaves 0.05 NEAR free for network fees, and nothing to add below that", () => {
+    expect(LimitsClient.maxForOrders(10n ** 24n)).toBe(95n * 10n ** 22n);
+    expect(LimitsClient.maxForOrders(5n * 10n ** 22n)).toBe(0n);
+    expect(LimitsClient.maxForOrders(0n)).toBe(0n);
+  });
+});
+
 describe("the contract code the app installs", () => {
   it("the pinned hash is the hash of the shipped build", () => {
     expect(wasmSha256(expectedWasm)).toBe(SPENDING_LIMITS_WASM_SHA256);

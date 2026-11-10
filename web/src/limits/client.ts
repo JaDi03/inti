@@ -13,6 +13,8 @@ const NO_CODE = "11111111111111111111111111111111";
 const ACTIVATION_MARGIN = 10n ** 23n; // 0.1 NEAR
 /** Room for creating the user's agent; the Agent API asks about 0.0145 NEAR to store its rules. */
 export const AGENT_CREATION_RESERVE = 2n * 10n ** 22n; // 0.02 NEAR
+/** NEAR left in the account when adding NEAR for orders, so the user and Inti's key can still pay network fees. */
+export const FEE_RESERVE = 5n * 10n ** 22n; // 0.05 NEAR
 
 export interface SpendLimit {
   perOrder: bigint;
@@ -191,6 +193,20 @@ export class LimitsClient {
       actions: [...(intiConnected ? [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey))] : []), actions.deployContract(EMPTY_CONTRACT)],
     });
     return plan;
+  }
+
+  /** Most NEAR the user can add for orders: the available balance minus the fee reserve. */
+  static maxForOrders(available: bigint): bigint {
+    return available > FEE_RESERVE ? available - FEE_RESERVE : 0n;
+  }
+
+  /** Wraps `amount` more NEAR so the agent can be funded from it. It stays in the user's account. */
+  async addForOrders(accountId: string, signer: Signer, amount: bigint): Promise<string> {
+    const res = await this.account(accountId, signer).signAndSendTransaction({
+      receiverId: this.config.token.id,
+      actions: [actions.functionCall("near_deposit", {}, 10n * TGAS, amount)],
+    });
+    return res.transaction.hash;
   }
 
   /** Signs and sends the transactions in order, stopping at the first failure. Returns their hashes. */
