@@ -1,4 +1,4 @@
-import { useMfaEnrollment, usePrivy } from "@privy-io/react-auth";
+import { useLinkWithPasskey, useMfaEnrollment, usePrivy, useUser, type User } from "@privy-io/react-auth";
 import { Fingerprint, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,16 @@ export function useHasPasskey(): boolean {
  * Asks the user to add a passkey. Once enrolled, Privy requires it before the wallet signs,
  * so code running in the page alone cannot sign. Inti does not sign without one.
  */
+/** Credential ids of the passkeys linked to the user. */
+function passkeyIds(user: User | null): string[] {
+  return (user?.linkedAccounts ?? []).flatMap((a) => (a.type === "passkey" ? [a.credentialId] : []));
+}
+
 export function PasskeyProtection() {
   const hasPasskey = useHasPasskey();
-  const { initEnrollmentWithPasskey } = useMfaEnrollment();
+  const { user, refreshUser } = useUser();
+  const { linkWithPasskey } = useLinkWithPasskey();
+  const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +38,17 @@ export function PasskeyProtection() {
     setBusy(true);
     setError(null);
     try {
+      // Privy enrolls a passkey as a second factor in three steps: link one to the account, start the
+      // enrollment, then confirm it with the linked passkeys (docs.privy.io, MFA enrollment with passkeys).
+      let ids = passkeyIds(user);
+      if (ids.length === 0) {
+        await linkWithPasskey({ name: "Inti" });
+        ids = passkeyIds(await refreshUser());
+      }
+      if (ids.length === 0) throw new Error("no passkey linked");
       await initEnrollmentWithPasskey();
+      await submitEnrollmentWithPasskey({ credentialIds: ids });
+      await refreshUser();
     } catch {
       setError("The passkey was not added. Try again.");
     } finally {
