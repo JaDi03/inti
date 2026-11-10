@@ -5,20 +5,29 @@ import type { Policy } from "@near-intents-agent-api/sdk";
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { emptySpendState, type SpendState } from "../core/guard.js";
-import { runCycle } from "../core/loop.js";
+import { runCycle, type Toolset } from "../core/loop.js";
 import type { PricedToken, SimulatedPortfolio } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import { LIMITS } from "./config.js";
+import { newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
+import type { ChainPort } from "./orders.js";
 import { DailyQuota } from "./quota.js";
+import { realTools } from "./realTools.js";
+import type { Trading } from "./trading.js";
 
 export interface AppDeps {
   verify: TokenVerifier;
   brain: Brain;
   tokens: () => Promise<PricedToken[]>;
   agents: AgentAccounts;
+  grants: GrantStore;
+  /** Real orders. Without them every chat runs on the simulated portfolio. */
+  trading?: Trading;
+  chain?: ChainPort;
+  now?: () => number;
   policy: () => Policy;
   newPortfolio: (tokens: readonly PricedToken[]) => SimulatedPortfolio;
   allowedOrigins: string[];
@@ -55,6 +64,8 @@ function publicEvent(e: AgentEvent): Record<string, string> {
       return { type: e.type, from: e.from, amountIn: e.amountIn, code: e.code, reason: e.reason };
     case "question":
       return { type: e.type, text: e.text };
+    case "limit_order_placed":
+      return { type: e.type, to: e.to, usd: e.usd, priceUsd: e.priceUsd, days: e.days };
   }
 }
 
@@ -74,6 +85,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const agentQuota = deps.agentQuota ?? new DailyQuota(LIMITS.agentsPerUserPerDay, LIMITS.agentsPerDayTotal);
   // Agent creations waiting for a signature, and the user each one belongs to.
   const pendingAgents = new Map<string, string>();
+  const now = deps.now ?? Date.now;
+  const grantQuota = new DailyQuota(LIMITS.grantsPerUserPerDay, LIMITS.grantsPerDayTotal);
+  // Grants waiting for a signature: the user, and the token that only the server ever holds.
+  const pendingGrants = new Map<string, { userId: string; record: GrantRecord }>();
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -122,7 +137,58 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const userId = await signedInUser(req, reply);
     if (userId === null) return reply;
     try {
-      return await deps.agents.find(userId);
+      const agent = await deps.agents.find(userId);
+      if (agent.status !== "active") return agent;
+      // The token never leaves the server; the user sees only until when Inti may act.
+      const grant = usableGrant(deps.grants.get(userId), now());
+      const sameAgent = grant?.agentId === agent.agentId;
+      return { ...agent, grant: sameAgent ? { expiresAt: grant.expiresAt } : null };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // The document the user's wallet signs so Inti's server may trade for their agent.
+  app.post("/api/agent/grant/prepare", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    if (req.body !== undefined && req.body !== null && Object.keys(req.body).length > 0) return reply.code(400).send({ error: "bad_request" });
+    try {
+      const agent = await deps.agents.find(userId);
+      if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
+      const allowed = grantQuota.take(userId);
+      if (allowed !== "ok") {
+        req.log.warn({ userId, cap: allowed }, "grant_quota_refused");
+        return reply.code(429).send({ error: "rate_limited" });
+      }
+      const { token, expiresAt, body } = newGrantRequest(agent.agentId, now());
+      const prepared = await deps.agents.prepareGrant(body);
+      if (pendingGrants.size >= LIMITS.pendingGrantsInMemory) {
+        const oldest = pendingGrants.keys().next().value;
+        if (oldest !== undefined) pendingGrants.delete(oldest);
+      }
+      pendingGrants.set(prepared.correlationId, { userId, record: { agentId: agent.agentId, token, expiresAt } });
+      req.log.info({ userId }, "grant_prepared");
+      return { status: "pending_signature", correlationId: prepared.correlationId, intent: prepared.intent, preview: prepared.preview, expiresAt };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Sends the signed grant. Only the user who asked for it may send it; the token is kept only once it is live.
+  app.post("/api/agent/grant/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = submitAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const pending = pendingGrants.get(body.data.correlationId);
+    if (pending?.userId !== userId) return reply.code(404).send({ error: "not_found" });
+    try {
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "grant_issue");
+      if (outcome === "success") await deps.grants.put(userId, pending.record);
+      if (outcome !== "processing") pendingGrants.delete(body.data.correlationId);
+      req.log.info({ userId, outcome }, "grant_submitted");
+      return outcome === "success" ? { status: outcome, expiresAt: pending.record.expiresAt } : { status: outcome };
     } catch (error) {
       return agentFailure(req, reply, error);
     }
@@ -172,6 +238,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
   });
 
+  /** The real-money tools for this user, or null when they have no agent, no live grant, or trading is off. */
+  const realToolsFor = async (userId: string): Promise<Toolset | null> => {
+    if (!deps.trading || !deps.chain) return null;
+    const agent = await deps.agents.find(userId);
+    if (agent.status !== "active") return null;
+    const grant = usableGrant(deps.grants.get(userId), now());
+    if (grant?.agentId !== agent.agentId) return null;
+    return realTools({ userId, owner: agent.ownerAccount, trading: deps.trading, chain: deps.chain, tokens: deps.tokens });
+  };
+
   app.post("/api/chat", async (req, reply) => {
     const token = bearerToken(req.headers.authorization);
     let userId: string;
@@ -214,6 +290,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       }
       users.delete(userId);
       users.set(userId, state);
+      // Real money only for a user with their own agent and a live grant for it; everyone else gets the simulation.
+      const tools = await realToolsFor(userId);
       const result = await runCycle({
         brain: deps.brain,
         goal: body.data.message,
@@ -221,10 +299,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         portfolio: state.portfolio,
         spend: state.spend,
         mode: "execute",
+        ...(tools ? { tools } : {}),
       });
       for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
       return {
-        simulated: true,
+        simulated: tools === null,
         report: result.report,
         stopReason: result.stopReason,
         events: result.events.map(publicEvent),

@@ -31,6 +31,8 @@ interface Props {
   userInitials: string;
   /** The agent ran on a simulated portfolio: a small label under the bubble says so. */
   simulated?: boolean;
+  /** The agent placed an order that waits for a price: its money sits with the agent until then. */
+  orderWaiting?: boolean;
 }
 
 /** Inti's bubble with three moving dots while the agent works, like mobile chat apps. */
@@ -47,7 +49,7 @@ export function TypingIndicator({ firstOfTurn }: { firstOfTurn: boolean }) {
   );
 }
 
-export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated = false }: Props) {
+export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated = false, orderWaiting = false }: Props) {
   const mine = from === "user";
   return (
     <li className={cn("flex max-w-full items-start gap-3.5", mine ? "flex-row-reverse self-end" : "self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")}>
@@ -64,6 +66,11 @@ export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated =
           {text}
         </div>
         {simulated && <span className="mt-1 px-2 text-xs text-muted-foreground">Simulated portfolio, no real funds moved</span>}
+        {orderWaiting && (
+          <span className="mt-1 px-2 text-xs text-muted-foreground">
+            While this order waits, its money sits with your agent. It is the only time your money is not in your wallet. When the order fills, what it buys goes to your wallet; if it expires, the money comes back.
+          </span>
+        )}
       </div>
     </li>
   );

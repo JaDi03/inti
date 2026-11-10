@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { Coins, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,14 @@ import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
+import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
+import { AssetsPanel } from "./assets/AssetsPanel";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
-type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean };
+type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean; orderWaiting?: boolean };
 
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
 const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 4 steps, right here.";
@@ -61,6 +63,7 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
   const creating = useRef(false);
@@ -105,6 +108,8 @@ export function App() {
   }, [limits.status, needsActivation]);
   const showActivation = address !== null && (needsActivation || (sawInactive && !activationDone && limits.status?.kind === "installed"));
   const [activating, setActivating] = useState(false);
+  const grantNeeded = useGrantNeeded(limits.status?.kind === "installed" ? limits.agentAccount : null, getAccessToken);
+  const [grantDone, setGrantDone] = useState(false);
 
   // Every user needs a NEAR wallet; create it once, without asking.
   useEffect(() => {
@@ -119,8 +124,8 @@ export function App() {
   if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Loading...</main>;
   if (!authenticated || !user) return <Welcome onLogin={login} />;
 
-  const addMessage = (from: Message["from"], text: string, simulated = false) =>
-    setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated }]);
+  const addMessage = (from: Message["from"], text: string, simulated = false, orderWaiting = false) =>
+    setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated, orderWaiting }]);
 
   const send = async (text: string) => {
     addMessage("user", text);
@@ -131,7 +136,7 @@ export function App() {
       const token = await getAccessToken();
       if (!token) throw new AgentError("Your session expired. Sign in again and retry.");
       const reply = await askAgent(token, text);
-      addMessage("inti", reply.report || "Done.", reply.simulated);
+      addMessage("inti", reply.report || "Done.", reply.simulated, reply.events.some((e) => e.type === "limit_order_placed"));
     } catch (error) {
       addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
     } finally {
@@ -152,6 +157,9 @@ export function App() {
         onDone={() => setActivationDone(true)}
         onWorking={setActivating}
       />
+    ) : address && limits.setup.kind === "ready" && limits.status?.kind === "installed" && grantNeeded && !grantDone ? (
+      // After activation: one more signature lets Inti trade on its own.
+      <TradeGrantCard address={address} config={limits.setup.config} getAccessToken={getAccessToken} onDone={() => setGrantDone(true)} />
     ) : null;
 
   // The mascot "thinks" (antennas light up) whenever the app is working for the user.
@@ -172,6 +180,11 @@ export function App() {
           {address && (
             <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setLimitsOpen(true)}>
               <ShieldCheck />
+            </Button>
+          )}
+          {address && (
+            <Button variant="ghost" size="icon" aria-label="Assets" title="Assets" onClick={() => setAssetsOpen(true)}>
+              <Coins />
             </Button>
           )}
           {address && (
@@ -240,6 +253,7 @@ export function App() {
                 firstOfTurn={i === 0 || messages[i - 1]?.from !== m.from}
                 userInitials={userInitials}
                 simulated={m.simulated}
+                orderWaiting={m.orderWaiting}
               />
             ))}
             {thinking && <TypingIndicator firstOfTurn={messages.at(-1)?.from !== "inti"} />}
@@ -254,6 +268,7 @@ export function App() {
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
       {limitsOpen && address && <SpendingLimitsPanel address={address} onClose={() => setLimitsOpen(false)} />}
+      {assetsOpen && address && <AssetsPanel address={address} onClose={() => setAssetsOpen(false)} />}
     </div>
   );
 }

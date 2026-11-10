@@ -7,7 +7,7 @@ export interface AgentOwner {
   publicKey: string;
 }
 
-export type AgentLookup = { status: "none" } | { status: "active"; agentAccount: string; ownerAccount: string };
+export type AgentLookup = { status: "none" } | { status: "active"; agentId: string; agentAccount: string; ownerAccount: string };
 
 /** What the owner's wallet must sign to create the agent, as the Agent API returned it. */
 export interface PreparedAgent {
@@ -28,8 +28,13 @@ export class AgentsUnavailableError extends Error {
 export interface AgentAccounts {
   find(userId: string): Promise<AgentLookup>;
   prepare(userId: string, owner: AgentOwner): Promise<PreparedAgent>;
-  submit(correlationId: string, signedData: unknown): Promise<AgentOutcome>;
+  submit(correlationId: string, signedData: unknown, type?: OwnerIntentType): Promise<AgentOutcome>;
+  /** Asks for the document the owner signs to let Inti's server act for their agent. */
+  prepareGrant(body: Record<string, string>): Promise<{ correlationId: string; intent: unknown; preview: { summary: string } }>;
 }
+
+/** The owner-signed actions Inti sends. */
+export type OwnerIntentType = "agent_create" | "grant_issue";
 
 /** Longest the server waits for one Agent API answer; a status read may hold for 30 s by design. */
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -69,7 +74,7 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
         const page = await request<{ data: AgentView[] }>(`/v1/agents?external_user_id=${encodeURIComponent(userId)}`);
         const active = page.data.find((a) => a.status === "ACTIVE" && a.wallet && a.owner_account);
         if (!active?.wallet || !active.owner_account) return { status: "none" };
-        return { status: "active", agentAccount: active.wallet.near_account_id, ownerAccount: active.owner_account.account_id };
+        return { status: "active", agentId: active.id, agentAccount: active.wallet.near_account_id, ownerAccount: active.owner_account.account_id };
       } catch (error) {
         throw unavailable(error);
       }
@@ -88,9 +93,17 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
         throw unavailable(error);
       }
     },
-    async submit(correlationId, signedData) {
+    async prepareGrant(body) {
       try {
-        await request("/v1/submit-intent", { type: "agent_create", correlation_id: correlationId, signed_data: signedData });
+        const res = await request<{ correlation_id: string; intent: unknown; preview: { summary: string } }>("/v1/generate-intent", body);
+        return { correlationId: res.correlation_id, intent: res.intent, preview: { summary: res.preview.summary } };
+      } catch (error) {
+        throw unavailable(error);
+      }
+    },
+    async submit(correlationId, signedData, type = "agent_create") {
+      try {
+        await request("/v1/submit-intent", { type, correlation_id: correlationId, signed_data: signedData });
         const status = await request<StatusResponse>(`/v1/status?correlation_id=${encodeURIComponent(correlationId)}&wait_ms=${STATUS_WAIT_MS}`);
         if (status.status === "SUCCESS") return "success";
         return status.status === "FAILED" || status.status === "REFUNDED" ? "failed" : "processing";

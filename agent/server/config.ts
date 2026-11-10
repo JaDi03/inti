@@ -24,6 +24,14 @@ export const LIMITS = {
   agentsPerDayTotal: 80,
   /** Creations waiting for the owner's signature that the server remembers; the oldest is dropped first. */
   pendingAgentsInMemory: 2000,
+  /** Grant documents one user may ask for per day; a grant normally lasts 90 days. */
+  grantsPerUserPerDay: 5,
+  /** Grant documents per day for everyone. */
+  grantsPerDayTotal: 400,
+  /** Grants waiting for the owner's signature that the server remembers; the oldest is dropped first. */
+  pendingGrantsInMemory: 2000,
+  /** How often every agent is swept back to its owner's wallet. */
+  sweepEveryMs: 5 * 60_000,
 } as const;
 
 const envSchema = z.object({
@@ -42,6 +50,13 @@ const envSchema = z.object({
   SERVER_TRUSTED_PROXY: z.string().default(""),
   /** Kill switch: "false" stops every agent cycle without a deploy. */
   SERVER_AGENT_ENABLED: z.enum(["true", "false"]).default("true"),
+  /** Where users' trading grants are kept, each one encrypted. */
+  SERVER_GRANT_FILE: z.string().min(1).default("./grants.json"),
+  /** 32 random bytes in base64 that encrypt the grants. */
+  SERVER_GRANT_KEY: z.base64().refine((v) => Buffer.from(v, "base64").length === 32),
+  /** JSON file with Inti's function-call key ({ publicKey, secretKey }); it can only call fund_agent. */
+  SERVER_INTI_KEY_FILE: z.string().min(1),
+  SERVER_NEAR_RPC_URL: z.url().default("https://free.rpc.fastnear.com"),
 });
 
 export interface ServerConfig {
@@ -55,6 +70,10 @@ export interface ServerConfig {
   port: number;
   trustedProxy: string | null;
   agentEnabled: boolean;
+  grantFile: string;
+  grantKey: string;
+  intiKeyFile: string;
+  nearRpcUrl: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -81,5 +100,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     port: e.SERVER_PORT,
     trustedProxy: e.SERVER_TRUSTED_PROXY || null,
     agentEnabled: e.SERVER_AGENT_ENABLED === "true",
+    grantFile: e.SERVER_GRANT_FILE,
+    grantKey: e.SERVER_GRANT_KEY,
+    intiKeyFile: e.SERVER_INTI_KEY_FILE,
+    nearRpcUrl: e.SERVER_NEAR_RPC_URL,
   };
 }

@@ -27,6 +27,7 @@
     "@near-intents-agent-api/sdk": "0.7.3",
     "fastify": "5.12.7",
     "jose": "6.2.13",
+    "near-api-js": "7.4.0",
     "openai": "7.43.0",
     "zod": "^4.6.7"
   },
