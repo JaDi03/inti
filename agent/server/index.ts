@@ -6,6 +6,7 @@
 import { NearAiBrain } from "../brains/nearai.js";
 import { demoPolicy, demoPortfolio, fetchTokens } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
+import { agentApiAccounts } from "./agents.js";
 import { buildApp } from "./app.js";
 import { privyVerifier } from "./auth.js";
 import { LIMITS, loadConfig } from "./config.js";
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
     verify: await privyVerifier(config.privyAppId, config.privyVerificationKey),
     brain: NearAiBrain.fromApiKey(config.nearAiApiKey),
     tokens,
+    agents: agentApiAccounts(config.agentApiKey, config.agentApiUrl),
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
     allowedOrigins: config.allowedOrigins,

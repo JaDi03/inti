@@ -13,8 +13,18 @@ import type { LimitsConfig } from "./config";
 /** Most a token may charge to register the user (wrap.near asks 0.00125 NEAR). */
 const MAX_REGISTRATION_YOCTO = 10n ** 22n; // 0.01 NEAR
 const NEAR_DECIMALS = 24;
+/** Most the one-time storage of an agent's rules may cost. */
+const MAX_AGENT_RULES_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR
+const AGENT_RULES_KEYS = ["locked", "version", "valid_until", "wallet_pubkey", "encrypted_data", "wallet_signature", "agent_policy_hash", "storage_refund_to"] as const;
 
 export class RefusedSigningError extends Error {}
+
+/** A request the user signs for someone else to send (the Agent API pays its network fee). */
+export interface OwnerDelegate {
+  senderId: string;
+  receiverId: string;
+  actions: readonly Action[];
+}
 
 export interface OwnerTransaction {
   signerId: string;
@@ -63,7 +73,8 @@ function describeOwnAccountAction(action: Action, config: LimitsConfig, accountI
     const { methodName, args, deposit } = action.functionCall;
     if (methodName === "new") {
       const a = argsOf(args, methodName, ["intents", "agent"]);
-      if (a.intents !== config.intentsAccount || a.agent !== config.agentAccount || deposit !== 0n) refuse("the setup names another agent or verifier.");
+      const ownAgent = config.agentAccount !== null && a.agent === config.agentAccount;
+      if (a.intents !== config.intentsAccount || !ownAgent || deposit !== 0n) refuse("the setup names another agent or verifier.");
       return `Set up Spending Limits so orders can only go to your agent (${config.agentAccount}).`;
     }
     if (methodName === "set_limit") {
@@ -114,6 +125,37 @@ function describeTokenAction(action: Action, config: LimitsConfig, accountId: st
     return `Turn ${near(call.deposit)} into ${config.token.symbol} your agent can be funded from. It stays in your account.`;
   }
   refuse(`the method ${call.methodName} on the token is not one Inti uses.`);
+}
+
+/** The one call that creates an agent: storing its rules, unlocked, for a small one-time cost. */
+function agentCreation(delegate: OwnerDelegate, config: LimitsConfig): { agentAccount: string; cost: bigint } {
+  if (delegate.receiverId !== config.agentRulesContract) refuse(`the request is addressed to ${delegate.receiverId}.`);
+  const call = delegate.actions.length === 1 ? delegate.actions[0]?.functionCall : undefined;
+  if (!call) refuse("creating an agent is exactly one contract call.");
+  if (call.methodName !== "store_wallet_policy") refuse(`the method ${call.methodName} is not one Inti uses.`);
+  const a = argsOf(call.args, call.methodName, AGENT_RULES_KEYS);
+  if (a.locked !== false) refuse("the agent's rules would be locked.");
+  if (call.deposit > MAX_AGENT_RULES_YOCTO) refuse("creating the agent costs more than expected.");
+  const key = /^ed25519:([0-9a-f]{64})$/.exec(typeof a.wallet_pubkey === "string" ? a.wallet_pubkey : "");
+  if (!key?.[1]) refuse("the agent's key is not valid.");
+  return { agentAccount: key[1], cost: call.deposit };
+}
+
+/** The agent account a creation request is for: the wallet key named in the rules it stores. */
+export function agentAccountOf(delegate: OwnerDelegate, config: LimitsConfig): string {
+  return agentCreation(delegate, config).agentAccount;
+}
+
+/**
+ * Plain-language lines for the only request the app asks the user to sign for someone else to
+ * send: creating their own agent. Anything else is refused.
+ */
+export function describeOwnerDelegate(delegate: OwnerDelegate, config: LimitsConfig): string[] {
+  const { agentAccount, cost } = agentCreation(delegate, config);
+  return [
+    `Create your own agent on NEAR Intents (${agentAccount}).`,
+    `Store its rules, encrypted, on ${config.agentRulesContract} (one-time cost ${near(cost)}).`,
+  ];
 }
 
 /**

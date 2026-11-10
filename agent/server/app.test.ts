@@ -5,6 +5,7 @@ import { ScriptedBrain } from "../brains/scripted.js";
 import { demoPolicy, demoPortfolio } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import type { Brain } from "../core/types.js";
+import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
 import { DailyQuota } from "./quota.js";
@@ -41,11 +42,31 @@ function token(opts: { key?: CryptoKey; sub?: string; aud?: string; iss?: string
 
 const reportOnly = (): Brain => new ScriptedBrain(Array.from({ length: 50 }, () => () => ({ text: "Done.", stop: "end" as const, toolCalls: [] })));
 
+const OWNER = { accountId: "ab".repeat(32), publicKey: `ed25519:${"1".repeat(44)}` };
+
+/** An Agent API stand-in that records what the server asked it for. */
+function fakeAgents(existing: AgentLookup = { status: "none" }) {
+  const calls: { prepared: string[]; submitted: string[] } = { prepared: [], submitted: [] };
+  const agents: AgentAccounts = {
+    find: () => Promise.resolve(existing),
+    prepare: (userId, owner) => {
+      calls.prepared.push(userId);
+      return Promise.resolve({ correlationId: `intent_${calls.prepared.length}`, intent: { standard: "nep366", owner: owner.accountId }, preview: { summary: "s", policy: {} } });
+    },
+    submit: (correlationId) => {
+      calls.submitted.push(correlationId);
+      return Promise.resolve("success");
+    },
+  };
+  return { agents, calls };
+}
+
 async function app(overrides: Partial<AppDeps> = {}) {
   return buildApp({
     verify,
     brain: reportOnly(),
     tokens: () => Promise.resolve(tokens),
+    agents: fakeAgents().agents,
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
     allowedOrigins: [ORIGIN],
@@ -177,6 +198,83 @@ describe("POST /api/chat", () => {
     const res = await chat(await app({ brain: failing }), `Bearer ${await token()}`, { message: "hi" });
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe(JSON.stringify({ error: "agent_unavailable" }));
+  });
+});
+
+describe("the user's own agent", () => {
+  const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
+    server.inject({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json", origin: ORIGIN, ...(auth ? { authorization: auth } : {}) },
+      payload: JSON.stringify(payload),
+    });
+
+  it("prepares the creation for the signed-in user and lets only that user submit it", async () => {
+    const { agents, calls } = fakeAgents();
+    const server = await app({ agents });
+    const alice = `Bearer ${await token()}`;
+    const bob = `Bearer ${await token({ sub: "did:privy:bob" })}`;
+
+    const prepared = await post(server, "/api/agent/prepare", alice, OWNER);
+    expect(prepared.statusCode).toBe(200);
+    expect(prepared.json()).toMatchObject({ status: "pending_signature", correlationId: "intent_1" });
+    expect(calls.prepared).toEqual(["did:privy:alice"]);
+
+    const stolen = await post(server, "/api/agent/submit", bob, { correlationId: "intent_1", signedData: {} });
+    expect(stolen.statusCode).toBe(404);
+    expect(calls.submitted).toEqual([]);
+
+    const submitted = await post(server, "/api/agent/submit", alice, { correlationId: "intent_1", signedData: { standard: "nep366" } });
+    expect(submitted.json()).toEqual({ status: "success" });
+    expect(calls.submitted).toEqual(["intent_1"]);
+  });
+
+  it("returns the agent a user already has instead of creating another", async () => {
+    const existing: AgentLookup = { status: "active", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
+    const { agents, calls } = fakeAgents(existing);
+    const server = await app({ agents });
+    const auth = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/prepare", auth, OWNER)).json()).toEqual(existing);
+    expect(calls.prepared).toEqual([]);
+    const read = await server.inject({ method: "GET", url: "/api/agent", headers: { origin: ORIGIN, authorization: auth } });
+    expect(read.json()).toEqual(existing);
+  });
+
+  it("refuses requests without a token, with a malformed owner or with unknown fields", async () => {
+    const { agents, calls } = fakeAgents();
+    const server = await app({ agents });
+    const auth = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/prepare", null, OWNER)).statusCode).toBe(401);
+    expect((await server.inject({ method: "GET", url: "/api/agent" })).statusCode).toBe(401);
+    expect((await post(server, "/api/agent/prepare", auth, { ...OWNER, accountId: "alice.near" })).statusCode).toBe(400);
+    expect((await post(server, "/api/agent/prepare", auth, { ...OWNER, publicKey: "secp256k1:abc" })).statusCode).toBe(400);
+    expect((await post(server, "/api/agent/prepare", auth, { ...OWNER, extra: 1 })).statusCode).toBe(400);
+    expect((await post(server, "/api/agent/submit", auth, { correlationId: "intent_9", signedData: {} })).statusCode).toBe(404);
+    expect(calls.prepared).toEqual([]);
+  });
+
+  it("stops at the per-user daily cap of creations", async () => {
+    const { agents, calls } = fakeAgents();
+    const server = await app({ agents, agentQuota: new DailyQuota(1, 10) });
+    const auth = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/prepare", auth, OWNER)).statusCode).toBe(200);
+    const second = await post(server, "/api/agent/prepare", auth, OWNER);
+    expect(second.statusCode).toBe(429);
+    expect(second.json()).toEqual({ error: "agents_limit" });
+    expect(calls.prepared).toHaveLength(1);
+  });
+
+  it("hides Agent API failures behind one short code", async () => {
+    const agents: AgentAccounts = {
+      find: () => Promise.reject(new AgentsUnavailableError("agents_unavailable")),
+      prepare: () => Promise.reject(new Error("unused")),
+      submit: () => Promise.reject(new Error("unused")),
+    };
+    const server = await app({ agents });
+    const res = await post(server, "/api/agent/prepare", `Bearer ${await token()}`, OWNER);
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ error: "agents_unavailable" });
   });
 });
 

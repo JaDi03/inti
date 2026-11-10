@@ -118,12 +118,13 @@ export class LimitsClient {
    */
   async activate(accountId: string, signer: Signer, wasm: Uint8Array, limit: SpendLimit, fundAmount: bigint): Promise<string[]> {
     const account = this.account(accountId, signer);
-    const { token } = this.config;
+    const { token, agentAccount } = this.config;
+    if (agentAccount === null) throw new Error("Create your agent first.");
     const install = await account.signAndSendTransaction({
       receiverId: accountId,
       actions: [
         actions.deployContract(wasm),
-        actions.functionCall("new", { intents: this.config.intentsAccount, agent: this.config.agentAccount }, 30n * TGAS, 0n),
+        actions.functionCall("new", { intents: this.config.intentsAccount, agent: agentAccount }, 30n * TGAS, 0n),
         actions.functionCall("set_limit", limitArgs(token.id, limit), 30n * TGAS, 1n),
         this.intiKeyAction(accountId),
       ],

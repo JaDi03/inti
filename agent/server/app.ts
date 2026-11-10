@@ -2,13 +2,14 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import type { Policy } from "@near-intents-agent-api/sdk";
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { emptySpendState, type SpendState } from "../core/guard.js";
 import { runCycle } from "../core/loop.js";
 import type { PricedToken, SimulatedPortfolio } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
+import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import { LIMITS } from "./config.js";
 import { DailyQuota } from "./quota.js";
@@ -17,12 +18,14 @@ export interface AppDeps {
   verify: TokenVerifier;
   brain: Brain;
   tokens: () => Promise<PricedToken[]>;
+  agents: AgentAccounts;
   policy: () => Policy;
   newPortfolio: (tokens: readonly PricedToken[]) => SimulatedPortfolio;
   allowedOrigins: string[];
   agentEnabled: boolean;
   trustedProxy: string | null;
   quota?: DailyQuota;
+  agentQuota?: DailyQuota;
   logger?: boolean;
 }
 
@@ -32,6 +35,15 @@ interface UserState {
 }
 
 const chatBody = z.strictObject({ message: z.string().trim().min(1).max(LIMITS.messageChars) });
+/** The owner is the user's implicit NEAR account and its ed25519 key. */
+const prepareAgentBody = z.strictObject({
+  accountId: z.string().regex(/^[0-9a-f]{64}$/),
+  publicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/),
+});
+const submitAgentBody = z.strictObject({
+  correlationId: z.string().min(1).max(128),
+  signedData: z.record(z.string(), z.unknown()),
+});
 
 /** Only these fields leave the server, whatever the event holds. */
 function publicEvent(e: AgentEvent): Record<string, string> {
@@ -47,8 +59,8 @@ function publicEvent(e: AgentEvent): Record<string, string> {
 }
 
 /**
- * The agent HTTP API. One route that matters: POST /api/chat runs one agent cycle
- * for the signed-in Privy user on their own simulated portfolio.
+ * The agent HTTP API. POST /api/chat runs one agent cycle for the signed-in Privy user on
+ * their own simulated portfolio; the /api/agent routes create that user's own agent.
  */
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
@@ -59,6 +71,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const quota = deps.quota ?? new DailyQuota(LIMITS.cyclesPerUserPerDay, LIMITS.cyclesPerDayTotal);
   const users = new Map<string, UserState>();
   const busy = new Set<string>();
+  const agentQuota = deps.agentQuota ?? new DailyQuota(LIMITS.agentsPerUserPerDay, LIMITS.agentsPerDayTotal);
+  // Agent creations waiting for a signature, and the user each one belongs to.
+  const pendingAgents = new Map<string, string>();
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -83,6 +98,79 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   app.get("/health", async () => ({ ok: true }));
+
+  /** The signed-in Privy user, or null after answering 401. */
+  const signedInUser = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
+    const token = bearerToken(req.headers.authorization);
+    try {
+      if (!token) throw new Error("no token");
+      return await deps.verify(token);
+    } catch {
+      req.log.warn("auth_failed");
+      void reply.code(401).send({ error: "unauthorized" });
+      return null;
+    }
+  };
+  const agentFailure = (req: FastifyRequest, reply: FastifyReply, error: unknown) => {
+    const code = error instanceof AgentsUnavailableError ? error.code : "agents_unavailable";
+    req.log.error({ code }, "agent_api_failed");
+    return reply.code(code === "agents_limit" ? 429 : 502).send({ error: code });
+  };
+
+  // The user's own agent, if they have one. The id comes from the token, never from the request.
+  app.get("/api/agent", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    try {
+      return await deps.agents.find(userId);
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Asks the Agent API for the document the user's wallet signs to create their agent.
+  app.post("/api/agent/prepare", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = prepareAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      const existing = await deps.agents.find(userId);
+      if (existing.status === "active") return existing;
+      const allowed = agentQuota.take(userId);
+      if (allowed !== "ok") {
+        req.log.warn({ userId, cap: allowed }, "agent_quota_refused");
+        return reply.code(429).send({ error: "agents_limit" });
+      }
+      const prepared = await deps.agents.prepare(userId, body.data);
+      if (pendingAgents.size >= LIMITS.pendingAgentsInMemory) {
+        const oldest = pendingAgents.keys().next().value;
+        if (oldest !== undefined) pendingAgents.delete(oldest);
+      }
+      pendingAgents.set(prepared.correlationId, userId);
+      req.log.info({ userId }, "agent_prepared");
+      return { status: "pending_signature", ...prepared };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Sends the user's signature to the Agent API. Only the user who asked for the document may send it.
+  app.post("/api/agent/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = submitAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (pendingAgents.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
+    try {
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData);
+      if (outcome !== "processing") pendingAgents.delete(body.data.correlationId);
+      req.log.info({ userId, outcome }, "agent_submitted");
+      return { status: outcome };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
 
   app.post("/api/chat", async (req, reply) => {
     const token = bearerToken(req.headers.authorization);

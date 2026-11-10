@@ -16,6 +16,14 @@ export const LIMITS = {
   usersInMemory: 1000,
   /** Live token prices are re-read at most this often. */
   tokensTtlMs: 60_000,
+  /** A signed agent creation carries the encrypted rules, so it needs a larger body than a chat message. */
+  agentBodyBytes: 32_768,
+  /** Agent creations one user may start per day (each one that is not signed is left pending upstream). */
+  agentsPerUserPerDay: 3,
+  /** Agent creations per day for everyone; the Agent API allows 100 per partner (docs: network-and-quotas). */
+  agentsPerDayTotal: 80,
+  /** Creations waiting for the owner's signature that the server remembers; the oldest is dropped first. */
+  pendingAgentsInMemory: 2000,
 } as const;
 
 const envSchema = z.object({
@@ -23,6 +31,8 @@ const envSchema = z.object({
   /** Public key from the Privy dashboard (App settings > Basics > Verify with key instead), PEM. */
   PRIVY_VERIFICATION_KEY: z.string().includes("BEGIN PUBLIC KEY"),
   NEAR_AI_API_KEY: z.string().min(1),
+  /** Partner key of the NEAR Intents Agent API. It can create agents, never move their funds. */
+  NEAR_INTENTS_AGENT_API_KEY: z.string().min(1),
   NEAR_INTENTS_AGENT_API_URL: z.url().default(DEFAULT_AGENT_API_URL),
   /** Exact origins allowed to call the API, comma separated (e.g. https://hellointi.xyz). */
   SERVER_ALLOWED_ORIGINS: z.string().min(1),
@@ -38,6 +48,7 @@ export interface ServerConfig {
   privyAppId: string;
   privyVerificationKey: string;
   nearAiApiKey: string;
+  agentApiKey: string;
   agentApiUrl: string;
   allowedOrigins: string[];
   host: string;
@@ -63,6 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     // .env files keep the PEM on one line with literal \n.
     privyVerificationKey: e.PRIVY_VERIFICATION_KEY.replace(/\\n/g, "\n"),
     nearAiApiKey: e.NEAR_AI_API_KEY,
+    agentApiKey: e.NEAR_INTENTS_AGENT_API_KEY,
     agentApiUrl: e.NEAR_INTENTS_AGENT_API_URL,
     allowedOrigins: origins,
     host: e.SERVER_HOST,
