@@ -10,6 +10,8 @@ const YOCTO_PER_BYTE = 10n ** 19n;
 const NO_CODE = "11111111111111111111111111111111";
 /** Room for contract state, token registration and gas on top of the code storage. */
 const ACTIVATION_MARGIN = 10n ** 23n; // 0.1 NEAR
+/** Room for creating the user's agent; the Agent API asks about 0.0145 NEAR to store its rules. */
+export const AGENT_CREATION_RESERVE = 2n * 10n ** 22n; // 0.02 NEAR
 
 export interface SpendLimit {
   perOrder: bigint;
@@ -42,9 +44,12 @@ export class LimitsClient {
     return BigInt(wasmBytes) * YOCTO_PER_BYTE;
   }
 
-  /** Available NEAR the account needs before activating with `fundAmount` of token. */
-  static activationNeeds(wasmBytes: number, fundAmount: bigint): bigint {
-    return LimitsClient.storageCost(wasmBytes) + ACTIVATION_MARGIN + fundAmount;
+  /**
+   * Available NEAR the account needs before activating with `fundAmount` of token, plus the cost
+   * of creating the agent while the user has none yet.
+   */
+  static activationNeeds(wasmBytes: number, fundAmount: bigint, createsAgent = false): bigint {
+    return LimitsClient.storageCost(wasmBytes) + ACTIVATION_MARGIN + fundAmount + (createsAgent ? AGENT_CREATION_RESERVE : 0n);
   }
 
   async loadWasm(): Promise<Uint8Array> {

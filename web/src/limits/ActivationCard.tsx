@@ -84,10 +84,10 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
     );
   }
 
-  const needs = LimitsClient.activationNeeds(wasm.length, DEFAULT_FUND);
+  const hasAgent = config.agentAccount !== null;
+  const needs = LimitsClient.activationNeeds(wasm.length, DEFAULT_FUND, !hasAgent);
   const funded = status.kind === "installed" || status.available >= needs;
   const active = status.kind === "installed";
-  const hasAgent = config.agentAccount !== null;
 
   const createMyAgent = async () => {
     setBusy("Creating your agent: confirm the signature...");
