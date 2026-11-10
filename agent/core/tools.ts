@@ -10,6 +10,8 @@ export type AgentEvent =
   | { type: "swap_executed"; from: string; to: string; amountIn: string; amountOut: string; usd: string; reason: string }
   | { type: "swap_proposed"; from: string; to: string; amountIn: string; amountOut: string; usd: string; reason: string }
   | { type: "swap_denied"; from: string; amountIn: string; code: string; reason: string }
+  /** A real order that buys only at a price: its money waits with the agent until it fills or expires. */
+  | { type: "limit_order_placed"; to: string; usd: string; priceUsd: string; days: string }
   | { type: "question"; text: string };
 
 export interface ToolContext {
