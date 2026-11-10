@@ -2,7 +2,7 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { ThemeProvider } from "./theme";
+import { logoSrc, ThemeProvider } from "./theme";
 import "./index.css";
 
 const appId = import.meta.env.PRIVY_APP_ID as string | undefined;
@@ -14,7 +14,7 @@ createRoot(root).render(
     {appId ? (
       <ThemeProvider>
         {(theme) => (
-          <PrivyProvider appId={appId} config={{ loginMethods: ["email", "google"], appearance: { theme, accentColor: "#00EB96" } }}>
+          <PrivyProvider appId={appId} config={{ loginMethods: ["email", "google"], appearance: { theme, accentColor: "#00EB96", logo: <img src={logoSrc(theme)} alt="Inti" width={180} height={69} /> } }}>
             <App />
           </PrivyProvider>
         )}
