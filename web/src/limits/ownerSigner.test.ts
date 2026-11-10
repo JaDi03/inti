@@ -113,10 +113,10 @@ describe("signing with the user's account key", () => {
     expect(wallet.signed).toHaveLength(0);
   });
 
-  it("signs nothing and shows no dialog while the account has no passkey", async () => {
+  it("signs nothing and shows no dialog while the account has no second factor", async () => {
     const wallet = userWallet(true, false);
     const client = clientSigningThrough(wallet);
-    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow("add a passkey");
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow("protect your account");
     expect(wallet.shown).toHaveLength(0);
     expect(wallet.signed).toHaveLength(0);
   });
@@ -192,11 +192,11 @@ describe("creating the user's own agent", () => {
     expect(agentAccountOf(signedDelegate.delegateAction, config)).toBe(AGENT);
   });
 
-  it("signs nothing when the user cancels or the account has no passkey", async () => {
+  it("signs nothing when the user cancels or the account has no second factor", async () => {
     const cancelled = userWallet(false);
     await expect(cancelled.signer.signDelegateAction(creation(cancelled))).rejects.toThrow(SigningCancelledError);
     const unprotected = userWallet(true, false);
-    await expect(unprotected.signer.signDelegateAction(creation(unprotected))).rejects.toThrow("add a passkey");
+    await expect(unprotected.signer.signDelegateAction(creation(unprotected))).rejects.toThrow("protect your account");
     expect(cancelled.signed).toHaveLength(0);
     expect(unprotected.signed).toHaveLength(0);
     expect(unprotected.shown).toHaveLength(0);

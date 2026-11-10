@@ -11,7 +11,7 @@ export class SigningCancelledError extends Error {}
 /**
  * Wraps the user's full-access signer: a transaction is signed only if every action is one
  * Inti uses (see ownerActions) and the user confirms the plain-language description first.
- * It also refuses to sign until the account has a passkey. The only delegate action it signs is
+ * It also refuses to sign until the account has a second factor (passkey or authenticator app). The only delegate action it signs is
  * the one that creates the user's own agent. Messages are never signed through it.
  */
 export class OwnerSigner extends Signer {
@@ -34,7 +34,7 @@ export class OwnerSigner extends Signer {
 
   override async signTransaction(transaction: Transaction) {
     const lines = describeOwnerTransaction(transaction, this.config);
-    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: add a passkey to your account first.");
+    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
     return this.inner.signTransaction(transaction);
   }
@@ -45,7 +45,7 @@ export class OwnerSigner extends Signer {
 
   override async signDelegateAction(delegateAction: DelegateAction) {
     const lines = describeOwnerDelegate(delegateAction, this.config);
-    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: add a passkey to your account first.");
+    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
     return this.inner.signDelegateAction(delegateAction);
   }
