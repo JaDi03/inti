@@ -8,6 +8,7 @@ import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
+import { TradeGrantCard } from "./agent/TradeGrantCard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -152,6 +153,9 @@ export function App() {
         onDone={() => setActivationDone(true)}
         onWorking={setActivating}
       />
+    ) : address && limits.setup.kind === "ready" && limits.status?.kind === "installed" && limits.agentAccount ? (
+      // After activation: one more signature lets Inti trade on its own; the card hides itself once given.
+      <TradeGrantCard address={address} config={limits.setup.config} getAccessToken={getAccessToken} />
     ) : null;
 
   // The mascot "thinks" (antennas light up) whenever the app is working for the user.
