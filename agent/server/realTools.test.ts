@@ -60,7 +60,9 @@ describe("realTools", () => {
 
   it("turns a dollar price into wNEAR per unit for a limit order", async () => {
     const { tools, orders } = setup();
-    await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, []);
+    const events: AgentEvent[] = [];
+    await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, events);
+    expect(events).toEqual([{ type: "limit_order_placed", to: "XAUT", usd: "1", priceUsd: "3950", days: "3" }]);
     expect(orders[0]).toMatchObject({ kind: "limit", asset: ASSETS.gold.assetId, price: usdPriceToWnear("3950", 3_550_000n), days: 3 });
     expect(usdPriceToWnear("3950", 3_550_000n)).toBe("1112.676056");
   });

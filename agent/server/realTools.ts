@@ -150,7 +150,7 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
           const price = usdPriceToWnear(input.price_usd, nearMicro);
           const result = await deps.trading.buyAtPrice(deps.userId, a.assetId, wnear, price, input.days);
           if (result.status === "resting") {
-            events.push({ type: "swap_proposed", from: "NEAR", to: a.symbol, amountIn: input.usd, amountOut: "", usd: input.usd, reason: `buys at ${input.price_usd} USD or less within ${input.days} days` });
+            events.push({ type: "limit_order_placed", to: a.symbol, usd: input.usd, priceUsd: input.price_usd, days: String(input.days) });
             return JSON.stringify({ status: "order_placed", asset: a.name, usd: input.usd, price_usd: input.price_usd, days: input.days });
           }
           if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The order is still being placed." });

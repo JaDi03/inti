@@ -64,6 +64,8 @@ function publicEvent(e: AgentEvent): Record<string, string> {
       return { type: e.type, from: e.from, amountIn: e.amountIn, code: e.code, reason: e.reason };
     case "question":
       return { type: e.type, text: e.text };
+    case "limit_order_placed":
+      return { type: e.type, to: e.to, usd: e.usd, priceUsd: e.priceUsd, days: e.days };
   }
 }
 
