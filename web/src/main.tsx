@@ -2,7 +2,6 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { NetworkProvider } from "./network";
 import { ThemeProvider } from "./theme";
 import "./index.css";
 
@@ -16,14 +15,12 @@ createRoot(root).render(
       <ThemeProvider>
         {(theme) => (
           <PrivyProvider appId={appId} config={{ loginMethods: ["email", "google"], appearance: { theme, accentColor: "#00EB96" } }}>
-            <NetworkProvider>
-              <App />
-            </NetworkProvider>
+            <App />
           </PrivyProvider>
         )}
       </ThemeProvider>
     ) : (
-      <p style={{ fontFamily: "system-ui", margin: 48 }}>PRIVY_APP_ID is missing from the root .env file.</p>
+      <p style={{ fontFamily: "system-ui", margin: 48 }}>Inti is not available right now. Please try again later.</p>
     )}
   </StrictMode>,
 );

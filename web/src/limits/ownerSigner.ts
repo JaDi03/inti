@@ -11,13 +11,15 @@ export class SigningCancelledError extends Error {}
 /**
  * Wraps the user's full-access signer: a transaction is signed only if every action is one
  * Inti uses (see ownerActions) and the user confirms the plain-language description first.
- * Messages and delegate actions are never signed through it.
+ * It also refuses to sign until the account has a passkey. Messages and delegate actions are never
+ * signed through it.
  */
 export class OwnerSigner extends Signer {
   constructor(
     private readonly inner: Signer,
     private readonly config: LimitsConfig,
     private readonly confirm: ConfirmSigning,
+    private readonly hasPasskey: () => boolean,
   ) {
     super();
   }
@@ -32,6 +34,7 @@ export class OwnerSigner extends Signer {
 
   override async signTransaction(transaction: Transaction) {
     const lines = describeOwnerTransaction(transaction, this.config);
+    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: add a passkey to your account first.");
     if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
     return this.inner.signTransaction(transaction);
   }

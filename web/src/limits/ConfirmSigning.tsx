@@ -1,11 +1,12 @@
 import { useSignRawHash } from "@privy-io/react-auth/extended-chains";
 import { ShieldCheck } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { PrivyNearSigner } from "../privySigner";
 import type { LimitsConfig } from "./config";
 import { OwnerSigner } from "./ownerSigner";
+import { useHasPasskey } from "./PasskeyProtection";
 
 type Pending = { lines: string[]; resolve: (ok: boolean) => void };
 
@@ -17,6 +18,12 @@ export function useOwnerSigner(address: string, config: LimitsConfig): { signer:
   const { signRawHash } = useSignRawHash();
   const [pending, setPending] = useState<Pending | null>(null);
   const pendingRef = useRef<Pending | null>(null);
+  const hasPasskey = useHasPasskey();
+  const hasPasskeyRef = useRef(hasPasskey);
+  useEffect(() => {
+    hasPasskeyRef.current = hasPasskey;
+  }, [hasPasskey]);
+  const passkeyCheck = useCallback(() => hasPasskeyRef.current, []);
 
   const confirm = useCallback(
     (lines: string[]) =>
@@ -34,7 +41,7 @@ export function useOwnerSigner(address: string, config: LimitsConfig): { signer:
     setPending(null);
   }, []);
 
-  const signer = useMemo(() => new OwnerSigner(new PrivyNearSigner(address, signRawHash), config, confirm), [address, signRawHash, config, confirm]);
+  const signer = useMemo(() => new OwnerSigner(new PrivyNearSigner(address, signRawHash), config, confirm, passkeyCheck), [address, signRawHash, config, confirm, passkeyCheck]);
 
   const confirmDialog = (
     <Dialog.Root open={pending !== null} onOpenChange={(open) => !open && answer(false)}>

@@ -10,15 +10,13 @@ import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
-import { useLimits } from "./limits/useLimits";
-import { NetworkSwitch } from "./network";
+import { UNAVAILABLE, useLimits } from "./limits/useLimits";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
 type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean };
 
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
-const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 2 steps, right here.";
-const MAINNET_SOON = "Mainnet is coming soon. Switch to Testnet to try me for free.";
+const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 3 steps, right here.";
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -126,7 +124,7 @@ export function App() {
 
   const send = async (text: string) => {
     addMessage("user", text);
-    if (limits.setup.kind === "not-ready") return addMessage("inti", MAINNET_SOON);
+    if (limits.setup.kind === "error") return addMessage("inti", UNAVAILABLE);
     if (needsActivation) return addMessage("inti", ACTIVATE_FIRST);
     setThinking(true);
     try {
@@ -164,7 +162,6 @@ export function App() {
       <header className="flex items-center justify-between px-4 py-3 sm:px-6">
         <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <NetworkSwitch />
           {address && (
             <code className="hidden rounded-full bg-muted px-3 py-1 text-xs sm:inline" title={address}>
               {shortAddress(address)}
