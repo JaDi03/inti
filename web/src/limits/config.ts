@@ -15,8 +15,10 @@ export interface LimitsConfig {
   explorerTxUrl: (hash: string) => string;
   /** The NEAR Intents verifier contract. */
   intentsAccount: string;
-  /** The agent account that orders are sent to (from .env until the Agent API gives one per user). */
-  agentAccount: string;
+  /** The user's own agent account that orders are sent to, or null until the user has created it. */
+  agentAccount: string | null;
+  /** The contract that stores each agent's rules; creating an agent is one call to it. */
+  agentRulesContract: string;
   token: TokenConfig;
   /** Public key of Inti's function-call key (the private key never reaches the browser). */
   intiPublicKey: string;
@@ -43,13 +45,14 @@ function required(name: string): string {
 
 const NEAR = 10n ** 24n;
 
-export function loadLimitsConfig(): LimitsConfig {
+export function loadLimitsConfig(agentAccount: string | null): LimitsConfig {
   return {
     // FastNEAR's public endpoint, listed in docs.near.org/api/rpc/providers (free tier, limit not published).
     rpcUrl: "https://free.rpc.fastnear.com",
     explorerTxUrl: (hash) => `https://nearblocks.io/txns/${hash}`,
     intentsAccount: "intents.near",
-    agentAccount: required("INTI_AGENT_ACCOUNT"),
+    agentAccount,
+    agentRulesContract: "outlayer.near",
     // Wrapped NEAR, shown to the user as NEAR.
     token: { id: "wrap.near", symbol: "NEAR", decimals: 24 },
     intiPublicKey: required("INTI_KEY_PUBLIC"),

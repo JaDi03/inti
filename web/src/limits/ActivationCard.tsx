@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, Loader2, ShieldCheck, X } from "lucide-react
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { createAgent } from "../agent/createAgent";
 import { LimitsClient, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
 import { PasskeyProtection, useHasPasskey } from "./PasskeyProtection";
@@ -13,6 +14,9 @@ interface Props {
   setup: LimitsSetup;
   status: LimitsStatus | null;
   refresh: () => Promise<void>;
+  getAccessToken: () => Promise<string | null>;
+  /** Called with the user's agent account once it has been created. */
+  onAgent: (agentAccount: string) => void;
   /** Hides the card after the user has seen the "ready" summary. */
   onDone: () => void;
   /** True while activation transactions are being signed and sent (the mascot shows it). */
@@ -21,10 +25,10 @@ interface Props {
 
 /**
  * First-run activation, inline on the home screen (not behind the shield icon):
- * 1. add a passkey, 2. add funds (the app notices them by itself), 3. set spending limits and
- * sign, 4. see where the money sits.
+ * 1. add a passkey, 2. add funds (the app notices them by itself), 3. create the user's own
+ * agent, 4. set spending limits and sign, then see where the money sits.
  */
-export function ActivationCard({ address, setup, status, refresh, onDone, onWorking }: Props) {
+export function ActivationCard({ address, setup, status, refresh, getAccessToken, onAgent, onDone, onWorking }: Props) {
   if (setup.kind === "error") {
     return (
       <CardFrame title="Spending Limits is unavailable" subtitle={setup.message}>
@@ -32,7 +36,18 @@ export function ActivationCard({ address, setup, status, refresh, onDone, onWork
       </CardFrame>
     );
   }
-  return <ActivationSteps address={address} client={setup.client} status={status} refresh={refresh} onDone={onDone} onWorking={onWorking} />;
+  return (
+    <ActivationSteps
+      address={address}
+      client={setup.client}
+      status={status}
+      refresh={refresh}
+      getAccessToken={getAccessToken}
+      onAgent={onAgent}
+      onDone={onDone}
+      onWorking={onWorking}
+    />
+  );
 }
 
 interface StepsProps {
@@ -40,11 +55,13 @@ interface StepsProps {
   client: LimitsClient;
   status: LimitsStatus | null;
   refresh: () => Promise<void>;
+  getAccessToken: () => Promise<string | null>;
+  onAgent: (agentAccount: string) => void;
   onDone: () => void;
   onWorking?: (working: boolean) => void;
 }
 
-function ActivationSteps({ address, client, status, refresh, onDone, onWorking }: StepsProps) {
+function ActivationSteps({ address, client, status, refresh, getAccessToken, onAgent, onDone, onWorking }: StepsProps) {
   const { config } = client;
   const { symbol, decimals } = config.token;
   const amount = (v: bigint) => `${display(v, decimals)} ${symbol}`;
@@ -70,6 +87,23 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
   const needs = LimitsClient.activationNeeds(wasm.length, DEFAULT_FUND);
   const funded = status.kind === "installed" || status.available >= needs;
   const active = status.kind === "installed";
+  const hasAgent = config.agentAccount !== null;
+
+  const createMyAgent = async () => {
+    setBusy("Creating your agent: confirm the signature...");
+    setError(null);
+    onWorking?.(true);
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) throw new Error("Your session expired. Sign in again and retry.");
+      onAgent(await createAgent({ accessToken, accountId: address, config, provider: client.provider, signer }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Your agent could not be created.");
+    } finally {
+      setBusy(null);
+      onWorking?.(false);
+    }
+  };
 
   const activate = async (limit: Parameters<LimitsClient["activate"]>[3], fund: bigint) => {
     setBusy("Activating Inti: confirm the two signatures...");
@@ -93,7 +127,7 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
       subtitle={
         active
           ? "Your money stays in your account. Inti can only fund your own agent, within your limits."
-          : "Set up in 3 steps. Your money never leaves your account: Inti only gets a key that funds your own agent, within the limits you sign."
+          : "Set up in 4 steps. Your money never leaves your account: Inti only gets a key that funds your own agent, within the limits you sign."
       }
       onClose={active ? onDone : undefined}
     >
@@ -112,8 +146,25 @@ function ActivationSteps({ address, client, status, refresh, onDone, onWorking }
               ))}
           </Step>
 
-          <Step n={3} title="Set your spending limits" done={false} disabled={!funded || !hasPasskey}>
-            {funded && hasPasskey && (
+          <Step n={3} title="Create your agent" done={hasAgent} disabled={!funded || !hasPasskey}>
+            {funded &&
+              hasPasskey &&
+              (hasAgent ? (
+                <p className="text-sm text-muted-foreground">Your own agent on NEAR Intents is ready.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Your own agent on NEAR Intents, used only for you. It can only swap, and what it buys goes back to your account.
+                  </p>
+                  <Button className="mt-3 rounded-xl" disabled={busy !== null} onClick={() => void createMyAgent()}>
+                    Create my agent
+                  </Button>
+                </>
+              ))}
+          </Step>
+
+          <Step n={4} title="Set your spending limits" done={false} disabled={!funded || !hasPasskey || !hasAgent}>
+            {funded && hasPasskey && hasAgent && (
               <>
                 <KeyLimits />
                 <LimitForm decimals={decimals} symbol={symbol} withFunding submitLabel="Activate Inti" busy={busy} onSubmit={(limit, fund) => void activate(limit, fund)} />

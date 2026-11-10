@@ -35,7 +35,8 @@ interface Props {
 export function SpendingLimitsPanel({ address, onClose }: Props) {
   const setup = useMemo((): { config: LimitsConfig; client: LimitsClient } | { error: string } => {
     try {
-      const config = loadLimitsConfig();
+      // Limits are changed here after setup; the agent is only needed to install them.
+      const config = loadLimitsConfig(null);
       return { config, client: new LimitsClient(config) };
     } catch (e) {
       console.error(e);

@@ -16,7 +16,7 @@ import { logoSrc, ThemeToggle, useTheme } from "./theme";
 type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean };
 
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
-const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 3 steps, right here.";
+const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 4 steps, right here.";
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -94,7 +94,7 @@ export function App() {
 
   // Spending Limits status on the selected network. Re-read every few seconds until it is active.
   const [pollLimits, setPollLimits] = useState(false);
-  const limits = useLimits(address, pollLimits);
+  const limits = useLimits(address, pollLimits, getAccessToken);
   const needsActivation = limits.setup.kind !== "ready" || (limits.status !== null && limits.status.kind !== "installed");
   // Shows the "ready" summary once, right after activating in this visit.
   const [sawInactive, setSawInactive] = useState(false);
@@ -147,6 +147,8 @@ export function App() {
         setup={limits.setup}
         status={limits.status}
         refresh={limits.refresh}
+        getAccessToken={getAccessToken}
+        onAgent={limits.rememberAgent}
         onDone={() => setActivationDone(true)}
         onWorking={setActivating}
       />

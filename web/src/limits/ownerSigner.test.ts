@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
-import { Account, actions, createTransaction, KeyPair } from "near-api-js";
+import { Account, actions, buildDelegateAction, createTransaction, KeyPair } from "near-api-js";
 import type { Action, KeyPairEd25519 } from "near-api-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
-import { RefusedSigningError, wasmSha256 } from "./ownerActions";
+import { agentAccountOf, RefusedSigningError, wasmSha256 } from "./ownerActions";
 import { OwnerSigner, SigningCancelledError } from "./ownerSigner";
 
 const expectedWasm = new Uint8Array(readFileSync(new URL("../../public/inti-spending-limits.wasm", import.meta.url)));
@@ -16,6 +16,7 @@ const config: LimitsConfig = {
   explorerTxUrl: (hash) => hash,
   intentsAccount: "intents.testnet",
   agentAccount: "agent.testnet",
+  agentRulesContract: "outlayer.near",
   token: { id: "wrap.testnet", symbol: "NEAR", decimals: 24 },
   intiPublicKey: intiKey.toString(),
   intiKeyAllowanceYocto: 10n ** 23n,
@@ -155,10 +156,75 @@ describe("signing with the user's account key", () => {
     expect(wallet.signed).toHaveLength(0);
   });
 
-  it("never signs messages or delegate actions", async () => {
+  it("never signs messages", async () => {
     const wallet = userWallet();
     await expect(wallet.signer.signNep413Message()).rejects.toThrow(RefusedSigningError);
-    expect(() => wallet.signer.signDelegateAction()).toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+});
+
+describe("creating the user's own agent", () => {
+  const AGENT = "80".repeat(32);
+  // The arguments the Agent API sends for a new agent.
+  const rules = {
+    locked: false,
+    version: 1,
+    valid_until: 1794881635,
+    wallet_pubkey: `ed25519:${AGENT}`,
+    encrypted_data: "AYHD",
+    wallet_signature: "d9".repeat(64),
+    agent_policy_hash: "62".repeat(32),
+    storage_refund_to: "cf".repeat(32),
+  };
+  const COST = 12_910_000_000_000_000_000_000n;
+
+  function creation(wallet: Wallet, receiverId = "outlayer.near", txActions: Action[] = [actions.functionCall("store_wallet_policy", rules, 10n ** 14n, COST)]) {
+    return buildDelegateAction({ senderId: wallet.accountId, receiverId, actions: txActions, nonce: 1n, maxBlockHeight: 1n, publicKey: wallet.publicKey });
+  }
+
+  it("shows the agent and its cost in plain words and signs after the user confirms", async () => {
+    const wallet = userWallet();
+    const { signedDelegate } = await wallet.signer.signDelegateAction(creation(wallet));
+    expect(wallet.shown).toEqual([
+      [`Create your own agent on NEAR Intents (${AGENT}).`, "Store its rules, encrypted, on outlayer.near (one-time cost 0.01291 NEAR)."],
+    ]);
+    expect(wallet.signed).toHaveLength(1);
+    expect(agentAccountOf(signedDelegate.delegateAction, config)).toBe(AGENT);
+  });
+
+  it("signs nothing when the user cancels or the account has no passkey", async () => {
+    const cancelled = userWallet(false);
+    await expect(cancelled.signer.signDelegateAction(creation(cancelled))).rejects.toThrow(SigningCancelledError);
+    const unprotected = userWallet(true, false);
+    await expect(unprotected.signer.signDelegateAction(creation(unprotected))).rejects.toThrow("add a passkey");
+    expect(cancelled.signed).toHaveLength(0);
+    expect(unprotected.signed).toHaveLength(0);
+    expect(unprotected.shown).toHaveLength(0);
+  });
+
+  const call = (method: string, args: object, deposit = COST) => actions.functionCall(method, args, 10n ** 14n, deposit);
+  const refusedCreations: [string, (w: Wallet) => ReturnType<typeof creation>][] = [
+    ["a request to another contract", (w) => creation(w, "stranger.near")],
+    ["another method on the rules contract", (w) => creation(w, "outlayer.near", [call("freeze_wallet", rules)])],
+    ["rules that would be locked", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", { ...rules, locked: true })])],
+    ["an unexpected argument", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", { ...rules, controller: "stranger.near" })])],
+    ["a cost above the expected one", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", rules, 10n ** 24n)])],
+    ["an agent key that is not an ed25519 key", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", { ...rules, wallet_pubkey: "agent.near" })])],
+    ["a second action next to the creation", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", rules), actions.transfer(1n)])],
+    ["a plain transfer", (w) => creation(w, "outlayer.near", [actions.transfer(1n)])],
+  ];
+
+  it.each(refusedCreations)("refuses %s before asking the user or the wallet", async (_name, build) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signDelegateAction(build(wallet))).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("installs Spending Limits only for the user's own agent", async () => {
+    const wallet = userWallet();
+    const withoutAgent = new LimitsClient({ ...config, agentAccount: null });
+    await expect(withoutAgent.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 1n, perDay: 2n }, 1n)).rejects.toThrow("Create your agent first");
     expect(wallet.signed).toHaveLength(0);
   });
 });
