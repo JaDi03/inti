@@ -172,6 +172,47 @@ export function describeOwnerDelegate(delegate: OwnerDelegate, config: LimitsCon
   ];
 }
 
+/** The one message the app signs: a grant that lets Inti's server act for the user's agent. */
+export interface GrantMessage {
+  message: string;
+  recipient: string;
+}
+
+const GRANT_DOMAIN = "near-intents-agent-api.agent-grant.v6";
+export const GRANT_LABEL = "Inti trading";
+/** Longest grant the app signs; Inti asks for 90 days. */
+const MAX_GRANT_MS = 91 * 86_400_000;
+const GRANT_KEYS = ["agent_id", "credential", "domain", "expires_at_ms", "issued_at_ms", "label", "network", "nonce", "owner", "owner_epoch", "recipient", "tenant_id", "wallet_id"];
+
+/**
+ * Plain-language lines for a grant, or a refusal when the message is anything else: another
+ * domain or network, another owner, another service, or longer than Inti asks for.
+ */
+export function describeGrant(grant: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  let m: Record<string, unknown>;
+  try {
+    m = JSON.parse(grant.message) as Record<string, unknown>;
+  } catch {
+    refuse("the message is not a grant.");
+  }
+  if (typeof m !== "object" || m === null || Object.keys(m).sort().join(",") !== GRANT_KEYS.join(",")) refuse("the message is not a grant.");
+  if (m.domain !== GRANT_DOMAIN || m.network !== "mainnet") refuse("the message is not a mainnet grant.");
+  if (grant.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the grant is for ${String(m.recipient)}.`);
+  const owner = m.owner as Record<string, unknown> | null;
+  if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the grant names another owner.");
+  if (m.label !== GRANT_LABEL) refuse("the grant is not Inti's.");
+  if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the grant names no agent.");
+  if (typeof m.credential !== "string" || !/^[0-9a-f]{64}$/.test(m.credential)) refuse("the grant has no valid credential.");
+  const expires = m.expires_at_ms;
+  if (typeof expires !== "number" || expires <= now || expires - now > MAX_GRANT_MS) refuse("the grant lasts longer than Inti asks for.");
+  const until = new Date(expires).toISOString().slice(0, 10);
+  return [
+    `Let Inti trade for your agent until ${until}, without asking you each time.`,
+    "It can only buy within the spending limits you set, and everything it buys goes to your wallet.",
+    "You can turn it off at any time.",
+  ];
+}
+
 /**
  * Plain-language lines for a transaction the app may sign with the user's full-access
  * key, or a RefusedSigningError when any part of it is not an action Inti uses.

@@ -27,6 +27,8 @@ export interface LimitsConfig {
   wasmUrl: string;
   /** sha256 (hex) of the contract build the app may install; any other code is never deployed. */
   wasmSha256: string;
+  /** Host of the NEAR Intents Agent API: the only service a grant may be signed for. */
+  agentApiHost: string;
 }
 
 /**
@@ -59,5 +61,6 @@ export function loadLimitsConfig(agentAccount: string | null): LimitsConfig {
     intiKeyAllowanceYocto: NEAR / 4n,
     wasmUrl: "/inti-spending-limits.wasm",
     wasmSha256: SPENDING_LIMITS_WASM_SHA256,
+    agentApiHost: required("INTI_AGENT_API_HOST"),
   };
 }
