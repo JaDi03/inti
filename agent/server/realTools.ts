@@ -4,7 +4,7 @@ import { microToUsd, priceToMicro, usdStringToMicro } from "../core/money.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { ToolInputError, type AgentEvent } from "../core/tools.js";
 import { fromAtomic } from "../policy/units.js";
-import { ASSET_KEYS, ASSETS, type AssetKey } from "./assets.js";
+import { ASSET_KEYS, ASSETS, type AssetKey } from "../policy/assets.js";
 import { FUNDING_ASSET, FUNDING_TOKEN, tokenContract, type ChainPort } from "./orders.js";
 import type { Trading } from "./trading.js";
 

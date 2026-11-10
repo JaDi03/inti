@@ -5,7 +5,7 @@ import { runCycle } from "../core/loop.js";
 import { demoPolicy, demoPortfolio } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
-import { ASSETS } from "./assets.js";
+import { ASSETS } from "../policy/assets.js";
 import { FUNDING_ASSET, type ChainPort } from "./orders.js";
 import { realTools, usdPriceToWnear, usdToWnear } from "./realTools.js";
 import type { Trading } from "./trading.js";
