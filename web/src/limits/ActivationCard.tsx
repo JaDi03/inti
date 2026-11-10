@@ -154,7 +154,7 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
               ) : (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Your own agent on NEAR Intents, used only for you. It can only swap, and what it buys goes back to your account.
+                    Your own agent on NEAR Intents, used only for you. It can trade for you, and anything it sends can only go back to you.
                   </p>
                   <Button className="mt-3 rounded-xl" disabled={busy !== null} onClick={() => void createMyAgent()}>
                     Create my agent

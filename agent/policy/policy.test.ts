@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { agentPolicy } from "./agentPolicy.js";
 import { buildPolicy } from "./build.js";
 import { describePolicy, type TokenInfo } from "./preview.js";
 import { assertPolicyMatches, policyDifferences } from "./verify.js";
@@ -142,5 +143,28 @@ describe("describePolicy", () => {
       tokens,
     );
     expect(lines).toContain("Funds can never leave the agent. Swaps stay inside it.");
+  });
+});
+
+describe("the rules every agent starts with", () => {
+  const owner = "ab".repeat(32);
+  const policy = agentPolicy(owner);
+
+  it("lets the agent send only to its owner, by transfer or withdrawal", () => {
+    expect(policy.destinations.mode).toBe("only");
+    expect(policy.destinations.list.length).toBeGreaterThan(0);
+    for (const destination of policy.destinations.list) expect(destination.address).toBe(owner);
+  });
+
+  it("allows trading, private balances and limit orders within the API maximum", () => {
+    expect([...policy.actions].sort()).toEqual(["limit_order", "swap", "transfer", "withdraw"]);
+    expect(policy.confidential).toBe(true);
+    expect(policy.limit_order?.max_deviation_bps).toBe(300);
+    expect(policy.frozen).toBe(false);
+  });
+
+  it("is the same for the same owner, so the app can compare it with the API preview", () => {
+    expect(policyDifferences(agentPolicy(owner), policy)).toEqual([]);
+    expect(policyDifferences(agentPolicy("cd".repeat(32)), policy)).not.toEqual([]);
   });
 });
