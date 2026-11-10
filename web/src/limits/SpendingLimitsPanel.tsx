@@ -128,8 +128,8 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             onSubmit={(limit, fund) => void run("Activating...", () => client.activate(address, signer, wasm, limit, fund))}
           />
           <p className="mt-3 text-xs text-muted-foreground">
-            About {amount(LimitsClient.storageCost(wasm.length))} stays locked in your account while Spending Limits is installed (network storage). You confirm two
-            transactions.
+            About {amount(LimitsClient.storageCost(wasm.length))} is set aside in your account while Inti is on. It comes back when you turn Inti off. You
+            confirm two transactions.
           </p>
         </>
       );
@@ -141,7 +141,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
       <>
         <div className="flex items-center gap-2 text-sm">
           <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
-          {status.intiConnected ? "Inti is connected" : "Inti is disconnected: it cannot send anything"}
+          {status.intiConnected ? "Inti is on" : "Inti is paused: it cannot send anything"}
         </div>
 
         {limit && (
@@ -185,12 +185,12 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
               Edit limits
             </Button>
             {status.intiConnected ? (
-              <Button variant="destructive" disabled={busy !== null} onClick={() => void run("Disconnecting...", () => client.disconnectInti(address, signer))}>
-                Disconnect Inti
+              <Button variant="destructive" disabled={busy !== null} onClick={() => void run("Pausing...", () => client.disconnectInti(address, signer))}>
+                Pause Inti
               </Button>
             ) : (
-              <Button disabled={busy !== null} onClick={() => void run("Reconnecting...", () => client.reconnectInti(address, signer))}>
-                Reconnect Inti
+              <Button disabled={busy !== null} onClick={() => void run("Resuming...", () => client.reconnectInti(address, signer))}>
+                Resume Inti
               </Button>
             )}
             <Button variant="ghost" size="icon" aria-label="Refresh" disabled={busy !== null} onClick={() => void refresh()}>
@@ -201,6 +201,29 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
         <div className="mt-5">
           <PasskeyProtection />
         </div>
+
+        {!editing && (
+          <div className="mt-5 rounded-xl border p-3 text-sm">
+            <p className="font-medium">Turn off Inti</p>
+            <p className="mt-1 text-muted-foreground">
+              Inti stops working and your whole balance is back to normal, including the NEAR set aside for Inti. You can turn Inti on again later.
+            </p>
+            <Button
+              className="mt-2"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() =>
+                void run("Turning off Inti: confirm once...", async () => {
+                  const plan = client.releasePlan(address, status.spendable, status.intiConnected);
+                  await signer.approveAll(plan);
+                  return client.send(address, signer, plan);
+                })
+              }
+            >
+              Turn off Inti
+            </Button>
+          </div>
+        )}
       </>
     );
   }

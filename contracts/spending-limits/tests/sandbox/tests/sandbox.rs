@@ -749,3 +749,51 @@ async fn a_full_day_of_orders_burns_a_small_part_of_the_gas_allowance() -> anyho
     assert_eq!(s.spent_last_24h().await?, 24);
     Ok(())
 }
+
+/// The smallest valid wasm module: an empty contract with no methods.
+const EMPTY_WASM: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+
+/// "Release my money" as the app signs it: one transaction removes Inti's key and replaces the
+/// contract with an empty module. The code's storage is released and that NEAR can leave.
+#[tokio::test]
+async fn the_owner_can_remove_spending_limits_and_free_its_storage() -> anyhow::Result<()> {
+    let s = setup(100, 300).await?;
+    let before = s.user.view_account().await?;
+
+    let release = s
+        .user
+        .batch(s.user.id())
+        .delete_key(s.inti_key.clone())
+        .deploy(&EMPTY_WASM)
+        .transact()
+        .await?;
+    assert!(release.is_success(), "release failed: {release:?}");
+
+    let after = s.user.view_account().await?;
+    let freed_bytes = before.storage_usage - after.storage_usage;
+    println!(
+        "storage_usage before={} after={} freed_bytes={} freed_near={}",
+        before.storage_usage,
+        after.storage_usage,
+        freed_bytes,
+        freed_bytes as f64 * 1e19 / 1e24
+    );
+    assert!(freed_bytes >= contract_wasm().len() as u64 - EMPTY_WASM.len() as u64);
+
+    // Inti's key no longer works, and there is no fund_agent to call.
+    let order = s
+        .inti
+        .call(s.user.id(), "fund_agent")
+        .args_json(json!({ "token": s.token.id(), "amount": "1" }))
+        .gas(Gas::from_tgas(80))
+        .transact()
+        .await;
+    assert!(order.map(|r| !r.is_success()).unwrap_or(true), "Inti's key still acts");
+
+    // The released NEAR is spendable: send all but what the remaining storage and fees need.
+    let locked = after.storage_usage as u128 * 10u128.pow(19);
+    let spendable = after.balance.as_yoctonear() - locked - NearToken::from_millinear(10).as_yoctonear();
+    let out = s.user.transfer_near(s.stranger.id(), NearToken::from_yoctonear(spendable)).await?;
+    assert!(out.is_success(), "sending the released NEAR failed: {out:?}");
+    Ok(())
+}

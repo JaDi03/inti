@@ -17,6 +17,11 @@ const NEAR_DECIMALS = 24;
 const MAX_AGENT_RULES_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR
 const AGENT_RULES_KEYS = ["locked", "version", "valid_until", "wallet_pubkey", "encrypted_data", "wallet_signature", "agent_policy_hash", "storage_refund_to"] as const;
 
+/** The smallest valid wasm module: replacing Spending Limits with it frees the code's storage. */
+export const EMPTY_CONTRACT = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+
+const isEmptyContract = (code: Uint8Array) => code.length === EMPTY_CONTRACT.length && code.every((b, i) => b === EMPTY_CONTRACT[i]);
+
 export class RefusedSigningError extends Error {}
 
 /** A request the user signs for someone else to send (the Agent API pays its network fee). */
@@ -65,6 +70,9 @@ function atomicArg(value: unknown, method: string): bigint {
 function describeOwnAccountAction(action: Action, config: LimitsConfig, accountId: string): string | string[] {
   const { token } = config;
   if (action.deployContract) {
+    if (isEmptyContract(action.deployContract.code)) {
+      return "Remove Inti's setup from your account. The NEAR set aside for it goes back to your main balance.";
+    }
     const hash = wasmSha256(action.deployContract.code);
     if (hash !== config.wasmSha256) refuse("the contract code is not the expected Spending Limits build.");
     return `Install the Spending Limits contract on your account (expected build ${hash.slice(0, 12)}).`;
@@ -105,7 +113,7 @@ function describeOwnAccountAction(action: Action, config: LimitsConfig, accountI
   }
   if (action.deleteKey) {
     if (action.deleteKey.publicKey.toString() !== config.intiPublicKey) refuse("the key to remove is not Inti's key.");
-    return "Remove Inti's key from your account. Inti can no longer fund your agent.";
+    return "Turn off Inti's access to your account.";
   }
   refuse(`the action ${action.enum} is not one Inti uses.`);
 }
@@ -119,6 +127,12 @@ function describeTokenAction(action: Action, config: LimitsConfig, accountId: st
     if (a.account_id !== accountId || a.registration_only !== true) refuse("the token registration is for another account.");
     if (call.deposit > MAX_REGISTRATION_YOCTO) refuse("the token registration costs more than expected.");
     return `Register your account with ${config.token.id} (one-time fee ${near(call.deposit)}).`;
+  }
+  if (call.methodName === "near_withdraw") {
+    const a = argsOf(call.args, call.methodName, ["amount"]);
+    const wrapped = atomicArg(a.amount, call.methodName);
+    if (wrapped === 0n || call.deposit !== 1n) refuse("turning wrapped NEAR back needs a positive amount and exactly 1 yoctoNEAR.");
+    return `Move ${fromAtomic(wrapped.toString(), config.token.decimals)} NEAR from Inti's trading balance back to your main balance.`;
   }
   if (call.methodName === "near_deposit") {
     argsOf(call.args, call.methodName, []);

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
-import { agentAccountOf, RefusedSigningError, wasmSha256 } from "./ownerActions";
+import { agentAccountOf, EMPTY_CONTRACT, RefusedSigningError, wasmSha256 } from "./ownerActions";
 import { OwnerSigner, SigningCancelledError } from "./ownerSigner";
 
 const expectedWasm = new Uint8Array(readFileSync(new URL("../../public/inti-spending-limits.wasm", import.meta.url)));
@@ -97,7 +97,7 @@ describe("signing with the user's account key", () => {
     expect(wallet.signed).toHaveLength(3);
     expect(wallet.shown).toEqual([
       ["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day."],
-      ["Remove Inti's key from your account. Inti can no longer fund your agent."],
+      ["Turn off Inti's access to your account."],
       [
         "Give Inti a key that can only call fund_agent: it can send to your agent only within the spending limits you set.",
         "That key can also use up to 0.1 NEAR of your balance to pay network fees. This is not a spending limit.",
@@ -226,6 +226,69 @@ describe("creating the user's own agent", () => {
     const withoutAgent = new LimitsClient({ ...config, agentAccount: null });
     await expect(withoutAgent.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 1n, perDay: 2n }, 1n)).rejects.toThrow("Create your agent first");
     expect(wallet.signed).toHaveLength(0);
+  });
+});
+
+describe("turning Inti off", () => {
+  const WRAPPED = 10n ** 23n;
+
+  it("shows both transactions in one confirmation, then signs both without asking again", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    const plan = client.releasePlan(wallet.accountId, WRAPPED, true);
+    await wallet.signer.approveAll(plan);
+    await client.send(wallet.accountId, wallet.signer, plan);
+
+    expect(wallet.shown).toEqual([
+      [
+        "Move 0.1 NEAR from Inti's trading balance back to your main balance.",
+        "Turn off Inti's access to your account.",
+        "Remove Inti's setup from your account. The NEAR set aside for it goes back to your main balance.",
+      ],
+    ]);
+    expect(wallet.signed).toHaveLength(2);
+  });
+
+  it("leaves out the steps that are not needed", () => {
+    const client = new LimitsClient(config);
+    const plan = client.releasePlan("ab".repeat(32), 0n, false);
+    expect(plan).toHaveLength(1);
+    expect(plan[0]?.actions).toHaveLength(1);
+  });
+
+  it("asks again for any transaction that is not the approved one", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    await wallet.signer.approveAll(client.releasePlan(wallet.accountId, WRAPPED, true));
+    await client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n });
+    expect(wallet.shown).toHaveLength(2);
+    expect(wallet.shown[1]).toEqual(["Set your limit: at most 0.000000000000000000000001 NEAR per order and 0.000000000000000000000002 NEAR per day."]);
+  });
+
+  it("signs nothing when the user cancels the confirmation", async () => {
+    const wallet = userWallet(false);
+    const client = clientSigningThrough(wallet);
+    await expect(wallet.signer.approveAll(client.releasePlan(wallet.accountId, WRAPPED, true))).rejects.toThrow(SigningCancelledError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  const refusedReleases: [string, (w: Wallet) => [string, Action[]]][] = [
+    ["unwrapping with no yoctoNEAR attached", () => [config.token.id, [actions.functionCall("near_withdraw", { amount: "1" }, 1n, 0n)]]],
+    ["unwrapping with an extra argument", () => [config.token.id, [actions.functionCall("near_withdraw", { amount: "1", receiver_id: "stranger.near" }, 1n, 1n)]]],
+    ["unwrapping nothing", () => [config.token.id, [actions.functionCall("near_withdraw", { amount: "0" }, 1n, 1n)]]],
+    ["installing any other contract", (w) => [w.accountId, [actions.deployContract(new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x00]))]]],
+  ];
+
+  it.each(refusedReleases)("refuses %s before asking the user or the wallet", async (_name, build) => {
+    const wallet = userWallet();
+    const [receiverId, txActions] = build(wallet);
+    await expect(sign(wallet, receiverId, txActions)).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("the empty contract is the 8-byte wasm header and nothing else", () => {
+    expect(Array.from(EMPTY_CONTRACT)).toEqual([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
   });
 });
 

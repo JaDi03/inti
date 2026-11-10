@@ -1,7 +1,7 @@
 import { Signer } from "near-api-js";
 import type { DelegateAction, PublicKey, SignedMessage, Transaction } from "near-api-js";
 import type { LimitsConfig } from "./config";
-import { describeOwnerDelegate, describeOwnerTransaction, RefusedSigningError } from "./ownerActions";
+import { describeOwnerDelegate, describeOwnerTransaction, RefusedSigningError, type OwnerTransaction } from "./ownerActions";
 
 /** Shows the user what a transaction does and resolves true only if they confirm it. */
 export type ConfirmSigning = (lines: string[]) => Promise<boolean>;
@@ -15,6 +15,9 @@ export class SigningCancelledError extends Error {}
  * the one that creates the user's own agent. Messages are never signed through it.
  */
 export class OwnerSigner extends Signer {
+  /** What the user approved in one confirmation, one entry per transaction, in signing order. */
+  private approved: string[][] = [];
+
   constructor(
     private readonly inner: Signer,
     private readonly config: LimitsConfig,
@@ -32,10 +35,27 @@ export class OwnerSigner extends Signer {
     return Promise.reject(new RefusedSigningError("Inti refused to sign: raw bytes are never signed with your account key."));
   }
 
+  /**
+   * Shows every transaction of one user action in a single confirmation. Each one is then signed
+   * without asking again only if it reads exactly as approved, in the same order.
+   */
+  async approveAll(transactions: readonly OwnerTransaction[]): Promise<void> {
+    const each = transactions.map((t) => describeOwnerTransaction(t, this.config));
+    if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
+    this.approved = [];
+    if (!(await this.confirm(each.flat()))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
+    this.approved = each;
+  }
+
   override async signTransaction(transaction: Transaction) {
     const lines = describeOwnerTransaction(transaction, this.config);
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
-    if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
+    const next = this.approved.shift();
+    const preApproved = next !== undefined && next.length === lines.length && next.every((line, i) => line === lines[i]);
+    if (!preApproved) {
+      this.approved = [];
+      if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
+    }
     return this.inner.signTransaction(transaction);
   }
 
