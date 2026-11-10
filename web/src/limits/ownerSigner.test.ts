@@ -229,6 +229,15 @@ describe("creating the user's own agent", () => {
   });
 });
 
+describe("how much NEAR activation asks for", () => {
+  it("covers creating the agent until the user has one, so the last step is never left short", () => {
+    const withAgent = LimitsClient.activationNeeds(expectedWasm.length, 10n ** 23n);
+    const beforeAgent = LimitsClient.activationNeeds(expectedWasm.length, 10n ** 23n, true);
+    const agentCost = 14_510_000_000_000_000_000_000n;
+    expect(beforeAgent - agentCost).toBeGreaterThanOrEqual(withAgent);
+  });
+});
+
 describe("the contract code the app installs", () => {
   it("the pinned hash is the hash of the shipped build", () => {
     expect(wasmSha256(expectedWasm)).toBe(SPENDING_LIMITS_WASM_SHA256);
