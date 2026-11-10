@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { createAgent } from "../agent/createAgent";
 import { LimitsClient, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
-import { PasskeyProtection, useHasPasskey } from "./PasskeyProtection";
+import { PasskeyProtection, useHasSecondFactor } from "./PasskeyProtection";
 import { DEFAULT_FUND, display, LimitForm } from "./SpendingLimitsPanel";
 import type { LimitsSetup } from "./useLimits";
 
@@ -25,7 +25,7 @@ interface Props {
 
 /**
  * First-run activation, inline on the home screen (not behind the shield icon):
- * 1. add a passkey, 2. add funds (the app notices them by itself), 3. create the user's own
+ * 1. add a second factor of the user's choice, 2. add funds (the app notices them by itself), 3. create the user's own
  * agent, 4. set spending limits and sign, then see where the money sits.
  */
 export function ActivationCard({ address, setup, status, refresh, getAccessToken, onAgent, onDone, onWorking }: Props) {
@@ -66,7 +66,7 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
   const { symbol, decimals } = config.token;
   const amount = (v: bigint) => `${display(v, decimals)} ${symbol}`;
   const { signer, confirmDialog } = useOwnerSigner(address, config);
-  const hasPasskey = useHasPasskey();
+  const hasPasskey = useHasSecondFactor();
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +133,7 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
     >
       {!active && (
         <>
-          <Step n={1} title="Protect your account with a passkey" done={hasPasskey}>
+          <Step n={1} title="Protect your account" done={hasPasskey}>
             <PasskeyProtection />
           </Step>
 

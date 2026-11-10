@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PrivyNearSigner } from "../privySigner";
 import type { LimitsConfig } from "./config";
 import { OwnerSigner } from "./ownerSigner";
-import { useHasPasskey } from "./PasskeyProtection";
+import { useHasSecondFactor } from "./PasskeyProtection";
 
 type Pending = { lines: string[]; resolve: (ok: boolean) => void };
 
@@ -18,7 +18,7 @@ export function useOwnerSigner(address: string, config: LimitsConfig): { signer:
   const { signRawHash } = useSignRawHash();
   const [pending, setPending] = useState<Pending | null>(null);
   const pendingRef = useRef<Pending | null>(null);
-  const hasPasskey = useHasPasskey();
+  const hasPasskey = useHasSecondFactor();
   const hasPasskeyRef = useRef(hasPasskey);
   useEffect(() => {
     hasPasskeyRef.current = hasPasskey;

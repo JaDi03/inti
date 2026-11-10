@@ -1,68 +1,35 @@
-import { useLinkWithPasskey, useMfaEnrollment, usePrivy, useUser, type User } from "@privy-io/react-auth";
-import { Fingerprint, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useMfaEnrollment, usePrivy } from "@privy-io/react-auth";
+import { Fingerprint } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/** True once the user has a passkey. Privy then asks for it before the wallet signs. */
-export function useHasPasskey(): boolean {
+/** True once the user has any second factor (passkey, authenticator app or SMS), whichever they chose. */
+export function useHasSecondFactor(): boolean {
   const { user } = usePrivy();
-  return (user?.mfaMethods ?? []).includes("passkey");
+  return (user?.mfaMethods ?? []).length > 0;
 }
 
 /**
- * Asks the user to add a passkey. Once enrolled, Privy requires it before the wallet signs,
- * so code running in the page alone cannot sign. Inti does not sign without one.
+ * Asks the user to add a passkey (or an authenticator app) as a second factor. Once enrolled,
+ * Privy requires it before the wallet signs, so code running in the page alone cannot sign.
  */
-/** Credential ids of the passkeys linked to the user. */
-function passkeyIds(user: User | null): string[] {
-  return (user?.linkedAccounts ?? []).flatMap((a) => (a.type === "passkey" ? [a.credentialId] : []));
-}
-
 export function PasskeyProtection() {
-  const hasPasskey = useHasPasskey();
-  const { user, refreshUser } = useUser();
-  const { linkWithPasskey } = useLinkWithPasskey();
-  const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { user } = usePrivy();
+  const { showMfaEnrollmentModal } = useMfaEnrollment();
+  const methods = user?.mfaMethods ?? [];
 
-  if (hasPasskey) {
+  if (methods.length > 0) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Fingerprint className="size-4 text-primary" /> Every signature asks for your passkey.
+        <Fingerprint className="size-4 text-primary" /> Every signature asks for your {methods.includes("passkey") ? "passkey" : "authenticator code"}.
       </p>
     );
   }
-
-  const enroll = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      // Privy enrolls a passkey as a second factor in three steps: link one to the account, start the
-      // enrollment, then confirm it with the linked passkeys (docs.privy.io, MFA enrollment with passkeys).
-      let ids = passkeyIds(user);
-      if (ids.length === 0) {
-        await linkWithPasskey({ name: "Inti" });
-        ids = passkeyIds(await refreshUser());
-      }
-      if (ids.length === 0) throw new Error("no passkey linked");
-      await initEnrollmentWithPasskey();
-      await submitEnrollmentWithPasskey({ credentialIds: ids });
-      await refreshUser();
-    } catch {
-      setError("The passkey was not added. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="rounded-xl border border-dashed p-3 text-sm">
-      <p>Add a passkey so every signature asks for your fingerprint, face or security key. Inti does not sign without it.</p>
-      <Button className="mt-2" size="sm" disabled={busy} onClick={() => void enroll()}>
-        {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Add a passkey
+      <p>Protect your account: add a passkey so every signature asks for your fingerprint, face or security key.</p>
+      <Button className="mt-2" size="sm" onClick={showMfaEnrollmentModal}>
+        <Fingerprint /> Add a passkey
       </Button>
-      {error && <p className="mt-2 text-destructive">{error}</p>}
     </div>
   );
 }
