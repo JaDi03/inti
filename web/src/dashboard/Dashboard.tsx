@@ -1,4 +1,4 @@
-import { Check, Clock, ExternalLink, Loader2, Lock, Plus, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Check, Clock, ExternalLink, Eye, EyeOff, Loader2, Lock, Plus, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -23,6 +23,9 @@ const TILE: Record<AssetKey, string> = {
 };
 
 const NEAR_DECIMALS = 24;
+const HIDDEN = "••••";
+/** The viewer's choice to hide amounts, remembered in this browser only. */
+const HIDE_KEY = "inti-hide-balances";
 
 /** Dollar value for display only; amounts stay exact in atomic units everywhere else. */
 function usd(amount: string, price: number | null | undefined): number | null {
@@ -31,27 +34,29 @@ function usd(amount: string, price: number | null | undefined): number | null {
 }
 
 const money = (v: number | null) => (v === null ? "--" : v.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const nearText = (atomic: bigint) => display(atomic, NEAR_DECIMALS);
 
-interface Props {
-  address: string;
-  config: LimitsConfig;
-  client: LimitsClient;
-  status: Installed;
-  getAccessToken: () => Promise<string | null>;
-  /** Opens the Spending limits window (edit limits, add NEAR, pause or turn off Inti). */
-  onManage: () => void;
-  className?: string;
+export interface DashboardState {
+  data: DashboardData | null;
+  assets: AssetRow[] | null;
+  loading: boolean;
+  load: () => Promise<void>;
+  hidden: boolean;
+  toggleHidden: () => void;
 }
 
-/** The user's money and the rules around it, always in view next to the chat. */
-export function Dashboard({ address, config, client, status, getAccessToken, onManage, className }: Props) {
-  const { signer, confirmDialog } = useOwnerSigner(address, config);
+/** Prices, the agent's rules and the wallet's assets, read once for both halves of the dashboard. */
+export function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<AssetKey | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lastTx, setLastTx] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(HIDE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,6 +74,38 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
     void load();
   }, [load, status]);
 
+  const toggleHidden = () =>
+    setHidden((h) => {
+      try {
+        localStorage.setItem(HIDE_KEY, h ? "0" : "1");
+      } catch {
+        // Storage can be blocked; the choice then lasts for this visit.
+      }
+      return !h;
+    });
+
+  return { data, assets, loading, load, hidden, toggleHidden };
+}
+
+interface MoneyProps {
+  address: string;
+  config: LimitsConfig;
+  client: LimitsClient;
+  status: Installed;
+  state: DashboardState;
+  /** Opens the Spending limits window (add NEAR, edit limits, pause or turn off Inti). */
+  onManage: () => void;
+  className?: string;
+}
+
+/** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
+export function MoneyPanel({ address, config, client, status, state, onManage, className }: MoneyProps) {
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const { data, assets, loading, load, hidden, toggleHidden } = state;
+  const [busy, setBusy] = useState<AssetKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastTx, setLastTx] = useState<string | null>(null);
+
   const enable = async (key: AssetKey) => {
     setBusy(key);
     setError(null);
@@ -83,43 +120,36 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
   };
 
   const nearPrice = data?.prices.near ?? null;
-  const nearText = (atomic: bigint) => display(atomic, NEAR_DECIMALS);
-  const free = fromAtomic(status.available.toString(), NEAR_DECIMALS);
-  const forOrders = fromAtomic(status.spendable.toString(), NEAR_DECIMALS);
-  const setAside = fromAtomic(status.setAside.toString(), NEAR_DECIMALS);
+  const inWallet = usd(fromAtomic(status.available.toString(), NEAR_DECIMALS), nearPrice);
+  const forOrders = usd(fromAtomic(status.spendable.toString(), NEAR_DECIMALS), nearPrice);
   const assetValues = (assets ?? []).map((r) => usd(fromAtomic(r.balance.toString(), DECIMALS[r.key]), data?.prices[r.key]) ?? 0);
-  const nearValues = [free, forOrders, setAside].map((v) => usd(v, nearPrice));
-  const total = nearValues.some((v) => v === null) ? null : [...nearValues, ...assetValues].reduce<number>((a, b) => a + (b ?? 0), 0);
+  const total = inWallet === null || forOrders === null ? null : [inWallet, forOrders, ...assetValues].reduce((a, b) => a + b, 0);
+  const show = (text: string) => (hidden ? HIDDEN : text);
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      {/* Wallet */}
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
           <p className="text-sm text-muted-foreground">Your wallet</p>
-          <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={loading} onClick={() => void load()}>
-            <RefreshCw className={cn(loading && "animate-spin")} />
-          </Button>
+          <div className="-mt-1 -mr-2 flex">
+            <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
+              {hidden ? <EyeOff /> : <Eye />}
+            </Button>
+            <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={loading} onClick={() => void load()}>
+              <RefreshCw className={cn(loading && "animate-spin")} />
+            </Button>
+          </div>
         </div>
-        <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums">{money(total)}</p>
-        <p className="text-xs text-muted-foreground">Everything below is in your own account.</p>
+        <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums">{show(money(total))}</p>
         <dl className="mt-4 flex flex-col gap-2 text-sm">
-          <BalanceRow label="Free to use" near={nearText(status.available)} value={nearValues[0] ?? null} />
-          <BalanceRow label="For orders" near={nearText(status.spendable)} value={nearValues[1] ?? null} highlight />
-          <BalanceRow
-            label="Set aside for Inti"
-            near={nearText(status.setAside)}
-            value={nearValues[2] ?? null}
-            icon={<Lock className="size-3.5" />}
-            hint="Kept by the network while Inti's rules live on your account. It comes back when you turn Inti off."
-          />
+          <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
+          <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
         </dl>
         <Button className="mt-4 w-full rounded-full" onClick={onManage}>
           <Plus /> Add NEAR for orders
         </Button>
       </section>
 
-      {/* Assets */}
       <section>
         <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">What Inti can buy for you</h2>
         <ul className="grid grid-cols-2 gap-3">
@@ -133,16 +163,18 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-wide">{a.name}</p>
-                    <p className="text-xs opacity-70">{a.kind === "real-world" ? "Real-world asset" : "Crypto"} · {a.symbol}</p>
+                    <p className="text-xs opacity-70">
+                      {a.kind === "real-world" ? "Real-world asset" : "Crypto"} · {a.symbol}
+                    </p>
                   </div>
                   {row?.enabled && <Check className="size-4 shrink-0" aria-label="Enabled" />}
                 </div>
                 <div>
                   {row?.enabled ? (
                     <>
-                      <p className="text-2xl font-semibold tabular-nums">{money(amount === null ? null : usd(amount, price))}</p>
-                      <p className="truncate text-xs tabular-nums opacity-70" title={amount ?? ""}>
-                        {amount ?? "--"} {a.symbol}
+                      <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
+                      <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
+                        {show(`${amount ?? "--"} ${a.symbol}`)}
                       </p>
                     </>
                   ) : (
@@ -164,7 +196,24 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
         <p className="mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
       </section>
 
-      {/* Spending Limits, on the user's account */}
+      {error && <p className="break-words text-sm text-destructive">{error}</p>}
+      {lastTx && (
+        <a className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline" href={config.explorerTxUrl(lastTx)} target="_blank" rel="noreferrer">
+          View last transaction <ExternalLink className="size-3.5" />
+        </a>
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+/** The rules around the money: Spending Limits on the user's account and the agent's signed rules. */
+export function RulesPanel({ status, state, onManage, className }: { status: Installed; state: DashboardState; onManage: () => void; className?: string }) {
+  const { data, loading, hidden } = state;
+  const policy = data?.agent?.policy;
+  const orders = data?.agent?.orders;
+  return (
+    <div className={cn("flex flex-col gap-4", className)}>
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 font-medium">
@@ -198,27 +247,29 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
         ) : (
           <p className="mt-3 text-sm">No limit set yet.</p>
         )}
+        <div className="mt-3 flex items-start gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+          <Lock className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            The network keeps {hidden ? HIDDEN : `${nearText(status.setAside)} NEAR`} of your account aside while these rules live on it. It comes back when you turn Inti off.
+          </span>
+        </div>
         <Button variant="outline" className="mt-4 w-full rounded-full" onClick={onManage}>
           Manage limits
         </Button>
       </section>
 
-      {/* The agent's own rules, signed by the user */}
       <section className="rounded-3xl border bg-card p-5">
         <h2 className="flex items-center gap-2 font-medium">
           <Sparkles className="size-4 text-primary" /> Your agent&apos;s rules
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
-        {data?.agent?.policy ? (
+        {policy ? (
           <ul className="mt-3 flex flex-col gap-2 text-sm">
-            <Rule ok={data.agent.policy.sendsOnlyToOwner} text="Sends only to you" />
-            <Rule ok={data.agent.policy.canBuyNow} text="Can buy now" />
-            <Rule
-              ok={data.agent.policy.canPlaceLimitOrders}
-              text={`Can place price orders${data.agent.policy.maxPriceGapPercent ? `, at most ${data.agent.policy.maxPriceGapPercent}% from the market` : ""}`}
-            />
-            {data.agent.policy.maxActionsPerHour !== null && <Rule ok text={`At most ${data.agent.policy.maxActionsPerHour} actions per hour`} />}
-            {data.agent.policy.frozen && <Rule ok={false} text="Frozen: it can do nothing" />}
+            <Rule ok={policy.sendsOnlyToOwner} text="Sends only to you" />
+            <Rule ok={policy.canBuyNow} text="Can buy now" />
+            <Rule ok={policy.canPlaceLimitOrders} text={`Can place price orders${policy.maxPriceGapPercent ? `, at most ${policy.maxPriceGapPercent}% from the market` : ""}`} />
+            {policy.maxActionsPerHour !== null && <Rule ok text={`At most ${policy.maxActionsPerHour} actions per hour`} />}
+            {policy.frozen && <Rule ok={false} text="Frozen: it can do nothing" />}
           </ul>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">{loading ? "Reading your agent..." : "Your agent's rules are not available right now."}</p>
@@ -234,12 +285,12 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
           )}
         </div>
         <h3 className="mt-4 text-sm font-medium">Orders waiting for a price</h3>
-        {data?.agent?.orders && data.agent.orders.length > 0 ? (
+        {orders && orders.length > 0 ? (
           <ul className="mt-2 flex flex-col gap-2">
-            {data.agent.orders.map((o, i) => (
+            {orders.map((o, i) => (
               <li key={`${o.deadline}-${i}`} className="flex items-center justify-between gap-2 rounded-2xl border px-3 py-2 text-sm">
                 <span>
-                  {o.amount ?? "--"} {o.asset ? ASSETS[o.asset].symbol : "?"} at {o.priceUsd ? `$${o.priceUsd}` : `${o.priceNear} NEAR`}
+                  {hidden ? HIDDEN : (o.amount ?? "--")} {o.asset ? ASSETS[o.asset].symbol : "?"} at {o.priceUsd ? `$${o.priceUsd}` : `${o.priceNear} NEAR`}
                 </span>
                 <span className="text-xs text-muted-foreground">until {new Date(o.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
               </li>
@@ -249,32 +300,53 @@ export function Dashboard({ address, config, client, status, getAccessToken, onM
           <p className="mt-1 text-sm text-muted-foreground">None right now.</p>
         )}
       </section>
-
-      {error && <p className="break-words text-sm text-destructive">{error}</p>}
-      {lastTx && (
-        <a className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline" href={config.explorerTxUrl(lastTx)} target="_blank" rel="noreferrer">
-          View last transaction <ExternalLink className="size-3.5" />
-        </a>
-      )}
-      {confirmDialog}
     </div>
   );
 }
 
-function BalanceRow({ label, near, value, highlight, icon, hint }: { label: string; near: string; value: number | null; highlight?: boolean; icon?: React.ReactNode; hint?: string }) {
+interface LayoutProps {
+  address: string;
+  config: LimitsConfig;
+  client: LimitsClient;
+  status: Installed;
+  getAccessToken: () => Promise<string | null>;
+  onManage: () => void;
+  /** On a phone, which one shows: the chat or the portfolio. */
+  view: "chat" | "portfolio";
+  children: React.ReactNode;
+}
+
+/**
+ * The chat with the portfolio around it. Wide screens: the rules on the left, the money on the
+ * right. Medium screens: everything on the right. Phones: the chat or the portfolio, one at a time.
+ */
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, view, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken);
+  const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   return (
-    <div>
-      <div className="flex items-center justify-between gap-3">
-        <dt className={cn("flex items-center gap-1.5", highlight ? "text-foreground" : "text-muted-foreground")}>
-          {icon}
-          {label}
-        </dt>
-        <dd className="text-right tabular-nums">
-          <span className={cn(highlight && "font-medium")}>{near} NEAR</span>
-          <span className="ml-2 text-xs text-muted-foreground">{money(value)}</span>
-        </dd>
-      </div>
-      {hint && <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{hint}</p>}
+    <>
+      <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>
+        <RulesPanel status={status} state={state} onManage={onManage} />
+      </aside>
+      {children}
+      <aside className={cn(side, view === "chat" ? "hidden" : "flex-1", "lg:block lg:w-[380px] lg:flex-none lg:shrink-0 lg:pr-6 lg:pl-0")}>
+        <div className="mx-auto flex max-w-md flex-col gap-4">
+          <MoneyPanel address={address} config={config} client={client} status={status} state={state} onManage={onManage} />
+          <RulesPanel status={status} state={state} onManage={onManage} className="xl:hidden" />
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function BalanceRow({ label, near, value, highlight }: { label: string; near: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className={cn(highlight ? "text-foreground" : "text-muted-foreground")}>{label}</dt>
+      <dd className="text-right tabular-nums">
+        <span className={cn(highlight && "font-medium")}>{near}</span>
+        <span className="ml-2 text-xs text-muted-foreground">{value}</span>
+      </dd>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
 import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
-import { Dashboard } from "./dashboard/Dashboard";
+import { PortfolioLayout } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -35,6 +35,11 @@ function shortAddress(address: string): string {
 
 function Wordmark({ className }: { className?: string }) {
   return <span className={cn("font-heading font-bold tracking-tight text-primary", className)}>Inti</span>;
+}
+
+/** The chat alone until Inti is on; then the portfolio around it. */
+function WithPortfolio({ portfolio, children }: { portfolio: Omit<ComponentProps<typeof PortfolioLayout>, "children"> | null; children: ReactNode }) {
+  return portfolio ? <PortfolioLayout {...portfolio}>{children}</PortfolioLayout> : <>{children}</>;
 }
 
 function Welcome({ onLogin }: { onLogin: () => void }) {
@@ -222,6 +227,21 @@ export function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
+      <WithPortfolio
+        portfolio={
+          installed && address
+            ? {
+                address,
+                config: installed.setup.config,
+                client: installed.setup.client,
+                status: installed.status,
+                getAccessToken,
+                onManage: () => setLimitsOpen(true),
+                view,
+              }
+            : null
+        }
+      >
       <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", installed && view === "portfolio" && "hidden lg:flex")}>
         <div
           className={cn(
@@ -283,19 +303,7 @@ export function App() {
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
-      {installed && address && (
-        <aside className={cn("no-scrollbar min-h-0 overflow-y-auto px-4 pb-6 lg:block lg:w-[400px] lg:shrink-0 lg:pr-6 lg:pl-0", view === "chat" ? "hidden" : "flex-1")}>
-          <Dashboard
-            address={address}
-            config={installed.setup.config}
-            client={installed.setup.client}
-            status={installed.status}
-            getAccessToken={getAccessToken}
-            onManage={() => setLimitsOpen(true)}
-            className="mx-auto max-w-md"
-          />
-        </aside>
-      )}
+      </WithPortfolio>
       </div>
       {limitsOpen && address && (
         <SpendingLimitsPanel
