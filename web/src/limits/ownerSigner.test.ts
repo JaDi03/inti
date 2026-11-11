@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Account, actions, buildDelegateAction, createTransaction, KeyPair } from "near-api-js";
 import type { Action, KeyPairEd25519 } from "near-api-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { agentPolicy } from "../../../agent/policy/agentPolicy";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
@@ -233,6 +234,150 @@ describe("signing with the user's account key", () => {
     const unprotected = userWallet(true, false);
     await expect(unprotected.signer.signNep413Message(unprotected.accountId, grant(unprotected))).rejects.toThrow(RefusedSigningError);
     expect([...cancelled.signed, ...unprotected.signed]).toHaveLength(0);
+  });
+});
+
+describe("renewing the grant", () => {
+  /** A grant closing shaped exactly like the Agent API's (fields read from a live grant_revoke). */
+  function closing(wallet: Wallet, changes: Record<string, unknown> = {}) {
+    const now = Date.now();
+    const message = {
+      action: "revoke_grant",
+      agent_id: "ab".repeat(32),
+      domain: "near-intents-agent-api.owner-admin.v2",
+      expires_at_ms: now + 300_000,
+      issued_at_ms: now,
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      recipient: config.agentApiHost,
+      target_id: "46".repeat(32),
+      tenant_id: "01".repeat(32),
+      ...changes,
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  }
+  const grantFor = (wallet: Wallet) => {
+    const now = Date.now();
+    const message = {
+      agent_id: "ab".repeat(32),
+      credential: "cd".repeat(32),
+      domain: "near-intents-agent-api.agent-grant.v6",
+      expires_at_ms: now + 7 * 86_400_000,
+      issued_at_ms: now,
+      label: "Inti trading",
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      recipient: config.agentApiHost,
+      tenant_id: "01".repeat(32),
+      wallet_id: "685aeccf-ee19-4b46-b1c7-292d96870202",
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  };
+
+  it("shows the new grant and the closing in one confirmation, then signs both without asking again", async () => {
+    const wallet = userWallet();
+    const grant = grantFor(wallet);
+    const close = closing(wallet);
+    await wallet.signer.approveMessages(wallet.accountId, [grant, close]);
+    await wallet.signer.signNep413Message(wallet.accountId, grant);
+    await wallet.signer.signNep413Message(wallet.accountId, close);
+    expect(wallet.shown).toHaveLength(1);
+    expect(wallet.shown[0]?.at(-1)).toBe("Close Inti's earlier permission, so only the new one stays.");
+    expect(wallet.signed).toHaveLength(2);
+  });
+
+  it("asks again for a message that is not the one approved, or the same text with another nonce", async () => {
+    const wallet = userWallet();
+    await wallet.signer.approveMessages(wallet.accountId, [grantFor(wallet)]);
+    await wallet.signer.signNep413Message(wallet.accountId, closing(wallet));
+    expect(wallet.shown).toHaveLength(2);
+
+    const again = userWallet();
+    const grant = grantFor(again);
+    await again.signer.approveMessages(again.accountId, [grant]);
+    await again.signer.signNep413Message(again.accountId, { ...grant, nonce: new Uint8Array(32).fill(9) });
+    expect(again.shown).toHaveLength(2);
+  });
+
+  it("refuses a message that is not written exactly as the Agent API writes it", async () => {
+    const wallet = userWallet();
+    const grant = grantFor(wallet);
+    const spaced = { ...grant, message: JSON.stringify(JSON.parse(grant.message), null, 1) };
+    // A key written twice: a reader that keeps the first one would see another owner.
+    const twice = { ...grant, message: grant.message.replace("{", `{"owner":{"account_id":"${"cd".repeat(32)}","public_key":"ed25519:x","type":"near"},`) };
+    await expect(wallet.signer.signNep413Message(wallet.accountId, spaced)).rejects.toThrow(RefusedSigningError);
+    await expect(wallet.signer.signNep413Message(wallet.accountId, twice)).rejects.toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it.each([
+    ["another owner", { owner: { account_id: "cd".repeat(32), public_key: "ed25519:x", type: "near" } }],
+    ["another service", { recipient: "evil.example" }],
+    ["testnet", { network: "testnet" }],
+    ["no grant", { target_id: "x" }],
+    ["an expired closing", { expires_at_ms: Date.now() - 1000 }],
+    ["an extra field", { policy: {} }],
+  ])("refuses a closing with %s", async (_name, changes) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signNep413Message(wallet.accountId, closing(wallet, changes))).rejects.toThrow(RefusedSigningError);
+    await expect(wallet.signer.approveMessages(wallet.accountId, [grantFor(wallet), closing(wallet, changes)])).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+});
+
+describe("changing the price protection", () => {
+  /** A rule change shaped exactly like the Agent API's (fields read from a live policy_update). */
+  function ruleChange(wallet: Wallet, changes: Record<string, unknown> = {}) {
+    const now = Date.now();
+    const message = {
+      action: "update_policy",
+      agent_id: "ab".repeat(32),
+      domain: "near-intents-agent-api.owner-admin.v2",
+      expected_revision: 1,
+      expires_at_ms: now + 300_000,
+      issued_at_ms: now,
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      policy: agentPolicy(wallet.accountId, 100),
+      recipient: config.agentApiHost,
+      target_id: "9d".repeat(32),
+      tenant_id: "01".repeat(32),
+      ...changes,
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  }
+
+  it("signs Inti's own rules with a price protection the user can pick, after showing it", async () => {
+    const wallet = userWallet();
+    await wallet.signer.signNep413Message(wallet.accountId, ruleChange(wallet));
+    expect(wallet.signed).toHaveLength(1);
+    expect(wallet.shown[0]?.[0]).toBe("Set your price protection to 1%.");
+  });
+
+  it.each([
+    ["rules that send anywhere", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId, 100), destinations: { mode: "any", list: [] } } })],
+    ["rules that send to someone else", () => ({ policy: agentPolicy("cd".repeat(32), 100) })],
+    ["a price protection Inti does not offer", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId), limit_order: { max_deviation_bps: 250 } } })],
+    ["rules with an extra field", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId, 100), owner_approval: true } })],
+    ["another action", () => ({ action: "freeze" })],
+    ["another owner", () => ({ owner: { account_id: "cd".repeat(32), public_key: "ed25519:x", type: "near" } })],
+    ["another service", () => ({ recipient: "evil.example" })],
+    ["testnet", () => ({ network: "testnet" })],
+    ["an expired change", () => ({ expires_at_ms: Date.now() - 1000 })],
+    ["a change that stays signable for a day", () => ({ expires_at_ms: Date.now() + 86_400_000 })],
+    ["an extra field", () => ({ transfer_to: "attacker.near" })],
+  ])("refuses %s before asking the user or the wallet", async (_name, changes) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signNep413Message(wallet.accountId, ruleChange(wallet, changes(wallet)))).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
   });
 });
 

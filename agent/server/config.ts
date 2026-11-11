@@ -31,6 +31,12 @@ export const LIMITS = {
   grantsPerDayTotal: 400,
   /** Grants waiting for the owner's signature that the server remembers; the oldest is dropped first. */
   pendingGrantsInMemory: 2000,
+  /** Rule changes one user may start per day; the Agent API also waits between changes. */
+  policyChangesPerUserPerDay: 10,
+  /** Rule changes per day for everyone. */
+  policyChangesPerDayTotal: 500,
+  /** Rule changes waiting for the owner's signature that the server remembers; the oldest is dropped first. */
+  pendingPolicyChangesInMemory: 2000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
 } as const;

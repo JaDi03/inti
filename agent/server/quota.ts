@@ -28,4 +28,12 @@ export class DailyQuota {
     this.total += 1;
     return "ok";
   }
+
+  /** Gives back one use taken today, for a request that ended up preparing nothing. */
+  giveBack(userId: string): void {
+    const used = this.perUser.get(userId) ?? 0;
+    if (used === 0) return;
+    this.perUser.set(userId, used - 1);
+    this.total = Math.max(0, this.total - 1);
+  }
 }

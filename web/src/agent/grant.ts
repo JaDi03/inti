@@ -1,4 +1,4 @@
-import type { Signer } from "near-api-js";
+import type { OwnerSigner } from "../limits/ownerSigner";
 
 /** Public URL of Inti's agent API (INTI_API_URL in the root .env). Not a secret. */
 const API_URL = (import.meta.env as Record<string, string | undefined>).INTI_API_URL;
@@ -56,34 +56,67 @@ function fromBase64(text: string): Uint8Array {
   return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 }
 
-/**
- * Lets Inti's server trade for the user's agent: the server makes the grant, the owner signer
- * checks it and shows it in plain words, and the user's key signs it. Returns until when it lasts.
- */
-export async function issueGrant({ accessToken, accountId, signer }: { accessToken: string; accountId: string; signer: Signer }): Promise<string> {
-  const prepared = await call("/api/agent/grant/prepare", accessToken, {});
-  const intent = prepared.intent as { standard?: unknown; payload?: { message?: unknown; recipient?: unknown; nonce?: unknown } } | undefined;
+/** How long the user may let Inti trade before signing again. */
+export const GRANT_DAY_CHOICES = [7, 30, 90] as const;
+export type GrantDays = (typeof GRANT_DAY_CHOICES)[number];
+
+interface OwnerMessage {
+  correlationId: string;
+  intent: { standard: "nep413"; payload: { message: string; recipient: string; nonce: string } };
+  nonce: Uint8Array;
+}
+
+/** A message the Agent API built for the owner to sign, or null when it is not the documented shape. */
+function ownerMessage(correlationId: unknown, rawIntent: unknown): OwnerMessage | null {
+  const intent = rawIntent as { standard?: unknown; payload?: { message?: unknown; recipient?: unknown; nonce?: unknown } } | undefined;
   const payload = intent?.payload;
   if (
-    prepared.status !== "pending_signature" ||
-    typeof prepared.correlationId !== "string" ||
+    typeof correlationId !== "string" ||
     intent?.standard !== "nep413" ||
     typeof payload?.message !== "string" ||
     typeof payload.recipient !== "string" ||
     typeof payload.nonce !== "string"
   ) {
-    throw new GrantError(GENERIC);
+    return null;
   }
   const nonce = fromBase64(payload.nonce);
-  if (nonce.length !== 32) throw new GrantError(GENERIC);
+  if (nonce.length !== 32) return null;
+  return { correlationId, intent: intent as OwnerMessage["intent"], nonce };
+}
 
-  // The owner signer refuses anything that is not a grant for this account, before the wallet sees it.
-  const signed = await signer.signNep413Message(accountId, { message: payload.message, recipient: payload.recipient, nonce });
-  const sent = await call("/api/agent/grant/submit", accessToken, {
-    correlationId: prepared.correlationId,
-    signedData: { ...intent, public_key: signed.publicKey.toString(), signature: base64(signed.signature) },
+async function signAndSend(path: string, accessToken: string, accountId: string, signer: OwnerSigner, m: OwnerMessage): Promise<Record<string, unknown>> {
+  const { message, recipient } = m.intent.payload;
+  const signed = await signer.signNep413Message(accountId, { message, recipient, nonce: m.nonce });
+  return call(path, accessToken, {
+    correlationId: m.correlationId,
+    signedData: { ...m.intent, public_key: signed.publicKey.toString(), signature: base64(signed.signature) },
   });
-  if (sent.status === "success" && typeof sent.expiresAt === "string") return sent.expiresAt;
+}
+
+/**
+ * Lets Inti's server trade for the user's agent for `days`: the server makes the grant, the owner
+ * signer checks it and shows it in plain words, and the user's key signs it. Inti's earlier grants
+ * are closed in the same confirmation, but only after the new one is live, so trading never stops.
+ * Returns until when the new grant lasts.
+ */
+export async function issueGrant({ accessToken, accountId, signer, days }: { accessToken: string; accountId: string; signer: OwnerSigner; days?: GrantDays }): Promise<string> {
+  const prepared = await call("/api/agent/grant/prepare", accessToken, days === undefined ? {} : { days });
+  const grant = prepared.status === "pending_signature" ? ownerMessage(prepared.correlationId, prepared.intent) : null;
+  if (!grant) throw new GrantError(GENERIC);
+  const revokes = (Array.isArray(prepared.revokes) ? prepared.revokes : []).map((r: { correlationId?: unknown; intent?: unknown }) => ownerMessage(r.correlationId, r.intent));
+  if (revokes.some((r) => r === null)) throw new GrantError(GENERIC);
+  const closings = revokes as OwnerMessage[];
+
+  // The owner signer refuses anything that is not a grant or a closing for this account, before the wallet sees it.
+  await signer.approveMessages(
+    accountId,
+    [grant, ...closings].map((m) => ({ message: m.intent.payload.message, recipient: m.intent.payload.recipient, nonce: m.nonce })),
+  );
+  const sent = await signAndSend("/api/agent/grant/submit", accessToken, accountId, signer, grant);
   if (sent.status === "processing") throw new GrantError("Almost there: Inti's permission is still being saved. Check again in a minute.");
-  throw new GrantError(GENERIC);
+  if (sent.status !== "success" || typeof sent.expiresAt !== "string") throw new GrantError(GENERIC);
+  // The new grant is live. A closing that fails leaves an earlier grant open until it expires; the
+  // next renewal closes it, since the server lists every earlier grant that is still live.
+  for (const closing of closings) await signAndSend("/api/agent/grant/revoke/submit", accessToken, accountId, signer, closing).catch(() => null);
+  return sent.expiresAt;
 }

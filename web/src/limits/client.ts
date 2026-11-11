@@ -28,6 +28,8 @@ export type LimitsStatus =
       kind: "installed";
       available: bigint;
       intiConnected: boolean;
+      /** NEAR Inti's key may still spend on network fees, in total; null without a key or a cap. */
+      intiFeesLeft: bigint | null;
       agent: string;
       limit: SpendLimit | null;
       spentToday: bigint;
@@ -80,17 +82,18 @@ export class LimitsClient {
     if (state.codeHash === NO_CODE) return { kind: "not-installed", available };
 
     const token = this.config.token.id;
-    const [onChainConfig, limit, spent, balance, intiConnected] = await Promise.all([
+    const [onChainConfig, limit, spent, balance, intiKey] = await Promise.all([
       this.view<{ agent: string }>(accountId, "get_config"),
       this.view<{ per_order: string; per_day: string } | null>(accountId, "get_limit", { token }),
       this.view<string>(accountId, "get_spent_last_24h", { token }),
       this.view<string>(token, "ft_balance_of", { account_id: accountId }),
-      this.hasIntiKey(accountId),
+      this.intiKey(accountId),
     ]);
     return {
       kind: "installed",
       available,
-      intiConnected,
+      intiConnected: intiKey.connected,
+      intiFeesLeft: intiKey.feesLeft,
       agent: onChainConfig.agent,
       limit: limit ? { perOrder: BigInt(limit.per_order), perDay: BigInt(limit.per_day) } : null,
       spentToday: BigInt(spent),
@@ -99,13 +102,21 @@ export class LimitsClient {
     };
   }
 
-  private async hasIntiKey(accountId: string): Promise<boolean> {
+  /**
+   * Whether Inti's key is on the account, and what it may still spend on network fees (null when
+   * the key has no fee cap). The allowance is one total that each transaction lowers; adding the
+   * key again starts it over.
+   */
+  private async intiKey(accountId: string): Promise<{ connected: boolean; feesLeft: bigint | null }> {
+    let key;
     try {
-      await new Account(accountId, this.provider).getAccessKey(this.config.intiPublicKey);
-      return true;
+      key = await new Account(accountId, this.provider).getAccessKey(this.config.intiPublicKey);
     } catch {
-      return false;
+      return { connected: false, feesLeft: null };
     }
+    const permission = key.permission as unknown;
+    const allowance = typeof permission === "object" && permission !== null && "FunctionCall" in permission ? (permission as { FunctionCall: { allowance?: string | null } }).FunctionCall.allowance : null;
+    return { connected: true, feesLeft: typeof allowance === "string" && /^\d+$/.test(allowance) ? BigInt(allowance) : null };
   }
 
   private account(accountId: string, signer: Signer): Account {

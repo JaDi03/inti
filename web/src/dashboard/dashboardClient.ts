@@ -10,6 +10,11 @@ export interface PolicySummary {
   maxActionsPerHour: number | null;
   maxPriceGapPercent: string | null;
   sendsOnlyToOwner: boolean;
+  /** Every address the agent may send to, as signed. */
+  destinations: string[];
+  maxDeviationBps: number | null;
+  /** When the next rule change opens, or null when it already does. */
+  nextChangeAt: string | null;
 }
 
 export interface OpenOrder {
@@ -23,7 +28,7 @@ export interface OpenOrder {
 
 export interface DashboardData {
   prices: Record<"near" | AssetKey, number | null>;
-  agent: { grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
 
 /** Prices and the user's own agent, from Inti's server. Null when the server cannot be reached. */

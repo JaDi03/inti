@@ -9,6 +9,7 @@ import {
   FUNDING_ASSET,
   placeLimitBuy,
   priceInBand,
+  protectedMinOut,
   sweep,
   type AgentPort,
   type BuyResult,
@@ -77,7 +78,10 @@ export function trading(deps: TradingDeps) {
       const agent = await deps.agents.find(userId);
       if (agent.status !== "active") return { status: "refused", code: "no_agent" };
       const q = await deps.agent.quote(agent.agentId, FUNDING_ASSET, asset, amount);
-      return q ? { status: "quoted", ...q } : { status: "refused", code: "no_route" };
+      if (!q) return { status: "refused", code: "no_route" };
+      // The user sees the same least amount a real buy would accept.
+      const bound = await deps.agent.signedPriceBound(agent.agentId);
+      return { status: "quoted", ...q, minAmountOut: protectedMinOut(q, bound) };
     },
 
     /**

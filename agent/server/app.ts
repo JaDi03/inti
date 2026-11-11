@@ -9,11 +9,12 @@ import { runCycle, type Toolset } from "../core/loop.js";
 import type { PricedToken, SimulatedPortfolio } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
+import { PRICE_PROTECTION_BPS } from "../policy/agentPolicy.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
-import { newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
+import { GRANT_DAY_CHOICES, GRANT_DAYS, newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
 import type { ChainPort } from "./orders.js";
 import { DailyQuota } from "./quota.js";
 import { realTools } from "./realTools.js";
@@ -51,6 +52,11 @@ const chatBody = z.strictObject({ message: z.string().trim().min(1).max(LIMITS.m
 const prepareAgentBody = z.strictObject({
   accountId: z.string().regex(/^[0-9a-f]{64}$/),
   publicKey: z.string().regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$/),
+});
+/** How long the new grant lasts; without a choice, the default. */
+const prepareGrantBody = z.strictObject({ days: z.literal(GRANT_DAY_CHOICES).optional() });
+const preparePolicyBody = z.strictObject({
+  maxDeviationBps: z.literal(PRICE_PROTECTION_BPS),
 });
 const submitAgentBody = z.strictObject({
   correlationId: z.string().min(1).max(128),
@@ -92,6 +98,21 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const grantQuota = new DailyQuota(LIMITS.grantsPerUserPerDay, LIMITS.grantsPerDayTotal);
   // Grants waiting for a signature: the user, and the token that only the server ever holds.
   const pendingGrants = new Map<string, { userId: string; record: GrantRecord }>();
+  // Closings of earlier grants, each tied to the new grant that must be live before it is sent.
+  const pendingRevokes = new Map<string, { userId: string; grant: string }>();
+  // New grants that went live, and their user.
+  const issuedGrants = new Map<string, string>();
+  /** Keeps a pending entry, dropping the oldest when the map is full. */
+  const remember = <T>(map: Map<string, T>, key: string, value: T) => {
+    if (map.size >= LIMITS.pendingGrantsInMemory) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, value);
+  };
+  const policyQuota = new DailyQuota(LIMITS.policyChangesPerUserPerDay, LIMITS.policyChangesPerDayTotal);
+  // Rule changes waiting for a signature, and the user each one belongs to.
+  const pendingPolicies = new Map<string, string>();
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -164,7 +185,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.post("/api/agent/grant/prepare", async (req, reply) => {
     const userId = await signedInUser(req, reply);
     if (userId === null) return reply;
-    if (req.body !== undefined && req.body !== null && Object.keys(req.body).length > 0) return reply.code(400).send({ error: "bad_request" });
+    const choice = prepareGrantBody.safeParse(req.body ?? {});
+    if (!choice.success) return reply.code(400).send({ error: "bad_request" });
+    let taken = false;
     try {
       const agent = await deps.agents.find(userId);
       if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
@@ -173,16 +196,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         req.log.warn({ userId, cap: allowed }, "grant_quota_refused");
         return reply.code(429).send({ error: "rate_limited" });
       }
-      const { token, expiresAt, body } = newGrantRequest(agent.agentId, now());
+      taken = true;
+      const { token, expiresAt, body } = newGrantRequest(agent.agentId, now(), choice.data.days);
+      // Read before the new grant exists, so only the earlier ones are ever closed.
+      const revokes = await deps.agents.prepareRevokes(agent.agentId);
       const prepared = await deps.agents.prepareGrant(body);
-      if (pendingGrants.size >= LIMITS.pendingGrantsInMemory) {
-        const oldest = pendingGrants.keys().next().value;
-        if (oldest !== undefined) pendingGrants.delete(oldest);
-      }
-      pendingGrants.set(prepared.correlationId, { userId, record: { agentId: agent.agentId, token, expiresAt } });
-      req.log.info({ userId }, "grant_prepared");
-      return { status: "pending_signature", correlationId: prepared.correlationId, intent: prepared.intent, preview: prepared.preview, expiresAt };
+      remember(pendingGrants, prepared.correlationId, { userId, record: { agentId: agent.agentId, token, expiresAt } });
+      for (const r of revokes) remember(pendingRevokes, r.correlationId, { userId, grant: prepared.correlationId });
+      req.log.info({ userId, days: choice.data.days ?? GRANT_DAYS, revokes: revokes.length }, "grant_prepared");
+      return { status: "pending_signature", correlationId: prepared.correlationId, intent: prepared.intent, preview: prepared.preview, expiresAt, revokes };
     } catch (error) {
+      // Nothing was prepared, so the try does not count against the user or everyone else.
+      if (taken) grantQuota.giveBack(userId);
       return agentFailure(req, reply, error);
     }
   });
@@ -197,10 +222,84 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (pending?.userId !== userId) return reply.code(404).send({ error: "not_found" });
     try {
       const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "grant_issue");
-      if (outcome === "success") await deps.grants.put(userId, pending.record);
+      if (outcome === "success") {
+        await deps.grants.put(userId, pending.record);
+        remember(issuedGrants, body.data.correlationId, userId);
+      }
       if (outcome !== "processing") pendingGrants.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "grant_submitted");
       return outcome === "success" ? { status: outcome, expiresAt: pending.record.expiresAt } : { status: outcome };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Closes one earlier grant. Only its user may send it, and only once the grant that replaces it is live.
+  app.post("/api/agent/grant/revoke/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = submitAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const pending = pendingRevokes.get(body.data.correlationId);
+    if (pending?.userId !== userId || issuedGrants.get(pending.grant) !== userId) return reply.code(404).send({ error: "not_found" });
+    try {
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "grant_revoke");
+      if (outcome !== "processing") pendingRevokes.delete(body.data.correlationId);
+      req.log.info({ userId, outcome }, "grant_revoked");
+      return { status: outcome };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // The document the user's wallet signs to set their price protection. Only the percentage comes
+  // from the request; the rest of the rules are rebuilt here for the session's own agent.
+  app.post("/api/agent/policy/prepare", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = preparePolicyBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    let taken = false;
+    try {
+      const agent = await deps.agents.find(userId);
+      if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
+      const allowed = policyQuota.take(userId);
+      if (allowed !== "ok") {
+        req.log.warn({ userId, cap: allowed }, "policy_quota_refused");
+        return reply.code(429).send({ error: "rate_limited" });
+      }
+      taken = true;
+      const prepared = await deps.agents.preparePolicy(agent.agentId, agent.ownerAccount, body.data.maxDeviationBps);
+      if (prepared.status === "cooldown") {
+        // NEAR Intents is still waiting between changes: nothing was prepared, so the try does not count.
+        policyQuota.giveBack(userId);
+        return reply.code(409).send({ error: "cooldown", availableAt: prepared.availableAt });
+      }
+      if (pendingPolicies.size >= LIMITS.pendingPolicyChangesInMemory) {
+        const oldest = pendingPolicies.keys().next().value;
+        if (oldest !== undefined) pendingPolicies.delete(oldest);
+      }
+      pendingPolicies.set(prepared.correlationId, userId);
+      req.log.info({ userId, bps: body.data.maxDeviationBps }, "policy_prepared");
+      return prepared;
+    } catch (error) {
+      if (taken) policyQuota.giveBack(userId);
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Sends the signed rule change. Only the user who asked for it may send it.
+  app.post("/api/agent/policy/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = submitAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (pendingPolicies.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
+    try {
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "policy_update");
+      if (outcome !== "processing") pendingPolicies.delete(body.data.correlationId);
+      req.log.info({ userId, outcome }, "policy_submitted");
+      return { status: outcome };
     } catch (error) {
       return agentFailure(req, reply, error);
     }

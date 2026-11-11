@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -11,6 +11,9 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { AddressLine } from "./AddressLine";
+import { GrantRenewal } from "./GrantRenewal";
+import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
 
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
@@ -38,6 +41,11 @@ const GROUPS: { title: string; keys: AssetKey[] }[] = [
 
 const NEAR_DECIMALS = 24;
 const HIDDEN = "••••";
+/**
+ * What one order reserves from Inti's fee allowance: 100 TGas at NEAR's lowest gas price
+ * (0.0001 NEAR per TGas). Below it the next order cannot be paid.
+ */
+const ONE_ORDER_FEE_YOCTO = 10n ** 22n; // 0.01 NEAR
 
 /** Dollar value for display only; amounts stay exact in atomic units everywhere else. */
 function usd(amount: string, price: number | null | undefined): number | null {
@@ -268,17 +276,21 @@ interface RulesProps {
   onManage: () => void;
   /** Re-reads the account after the user changed something on it. */
   onChanged: () => void;
+  getAccessToken: () => Promise<string | null>;
   className?: string;
 }
 
 /** The rules around the money: Spending Limits on the user's account and the agent's signed rules. */
-export function RulesPanel({ address, config, client, status, state, onManage, onChanged, className }: RulesProps) {
+export function RulesPanel({ address, config, client, status, state, onManage, onChanged, getAccessToken, className }: RulesProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, loading } = state;
   const { hidden, toggleHidden } = useHideAmounts("rules");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const policy = data?.agent?.policy;
+  const agentAccount = data?.agent?.account;
+  // Inti's key is on, but what is left for fees cannot pay one more order.
+  const feesOut = (status.intiConnected && status.intiFeesLeft !== null && status.intiFeesLeft < ONE_ORDER_FEE_YOCTO);
   const orders = data?.agent?.orders;
   const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
 
@@ -302,9 +314,9 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         icon={<ShieldCheck className="size-4 text-primary" />}
         title="Spending limits"
         extra={
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
-            {status.intiConnected ? "Inti is on" : "Inti is paused"}
+          <span className={cn("flex items-center gap-1.5 text-xs", feesOut ? "font-medium text-destructive" : "text-muted-foreground")}>
+            <span className={cn("size-2 rounded-full", feesOut ? "bg-destructive" : status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
+            {feesOut ? "Inti can't trade" : status.intiConnected ? "Inti is on" : "Inti is paused"}
           </span>
         }
         extraWhenOpen={
@@ -336,6 +348,36 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         ) : (
           <p className="mt-3 text-sm">No limit set yet.</p>
         )}
+        <div className="mt-3 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Money can only go to</span>
+            {agentAccount &&
+              (agentAccount === status.agent ? (
+                <span className="flex items-center gap-1 text-xs text-primary">
+                  <Check className="size-3.5" /> Your agent
+                </span>
+              ) : (
+                <span className="text-xs text-destructive">Not your agent&apos;s wallet</span>
+              ))}
+          </div>
+          <AddressLine address={status.agent} label="destination" className="mt-1" />
+        </div>
+        {status.intiFeesLeft !== null && (
+          <>
+            <div className="mt-2 flex justify-between text-sm">
+              <span className="text-muted-foreground">Fees left for Inti</span>
+              <span className="tabular-nums">
+                {near(status.intiFeesLeft)} of {near(config.intiKeyAllowanceYocto)} NEAR
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Inti pays each order&apos;s network fee from this. It is one total, not per day. Pausing and resuming Inti starts it over.</p>
+            {feesOut && (
+              <p role="alert" className="mt-2 rounded-2xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                Inti&apos;s fees ran out, so it cannot place orders. Pause and resume Inti to start them over.
+              </p>
+            )}
+          </>
+        )}
         <div className="mt-3 flex items-start gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
           <Lock className="mt-0.5 size-3.5 shrink-0" />
           <span>
@@ -357,9 +399,21 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
 
       <FoldCard id="agent" icon={<Sparkles className="size-4 text-primary" />} title="Your agent's rules">
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
+        {agentAccount && (
+          <div className="mt-3">
+            <p className="text-sm">Agent wallet</p>
+            <AddressLine address={agentAccount} label="agent wallet" className="mt-1" />
+          </div>
+        )}
         {policy ? (
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             <Rule ok={policy.sendsOnlyToOwner} text="Sends only to you" />
+            {policy.destinations.map((d) => (
+              <li key={d} className="-mt-1 ml-6 text-xs text-muted-foreground">
+                <span className="break-all font-mono">{d}</span>
+                {d === address && <span className="ml-1 text-foreground">(this wallet)</span>}
+              </li>
+            ))}
             <Rule ok={policy.canBuyNow} text="Can buy now" />
             <Rule ok={policy.canPlaceLimitOrders} text={`Can place price orders${policy.maxPriceGapPercent ? `, at most ${policy.maxPriceGapPercent}% from the market` : ""}`} />
             {policy.maxActionsPerHour !== null && <Rule ok text={`At most ${policy.maxActionsPerHour} actions per hour`} />}
@@ -368,16 +422,10 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">{loading ? "Reading your agent..." : "Your agent's rules are not available right now."}</p>
         )}
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm">
-          <Clock className="size-4 shrink-0 text-muted-foreground" />
-          {data?.agent?.grantUntil ? (
-            <span>
-              Inti may trade for you until <strong>{new Date(data.agent.grantUntil).toLocaleDateString("en-US", { dateStyle: "medium" })}</strong>
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Inti has no permission to trade for you yet.</span>
-          )}
-        </div>
+        {policy && (
+          <PriceProtection address={address} signer={signer} getAccessToken={getAccessToken} current={policy.maxDeviationBps} nextChangeAt={policy.nextChangeAt} />
+        )}
+        {data?.agent && <GrantRenewal address={address} signer={signer} getAccessToken={getAccessToken} grantUntil={data.agent.grantUntil} />}
         <h3 className="mt-4 text-sm font-medium">Orders waiting for a price</h3>
         {orders && orders.length > 0 ? (
           <ul className="mt-2 flex flex-col gap-2">
@@ -524,7 +572,7 @@ interface LayoutProps {
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
-  const rules = { address, config, client, status, state, onManage, onChanged };
+  const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
   const money = { address, config, client, status, state, onManage };
   return (

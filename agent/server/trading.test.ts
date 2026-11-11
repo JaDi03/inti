@@ -38,8 +38,8 @@ function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: 
   };
   const agent = {
     available: () => Promise.resolve(new Map([[FUNDING_ASSET, credited]])),
-    minOut: () => Promise.resolve(null),
     quote: () => Promise.resolve({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.01", costPercent: "1.05", seconds: 12 }),
+    swap: () => Promise.resolve("failed"),
     withdraw: () => Promise.resolve("success"),
     previewLimit: () => Promise.resolve({ spend: 1n }),
     openLimitOrders: () => Promise.resolve(0),
@@ -74,7 +74,7 @@ describe("trading", () => {
     expect(await s.t.sweepAll(["did:privy:alice"])).toEqual([]);
     expect(s.calls).toEqual(["fund"]);
     s.release();
-    expect(await first).toEqual({ status: "returned", code: "no_route" });
+    expect(await first).toEqual({ status: "returned", code: "swap_failed" });
   });
 
   it("refuses limit prices outside the band around the market before funding", async () => {

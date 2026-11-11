@@ -1,7 +1,9 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { Action } from "near-api-js";
+import { agentPolicy, PRICE_PROTECTION_BPS } from "../../../agent/policy/agentPolicy";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
+import { policyDifferences } from "../../../agent/policy/verify";
 import { fromAtomic } from "../../../agent/policy/units";
 import type { LimitsConfig } from "./config";
 
@@ -199,6 +201,17 @@ export interface GrantMessage {
   recipient: string;
 }
 
+/**
+ * A signed message's JSON, only when writing it back gives the very same text. The Agent API sends
+ * compact JSON, so anything else (a key written twice, extra spaces) is refused: what the user sees
+ * is then exactly what any reader of the message gets.
+ */
+function exactJson(message: string): Record<string, unknown> {
+  const parsed = JSON.parse(message) as unknown;
+  if (JSON.stringify(parsed) !== message) throw new SyntaxError("not exact JSON");
+  return parsed as Record<string, unknown>;
+}
+
 const GRANT_DOMAIN = "near-intents-agent-api.agent-grant.v6";
 export const GRANT_LABEL = "Inti trading";
 /** Longest grant the app signs; Inti asks for 90 days. */
@@ -212,7 +225,7 @@ const GRANT_KEYS = ["agent_id", "credential", "domain", "expires_at_ms", "issued
 export function describeGrant(grant: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
   let m: Record<string, unknown>;
   try {
-    m = JSON.parse(grant.message) as Record<string, unknown>;
+    m = exactJson(grant.message);
   } catch {
     refuse("the message is not a grant.");
   }
@@ -232,6 +245,73 @@ export function describeGrant(grant: GrantMessage, accountId: string, publicKey:
     "It can only buy within the spending limits you set, and everything it buys goes to your wallet.",
     "You can turn it off at any time.",
   ];
+}
+
+const OWNER_ADMIN_DOMAIN = "near-intents-agent-api.owner-admin.v2";
+const POLICY_UPDATE_KEYS = ["action", "agent_id", "domain", "expected_revision", "expires_at_ms", "issued_at_ms", "network", "nonce", "owner", "owner_epoch", "policy", "recipient", "target_id", "tenant_id"];
+/** Longest a rule change may stay signable; the Agent API gives five minutes. */
+const MAX_POLICY_UPDATE_MS = 10 * 60_000;
+
+/**
+ * Plain-language lines for a change of the agent's rules, or a refusal unless the new rules are
+ * exactly the ones every Inti agent has, with one of the price protections the user can pick.
+ */
+export function describePolicyUpdate(update: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  let m: Record<string, unknown>;
+  try {
+    m = exactJson(update.message);
+  } catch {
+    refuse("the message is not a rule change.");
+  }
+  if (typeof m !== "object" || m === null || Object.keys(m).sort().join(",") !== POLICY_UPDATE_KEYS.join(",")) refuse("the message is not a rule change.");
+  if (m.action !== "update_policy" || m.domain !== OWNER_ADMIN_DOMAIN || m.network !== "mainnet") refuse("the message is not a mainnet rule change.");
+  if (update.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the rule change is for ${String(m.recipient)}.`);
+  const owner = m.owner as Record<string, unknown> | null;
+  if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the rule change names another owner.");
+  if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the rule change names no agent.");
+  const expires = m.expires_at_ms;
+  if (typeof expires !== "number" || expires <= now || expires - now > MAX_POLICY_UPDATE_MS) refuse("the rule change has expired.");
+  const bps = PRICE_PROTECTION_BPS.find((b) => policyDifferences(agentPolicy(accountId, b), m.policy).length === 0);
+  if (bps === undefined) refuse("the new rules are not the ones Inti uses.");
+  const percent = bps / 100;
+  return [
+    `Set your price protection to ${percent}%.`,
+    `Price orders stay within ${percent}% of the market, and a buy now never gets more than ${percent}% less than its quote.`,
+    "Nothing else changes: your agent still sends only to your own wallet.",
+  ];
+}
+
+const GRANT_REVOKE_KEYS = ["action", "agent_id", "domain", "expires_at_ms", "issued_at_ms", "network", "nonce", "owner", "owner_epoch", "recipient", "target_id", "tenant_id"];
+
+/**
+ * Plain-language lines for closing one earlier grant of the user's agent. Closing only takes a
+ * permission away, but the message must still be the user's own, for this service, on mainnet.
+ */
+export function describeGrantRevoke(revoke: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  let m: Record<string, unknown>;
+  try {
+    m = exactJson(revoke.message);
+  } catch {
+    refuse("the message is not a grant closing.");
+  }
+  if (typeof m !== "object" || m === null || Object.keys(m).sort().join(",") !== GRANT_REVOKE_KEYS.join(",")) refuse("the message is not a grant closing.");
+  if (m.action !== "revoke_grant" || m.domain !== OWNER_ADMIN_DOMAIN || m.network !== "mainnet") refuse("the message is not a mainnet grant closing.");
+  if (revoke.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the grant closing is for ${String(m.recipient)}.`);
+  const owner = m.owner as Record<string, unknown> | null;
+  if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the grant closing names another owner.");
+  if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the grant closing names no agent.");
+  if (typeof m.target_id !== "string" || !/^[0-9a-f]{64}$/.test(m.target_id)) refuse("the grant closing names no grant.");
+  const expires = m.expires_at_ms;
+  if (typeof expires !== "number" || expires <= now || expires - now > MAX_POLICY_UPDATE_MS) refuse("the grant closing has expired.");
+  return ["Close Inti's earlier permission, so only the new one stays."];
+}
+
+/** Plain-language lines for the only messages the app signs: a grant, closing an earlier one, or a price protection change. */
+export function describeOwnerMessage(message: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  if (!message.message.includes(`"domain":"${OWNER_ADMIN_DOMAIN}"`)) return describeGrant(message, accountId, publicKey, config, now);
+  return message.message.includes(`"action":"revoke_grant"`)
+    ? describeGrantRevoke(message, accountId, publicKey, config, now)
+    : describePolicyUpdate(message, accountId, publicKey, config, now);
 }
 
 /**

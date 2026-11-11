@@ -13,14 +13,18 @@ export type AgentPolicy = Omit<Policy, "actions"> & {
 export const AGENT_MAX_ACTIONS_PER_HOUR = 30;
 /** Farthest a limit order may sit from the market price; 300 bps (3%) is the Agent API maximum. */
 export const AGENT_LIMIT_ORDER_MAX_DEVIATION_BPS = 300;
+/** The price protection a user may pick: Tight 1%, Normal 2%, Wide 3%. */
+export const PRICE_PROTECTION_BPS = [100, 200, 300] as const;
+export type PriceProtectionBps = (typeof PRICE_PROTECTION_BPS)[number];
 
 /**
  * The rules every user's agent starts with. It may trade (swaps and limit orders, in public or
  * private), and the only place anything can leave to is its owner: their NEAR Intents account or
  * their NEAR wallet. It carries no amounts of its own, because how much reaches the agent is
- * capped by Spending Limits on the owner's account.
+ * capped by Spending Limits on the owner's account. The owner may later pick a tighter price
+ * protection; nothing else changes.
  */
-export function agentPolicy(ownerAccountId: string): AgentPolicy {
+export function agentPolicy(ownerAccountId: string, maxDeviationBps: PriceProtectionBps = AGENT_LIMIT_ORDER_MAX_DEVIATION_BPS): AgentPolicy {
   return {
     frozen: false,
     actions: ["swap", "transfer", "withdraw", "limit_order"],
@@ -39,6 +43,6 @@ export function agentPolicy(ownerAccountId: string): AgentPolicy {
     },
     budget: { daily_usd: null, weekly_usd: null, monthly_usd: null },
     timelock_ms: 0,
-    limit_order: { max_deviation_bps: AGENT_LIMIT_ORDER_MAX_DEVIATION_BPS },
+    limit_order: { max_deviation_bps: maxDeviationBps },
   };
 }

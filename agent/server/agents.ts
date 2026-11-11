@@ -1,5 +1,7 @@
 import type { AgentView, StatusResponse } from "@near-intents-agent-api/sdk";
-import { agentPolicy } from "../policy/agentPolicy.js";
+import { z } from "zod";
+import { agentPolicy, type PriceProtectionBps } from "../policy/agentPolicy.js";
+import { GRANT_LABEL } from "./grants.js";
 
 /** The owner of an agent: the user's own NEAR account and its full-access key. */
 export interface AgentOwner {
@@ -31,10 +33,44 @@ export interface AgentAccounts {
   submit(correlationId: string, signedData: unknown, type?: OwnerIntentType): Promise<AgentOutcome>;
   /** Asks for the document the owner signs to let Inti's server act for their agent. */
   prepareGrant(body: Record<string, string>): Promise<{ correlationId: string; intent: unknown; preview: { summary: string } }>;
+  /**
+   * Asks for the document the owner signs to set their price protection. The rules are rebuilt by
+   * Inti, so only the price protection can differ from the ones every user signs.
+   */
+  preparePolicy(agentId: string, ownerAccount: string, maxDeviationBps: PriceProtectionBps): Promise<PreparedPolicy>;
+  /**
+   * The documents the owner signs to close Inti's earlier grants that are still live, so a new
+   * grant replaces them instead of adding to them. Grants with another label are never touched.
+   */
+  prepareRevokes(agentId: string): Promise<PreparedRevoke[]>;
 }
 
+export interface PreparedRevoke {
+  correlationId: string;
+  intent: unknown;
+  /** Until when the grant being closed would have lasted. */
+  expiresAt: string;
+}
+
+/** Most earlier grants closed in one renewal; Inti keeps one live grant per agent. */
+export const MAX_REVOKES_PER_RENEWAL = 5;
+
+export type PreparedPolicy =
+  | { status: "pending_signature"; correlationId: string; intent: unknown; preview: { summary: string; policy: unknown } }
+  /** The Agent API waits between rule changes; the next one opens at `availableAt`. */
+  | { status: "cooldown"; availableAt: string };
+
 /** The owner-signed actions Inti sends. */
-export type OwnerIntentType = "agent_create" | "grant_issue";
+export type OwnerIntentType = "agent_create" | "grant_issue" | "policy_update" | "grant_revoke";
+
+const grantsSchema = z.object({
+  data: z.array(z.object({ grant_id: z.string().regex(/^[0-9a-f]{64}$/), label: z.string(), expires_at: z.string(), revoked_at: z.string().nullable() })),
+});
+
+const policyViewSchema = z.object({
+  revision: z.number().int().min(0).nullable(),
+  cooldowns: z.object({ policy_change_available_at: z.string().nullable() }),
+});
 
 /** Longest the server waits for one Agent API answer; a status read may hold for 30 s by design. */
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -97,6 +133,38 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
       try {
         const res = await request<{ correlation_id: string; intent: unknown; preview: { summary: string } }>("/v1/generate-intent", body);
         return { correlationId: res.correlation_id, intent: res.intent, preview: { summary: res.preview.summary } };
+      } catch (error) {
+        throw unavailable(error);
+      }
+    },
+    async preparePolicy(agentId, ownerAccount, maxDeviationBps) {
+      try {
+        const view = policyViewSchema.parse(await request(`/v1/agents/${encodeURIComponent(agentId)}/policy`));
+        const availableAt = view.cooldowns.policy_change_available_at;
+        if (availableAt !== null && Date.parse(availableAt) > Date.now()) return { status: "cooldown", availableAt };
+        const res = await request<{ correlation_id: string; intent: unknown; preview: { summary: string; policy: unknown } }>("/v1/generate-intent", {
+          type: "policy_update",
+          agent_id: agentId,
+          policy: agentPolicy(ownerAccount, maxDeviationBps),
+          expected_revision: view.revision ?? 0,
+        });
+        return { status: "pending_signature", correlationId: res.correlation_id, intent: res.intent, preview: { summary: res.preview.summary, policy: res.preview.policy } };
+      } catch (error) {
+        throw unavailable(error);
+      }
+    },
+    async prepareRevokes(agentId) {
+      try {
+        const page = grantsSchema.parse(await request(`/v1/agents/${encodeURIComponent(agentId)}/grants`));
+        const live = page.data
+          .filter((g) => g.label === GRANT_LABEL && g.revoked_at === null && Date.parse(g.expires_at) > Date.now())
+          .slice(0, MAX_REVOKES_PER_RENEWAL);
+        return await Promise.all(
+          live.map(async (g) => {
+            const res = await request<{ correlation_id: string; intent: unknown }>("/v1/generate-intent", { type: "grant_revoke", agent_id: agentId, grant_id: g.grant_id });
+            return { correlationId: res.correlation_id, intent: res.intent, expiresAt: g.expires_at };
+          }),
+        );
       } catch (error) {
         throw unavailable(error);
       }
