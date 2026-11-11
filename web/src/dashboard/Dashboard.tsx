@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -11,6 +11,7 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { ReceiveDialog } from "./Receive";
 
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
@@ -128,6 +129,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
+  const [receiving, setReceiving] = useState(false);
   const [busy, setBusy] = useState<AssetKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
@@ -176,11 +178,17 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
           <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
           <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
         </dl>
-        <Button className="mt-4 w-full rounded-full" onClick={onManage}>
-          <Plus /> Add NEAR for orders
-        </Button>
+        <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
+          <Button variant="outline" className="rounded-full" onClick={() => setReceiving(true)}>
+            <ArrowDownToLine /> Receive
+          </Button>
+          <Button className="rounded-full" onClick={onManage}>
+            <Plus /> Add NEAR for orders
+          </Button>
+        </div>
       </section>
       )}
+      {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
