@@ -76,7 +76,7 @@ describe("dashboard", () => {
     const { d, read } = setup({ "did:privy:alice": ALICE });
     const alice = await d("did:privy:alice");
     expect(alice.prices).toMatchObject({ near: 3.58, gold: 4026.83, euro: null });
-    expect(alice.agent).toMatchObject({ grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
+    expect(alice.agent).toMatchObject({ account: ALICE.agentAccount, grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
     expect(JSON.stringify(alice)).not.toContain("ngt_secret");
     expect(await d("did:privy:bob")).toMatchObject({ agent: null });
     expect(read).toEqual(["agent_a"]);

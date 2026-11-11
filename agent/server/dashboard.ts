@@ -36,7 +36,8 @@ export interface OpenOrder {
 export interface DashboardView {
   /** USD price of NEAR and of each asset Inti can buy, or null when there is no fresh price. */
   prices: Record<"near" | AssetKey, number | null>;
-  agent: { grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
+  /** `account` is the agent's own NEAR account on NEAR Intents, as the Agent API knows it. */
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
 
 /** What the dashboard reads from the Agent API about one agent. Reads only. */
@@ -154,6 +155,7 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
       const grant = usableGrant(deps.grants.get(userId), now());
       const [policy, orders] = await Promise.all([soft(() => deps.view.policy(agent.agentId)), soft(() => deps.view.openOrders(agent.agentId))]);
       agentPart = {
+        account: agent.agentAccount,
         grantUntil: grant?.agentId === agent.agentId ? grant.expiresAt : null,
         policy: policy ? summarizePolicy(policy, agent.ownerAccount, now()) : null,
         orders: orders ? orders.map((o) => orderView(o, tokens)) : null,
