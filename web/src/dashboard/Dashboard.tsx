@@ -21,7 +21,16 @@ const TILE: Record<AssetKey, string> = {
   euro: "bg-sky-300",
   pound: "bg-violet-300",
   bitcoin: "bg-orange-300",
+  ethereum: "bg-indigo-200",
+  solana: "bg-fuchsia-300",
 };
+
+/** The areas of the dashboard, by what each asset is. */
+const GROUPS: { title: string; keys: AssetKey[] }[] = [
+  { title: "Real-world assets", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "real-world") },
+  { title: "Currencies", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "currency") },
+  { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
+];
 
 const NEAR_DECIMALS = 24;
 const HIDDEN = "••••";
@@ -139,7 +148,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
     <div className={cn("flex flex-col gap-4", className)}>
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
-          <p className="text-sm text-muted-foreground">Your wallet</p>
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <img src="/tokens/near.png" alt="" width={20} height={20} className="size-5 rounded-full bg-white" /> Your wallet
+          </p>
           <div className="-mt-1 -mr-2 flex">
             <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
               {hidden ? <EyeOff /> : <Eye />}
@@ -161,21 +172,26 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
         </Button>
       </section>
 
-      <section>
-        <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">What Inti can buy for you</h2>
+      {GROUPS.map((group) => (
+      <section key={group.title}>
+        <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">{group.title}</h2>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
-          {ASSET_KEYS.map((key) => {
+          {group.keys.map((key, i) => {
             const a = ASSETS[key];
             const row = assets?.find((r) => r.key === key);
             const amount = row ? fromAtomic(row.balance.toString(), DECIMALS[key]) : null;
             const price = data?.prices[key];
+            // An odd tile out takes the whole row, so no area ends with a gap.
+            const wide = group.keys.length % 2 === 1 && i === group.keys.length - 1;
             return (
-              <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", TILE[key])}>
+              <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", TILE[key], wide && "col-span-2")}>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-wide">{a.name}</p>
-                    <p className="text-xs opacity-70">{a.kind === "real-world" ? "Real-world asset" : "Crypto"}</p>
-                    <p className="text-xs opacity-70">{a.symbol}</p>
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70", key === "gold" && "p-1")} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
+                      <p className="text-xs opacity-70">{a.symbol}</p>
+                    </div>
                   </div>
                   {row?.enabled && (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-neutral-950/10 px-2 py-0.5 text-[11px] font-semibold">
@@ -207,8 +223,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
             );
           })}
         </ul>
-        <p className="mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
       </section>
+      ))}
+      <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
 
       {error && <p className="break-words text-sm text-destructive">{error}</p>}
       {lastTx && (

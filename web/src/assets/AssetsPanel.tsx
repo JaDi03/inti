@@ -8,7 +8,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import { loadLimitsConfig, type LimitsConfig } from "../limits/config";
 
 /** Decimals of each asset's token on NEAR, as GET /v1/tokens lists them. */
-export const DECIMALS: Record<AssetKey, number> = { gold: 6, euro: 18, pound: 18, bitcoin: 8 };
+export const DECIMALS: Record<AssetKey, number> = { gold: 6, euro: 18, pound: 18, bitcoin: 8, ethereum: 18, solana: 9 };
 
 interface Props {
   address: string;
@@ -100,7 +100,7 @@ function AssetList({ address, config, client }: { address: string; config: Limit
                       {a.name} <span className="text-muted-foreground">({a.symbol})</span>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {a.kind === "real-world" ? "Real-world asset" : "Crypto"}
+                      {a.kind === "real-world" ? "Real-world asset" : a.kind === "currency" ? "Currency" : "Crypto"}
                       {row?.enabled ? ` · In your wallet: ${fromAtomic(row.balance.toString(), DECIMALS[key])}` : ""}
                     </p>
                   </div>
