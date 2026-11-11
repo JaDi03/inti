@@ -39,7 +39,7 @@ const descriptions: Record<ToolName, string> = {
   get_portfolio:
     "The owner's wallet, the assets you can buy with their prices and whether each is enabled, the owner's NEAR set aside for orders, and what the owner's limits still allow today.",
   get_quote:
-    "What buying an asset for an amount in US dollars would cost right now, without buying: the NEAR it takes, what the owner would receive, the trading fee and the total cost in percent. Use it for any question about price or fees.",
+    "What buying an asset now for an amount in US dollars would cost, without buying: the NEAR it takes, what the owner would receive and its value, and the cost (what the route keeps of the value at current prices). Use it for any question about price, cost or fees of buying now.",
   buy_now: "Buy an asset now for an amount in US dollars, paid with the owner's NEAR. The result goes to the owner's wallet. The code checks the owner's limits first.",
   buy_at_price: "Place an order that buys the asset only if its price falls to price_usd within the given days. The money waits with the agent until it fills or expires.",
   ask_user: "Ask the owner a question when the request is unclear. Ends the cycle.",
@@ -91,14 +91,11 @@ export function usdPriceToWnear(priceUsd: string, nearUsdMicro: bigint): string 
 }
 
 /**
- * A quote in the owner's terms: the NEAR it takes, what arrives and its dollar value, and the
- * total cost (fee plus price difference) as a percent of what is paid, in integer math.
+ * A quote in the owner's terms: the NEAR it takes, what arrives and its dollar value, and one
+ * cost: what the route keeps of the value at current prices, as the trading service reports it.
  */
 export function quoteView(payUsd: string, wnear: bigint, quote: SwapQuote, decimals: number, priceMicro: bigint) {
-  const payMicro = usdStringToMicro(payUsd);
   const receivedMicro = (quote.amountOut * priceMicro) / 10n ** BigInt(decimals);
-  const lostMicro = payMicro > receivedMicro ? payMicro - receivedMicro : 0n;
-  const costBps = (lostMicro * 10_000n) / payMicro;
   return {
     pay_usd: payUsd,
     pay_near: fromAtomic(((wnear + 10n ** 18n - 1n) / 10n ** 18n).toString(), 6),
@@ -106,11 +103,10 @@ export function quoteView(payUsd: string, wnear: bigint, quote: SwapQuote, decim
     // Four decimals: on small amounts, cents alone would hide most of the cost.
     receive_usd: `${receivedMicro / 1_000_000n}.${((receivedMicro % 1_000_000n) / 100n).toString().padStart(4, "0")}`,
     receive_at_least: fromAtomic(quote.minAmountOut.toString(), decimals),
-    fee_usd: quote.feeUsd,
-    fee_percent: quote.feePercent,
-    total_cost_percent: `${costBps / 100n}.${(costBps % 100n).toString().padStart(2, "0")}`,
+    cost_usd: quote.costUsd,
+    cost_percent: quote.costPercent,
     seconds: quote.seconds,
-    note: "An estimate at current prices; nothing was bought.",
+    note: "An estimate for right now; nothing was bought. The cost is what the route keeps of the value at current prices; it moves with the market and is not a fixed commission.",
   };
 }
 
@@ -191,7 +187,15 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
           const result = await deps.trading.buyAtPrice(deps.userId, a.assetId, wnear, price, input.days);
           if (result.status === "resting") {
             events.push({ type: "limit_order_placed", to: a.symbol, usd: input.usd, priceUsd: input.price_usd, days: String(input.days) });
-            return JSON.stringify({ status: "order_placed", asset: a.name, usd: input.usd, price_usd: input.price_usd, days: input.days });
+            return JSON.stringify({
+              status: "order_placed",
+              asset: a.name,
+              usd: input.usd,
+              price_usd: input.price_usd,
+              days: input.days,
+              fee: "1Click charges 0.20% on every limit order.",
+              leftover: "If the order expires or is cancelled, the money comes back to the wallet as regular NEAR; to place another order the owner adds NEAR for orders again in Spending limits.",
+            });
           }
           if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The order is still being placed." });
           events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: result.code, reason: REASONS[result.code] ?? result.code });

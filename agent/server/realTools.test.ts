@@ -29,7 +29,7 @@ function setup() {
     },
     quote: (_u: string, asset: string, amount: bigint) => {
       orders.push({ kind: "quote", asset, amount });
-      return Promise.resolve({ status: "quoted", amountOut: 246n, minAmountOut: 243n, feeUsd: "0.010611", feePercent: "1.05", seconds: 12 });
+      return Promise.resolve({ status: "quoted", amountOut: 246n, minAmountOut: 243n, costUsd: "0.010611", costPercent: "1.05", seconds: 12 });
     },
   } as unknown as Trading;
   const chain: ChainPort = {
@@ -64,7 +64,7 @@ describe("realTools", () => {
     expect(events[0]?.type).toBe("swap_executed");
   });
 
-  it("quotes a purchase in the owner's terms, with the fee and the total cost, and buys nothing", async () => {
+  it("quotes a purchase in the owner's terms, with one cost as the trading service reports it, and buys nothing", async () => {
     const { tools, orders } = setup();
     const events: AgentEvent[] = [];
     const out = JSON.parse(await tools.run("get_quote", { asset: "gold", usd: "1" }, events)) as Record<string, unknown>;
@@ -76,11 +76,10 @@ describe("realTools", () => {
       receive: "0.000246",
       receive_usd: "0.9879",
       receive_at_least: "0.000243",
-      fee_usd: "0.010611",
-      fee_percent: "1.05",
-      total_cost_percent: "1.20",
+      cost_usd: "0.010611",
+      cost_percent: "1.05",
       seconds: 12,
-      note: "An estimate at current prices; nothing was bought.",
+      note: "An estimate for right now; nothing was bought. The cost is what the route keeps of the value at current prices; it moves with the market and is not a fixed commission.",
     });
     expect(orders).toEqual([{ kind: "quote", asset: ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
     expect(events).toEqual([]);
@@ -99,6 +98,9 @@ describe("realTools", () => {
     const events: AgentEvent[] = [];
     await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, events);
     expect(events).toEqual([{ type: "limit_order_placed", to: "XAUT", usd: "1", priceUsd: "3950", days: "3" }]);
+    const out = JSON.parse(await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, [])) as Record<string, unknown>;
+    expect(out.fee).toBe("1Click charges 0.20% on every limit order.");
+    expect(out.leftover).toContain("comes back to the wallet as regular NEAR");
     expect(orders[0]).toMatchObject({ kind: "limit", asset: ASSETS.gold.assetId, price: usdPriceToWnear("3950", 3_550_000n), days: 3 });
     expect(usdPriceToWnear("3950", 3_550_000n)).toBe("1112.676056");
   });

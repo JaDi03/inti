@@ -39,7 +39,7 @@ function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: 
   const agent = {
     available: () => Promise.resolve(new Map([[FUNDING_ASSET, credited]])),
     minOut: () => Promise.resolve(null),
-    quote: () => Promise.resolve({ amountOut: 246n, minAmountOut: 243n, feeUsd: "0.01", feePercent: "1.05", seconds: 12 }),
+    quote: () => Promise.resolve({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.01", costPercent: "1.05", seconds: 12 }),
     withdraw: () => Promise.resolve("success"),
     previewLimit: () => Promise.resolve({ spend: 1n }),
     openLimitOrders: () => Promise.resolve(0),
@@ -61,7 +61,7 @@ describe("trading", () => {
 
   it("quotes for the user's own agent without a grant, and moves nothing", async () => {
     const s = setup({ grant: null });
-    expect(await s.t.quote("did:privy:alice", GOLD, 10n ** 23n)).toEqual({ status: "quoted", amountOut: 246n, minAmountOut: 243n, feeUsd: "0.01", feePercent: "1.05", seconds: 12 });
+    expect(await s.t.quote("did:privy:alice", GOLD, 10n ** 23n)).toEqual({ status: "quoted", amountOut: 246n, minAmountOut: 243n, costUsd: "0.01", costPercent: "1.05", seconds: 12 });
     expect(s.calls).toEqual([]);
     expect(await setup({ agent: { status: "none" } }).t.quote("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "no_agent" });
   });

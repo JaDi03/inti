@@ -233,7 +233,7 @@ describe("agentApiPort.quote", () => {
       fee: { amount_usd: "0.010611", percent: "1.05" },
       warnings: [{ code: "insufficient_balance", detail: "", available_amount: "0" }],
     });
-    expect(await port.quote("agent_1", FUNDING_ASSET, GOLD, 279n * 10n ** 21n)).toEqual({ amountOut: 246n, minAmountOut: 243n, feeUsd: "0.010611", feePercent: "1.05", seconds: 12 });
+    expect(await port.quote("agent_1", FUNDING_ASSET, GOLD, 279n * 10n ** 21n)).toEqual({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.010611", costPercent: "1.05", seconds: 12 });
     expect(asked).toEqual([
       { url: "https://api.example/v1/agents/agent_1/swap", body: { origin_asset: FUNDING_ASSET, destination_asset: GOLD, amount: "279000000000000000000000", dry: true } },
     ]);

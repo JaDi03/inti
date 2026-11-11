@@ -60,12 +60,16 @@ export interface AgentPort {
   signedPriceBound(agentId: string): Promise<number | null>;
 }
 
-/** A dry swap quote: atomic amounts out, the trading service's fee and how long it expects to take. */
+/**
+ * A dry swap quote: atomic amounts out, what the route keeps and how long it expects to take.
+ * The cost is the Agent API's `fee`: the input's value minus the quoted output's value at current
+ * prices, so it moves with the market and is not a fixed commission.
+ */
 export interface SwapQuote {
   amountOut: bigint;
   minAmountOut: bigint;
-  feeUsd: string | null;
-  feePercent: string | null;
+  costUsd: string | null;
+  costPercent: string | null;
   seconds: number | null;
 }
 
@@ -356,8 +360,8 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
         return {
           amountOut: BigInt(dry.quote.amount_out),
           minAmountOut: BigInt(dry.quote.min_amount_out),
-          feeUsd: dry.fee?.amount_usd ?? null,
-          feePercent: dry.fee?.percent ?? null,
+          costUsd: dry.fee?.amount_usd ?? null,
+          costPercent: dry.fee?.percent ?? null,
           seconds: dry.quote.time_estimate_seconds ?? null,
         };
       } catch {
