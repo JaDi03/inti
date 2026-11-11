@@ -1,7 +1,7 @@
 import { Signer } from "near-api-js";
 import type { DelegateAction, PublicKey, SignedMessage, Transaction } from "near-api-js";
 import type { LimitsConfig } from "./config";
-import { describeGrant, describeOwnerDelegate, describeOwnerTransaction, RefusedSigningError, type OwnerTransaction } from "./ownerActions";
+import { describeOwnerDelegate, describeOwnerMessage, describeOwnerTransaction, RefusedSigningError, type OwnerTransaction } from "./ownerActions";
 
 /** What near-api-js passes to sign a NEP-413 message. */
 interface MessagePayload {
@@ -20,7 +20,8 @@ export class SigningCancelledError extends Error {}
  * Wraps the user's full-access signer: a transaction is signed only if every action is one
  * Inti uses (see ownerActions) and the user confirms the plain-language description first.
  * It also refuses to sign until the account has a second factor (passkey or authenticator app). The only delegate action it signs is
- * the one that creates the user's own agent, and the only message is a grant for that agent.
+ * the one that creates the user's own agent, and the only messages are a grant for that agent and
+ * a change of its price protection.
  */
 export class OwnerSigner extends Signer {
   /** What the user approved in one confirmation, one entry per transaction, in signing order. */
@@ -67,11 +68,14 @@ export class OwnerSigner extends Signer {
     return this.inner.signTransaction(transaction);
   }
 
-  /** The only message it signs is a grant for the user's own agent, after the user confirms it. */
+  /**
+   * The only messages it signs are a grant for the user's own agent and a change of its price
+   * protection, after the user confirms them.
+   */
   override async signNep413Message(accountId: string, params: MessagePayload): Promise<SignedMessage> {
-    if (params.callbackUrl !== undefined) throw new RefusedSigningError("Inti refused to sign: a grant never redirects anywhere.");
+    if (params.callbackUrl !== undefined) throw new RefusedSigningError("Inti refused to sign: a signed message never redirects anywhere.");
     const publicKey = (await this.inner.getPublicKey()).toString();
-    const lines = describeGrant(params, accountId, publicKey, this.config, Date.now());
+    const lines = describeOwnerMessage(params, accountId, publicKey, this.config, Date.now());
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
     return this.inner.signNep413Message(accountId, params);

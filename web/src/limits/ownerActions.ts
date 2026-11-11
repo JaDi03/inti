@@ -1,7 +1,9 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { Action } from "near-api-js";
+import { agentPolicy, PRICE_PROTECTION_BPS } from "../../../agent/policy/agentPolicy";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
+import { policyDifferences } from "../../../agent/policy/verify";
 import { fromAtomic } from "../../../agent/policy/units";
 import type { LimitsConfig } from "./config";
 
@@ -232,6 +234,47 @@ export function describeGrant(grant: GrantMessage, accountId: string, publicKey:
     "It can only buy within the spending limits you set, and everything it buys goes to your wallet.",
     "You can turn it off at any time.",
   ];
+}
+
+const OWNER_ADMIN_DOMAIN = "near-intents-agent-api.owner-admin.v2";
+const POLICY_UPDATE_KEYS = ["action", "agent_id", "domain", "expected_revision", "expires_at_ms", "issued_at_ms", "network", "nonce", "owner", "owner_epoch", "policy", "recipient", "target_id", "tenant_id"];
+/** Longest a rule change may stay signable; the Agent API gives five minutes. */
+const MAX_POLICY_UPDATE_MS = 10 * 60_000;
+
+/**
+ * Plain-language lines for a change of the agent's rules, or a refusal unless the new rules are
+ * exactly the ones every Inti agent has, with one of the price protections the user can pick.
+ */
+export function describePolicyUpdate(update: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  let m: Record<string, unknown>;
+  try {
+    m = JSON.parse(update.message) as Record<string, unknown>;
+  } catch {
+    refuse("the message is not a rule change.");
+  }
+  if (typeof m !== "object" || m === null || Object.keys(m).sort().join(",") !== POLICY_UPDATE_KEYS.join(",")) refuse("the message is not a rule change.");
+  if (m.action !== "update_policy" || m.domain !== OWNER_ADMIN_DOMAIN || m.network !== "mainnet") refuse("the message is not a mainnet rule change.");
+  if (update.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the rule change is for ${String(m.recipient)}.`);
+  const owner = m.owner as Record<string, unknown> | null;
+  if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the rule change names another owner.");
+  if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the rule change names no agent.");
+  const expires = m.expires_at_ms;
+  if (typeof expires !== "number" || expires <= now || expires - now > MAX_POLICY_UPDATE_MS) refuse("the rule change has expired.");
+  const bps = PRICE_PROTECTION_BPS.find((b) => policyDifferences(agentPolicy(accountId, b), m.policy).length === 0);
+  if (bps === undefined) refuse("the new rules are not the ones Inti uses.");
+  const percent = bps / 100;
+  return [
+    `Set your price protection to ${percent}%.`,
+    `Price orders stay within ${percent}% of the market, and a buy now never gets more than ${percent}% less than its quote.`,
+    "Nothing else changes: your agent still sends only to your own wallet.",
+  ];
+}
+
+/** Plain-language lines for the only messages the app signs: a grant, or a price protection change. */
+export function describeOwnerMessage(message: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  return message.message.includes(`"domain":"${OWNER_ADMIN_DOMAIN}"`)
+    ? describePolicyUpdate(message, accountId, publicKey, config, now)
+    : describeGrant(message, accountId, publicKey, config, now);
 }
 
 /**

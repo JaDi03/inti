@@ -11,6 +11,7 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
 
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
@@ -268,11 +269,12 @@ interface RulesProps {
   onManage: () => void;
   /** Re-reads the account after the user changed something on it. */
   onChanged: () => void;
+  getAccessToken: () => Promise<string | null>;
   className?: string;
 }
 
 /** The rules around the money: Spending Limits on the user's account and the agent's signed rules. */
-export function RulesPanel({ address, config, client, status, state, onManage, onChanged, className }: RulesProps) {
+export function RulesPanel({ address, config, client, status, state, onManage, onChanged, getAccessToken, className }: RulesProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, loading } = state;
   const { hidden, toggleHidden } = useHideAmounts("rules");
@@ -360,6 +362,12 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         {policy ? (
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             <Rule ok={policy.sendsOnlyToOwner} text="Sends only to you" />
+            {policy.destinations.map((d) => (
+              <li key={d} className="-mt-1 ml-6 text-xs text-muted-foreground">
+                <span className="break-all font-mono">{d}</span>
+                {d === address && <span className="ml-1 text-foreground">(this wallet)</span>}
+              </li>
+            ))}
             <Rule ok={policy.canBuyNow} text="Can buy now" />
             <Rule ok={policy.canPlaceLimitOrders} text={`Can place price orders${policy.maxPriceGapPercent ? `, at most ${policy.maxPriceGapPercent}% from the market` : ""}`} />
             {policy.maxActionsPerHour !== null && <Rule ok text={`At most ${policy.maxActionsPerHour} actions per hour`} />}
@@ -367,6 +375,9 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           </ul>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">{loading ? "Reading your agent..." : "Your agent's rules are not available right now."}</p>
+        )}
+        {policy && (
+          <PriceProtection address={address} signer={signer} getAccessToken={getAccessToken} current={policy.maxDeviationBps} nextChangeAt={policy.nextChangeAt} />
         )}
         <div className="mt-4 flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm">
           <Clock className="size-4 shrink-0 text-muted-foreground" />
@@ -524,7 +535,7 @@ interface LayoutProps {
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
-  const rules = { address, config, client, status, state, onManage, onChanged };
+  const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
   const money = { address, config, client, status, state, onManage };
   return (

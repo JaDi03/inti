@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Account, actions, buildDelegateAction, createTransaction, KeyPair } from "near-api-js";
 import type { Action, KeyPairEd25519 } from "near-api-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { agentPolicy } from "../../../agent/policy/agentPolicy";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
@@ -233,6 +234,57 @@ describe("signing with the user's account key", () => {
     const unprotected = userWallet(true, false);
     await expect(unprotected.signer.signNep413Message(unprotected.accountId, grant(unprotected))).rejects.toThrow(RefusedSigningError);
     expect([...cancelled.signed, ...unprotected.signed]).toHaveLength(0);
+  });
+});
+
+describe("changing the price protection", () => {
+  /** A rule change shaped exactly like the Agent API's (fields read from a live policy_update). */
+  function ruleChange(wallet: Wallet, changes: Record<string, unknown> = {}) {
+    const now = Date.now();
+    const message = {
+      action: "update_policy",
+      agent_id: "ab".repeat(32),
+      domain: "near-intents-agent-api.owner-admin.v2",
+      expected_revision: 1,
+      expires_at_ms: now + 300_000,
+      issued_at_ms: now,
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      policy: agentPolicy(wallet.accountId, 100),
+      recipient: config.agentApiHost,
+      target_id: "9d".repeat(32),
+      tenant_id: "01".repeat(32),
+      ...changes,
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  }
+
+  it("signs Inti's own rules with a price protection the user can pick, after showing it", async () => {
+    const wallet = userWallet();
+    await wallet.signer.signNep413Message(wallet.accountId, ruleChange(wallet));
+    expect(wallet.signed).toHaveLength(1);
+    expect(wallet.shown[0]?.[0]).toBe("Set your price protection to 1%.");
+  });
+
+  it.each([
+    ["rules that send anywhere", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId, 100), destinations: { mode: "any", list: [] } } })],
+    ["rules that send to someone else", () => ({ policy: agentPolicy("cd".repeat(32), 100) })],
+    ["a price protection Inti does not offer", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId), limit_order: { max_deviation_bps: 250 } } })],
+    ["rules with an extra field", (w: Wallet) => ({ policy: { ...agentPolicy(w.accountId, 100), owner_approval: true } })],
+    ["another action", () => ({ action: "freeze" })],
+    ["another owner", () => ({ owner: { account_id: "cd".repeat(32), public_key: "ed25519:x", type: "near" } })],
+    ["another service", () => ({ recipient: "evil.example" })],
+    ["testnet", () => ({ network: "testnet" })],
+    ["an expired change", () => ({ expires_at_ms: Date.now() - 1000 })],
+    ["a change that stays signable for a day", () => ({ expires_at_ms: Date.now() + 86_400_000 })],
+    ["an extra field", () => ({ transfer_to: "attacker.near" })],
+  ])("refuses %s before asking the user or the wallet", async (_name, changes) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signNep413Message(wallet.accountId, ruleChange(wallet, changes(wallet)))).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
   });
 });
 

@@ -10,6 +10,11 @@ export interface PolicySummary {
   maxActionsPerHour: number | null;
   maxPriceGapPercent: string | null;
   sendsOnlyToOwner: boolean;
+  /** Every address the agent may send to, as signed. */
+  destinations: string[];
+  maxDeviationBps: number | null;
+  /** When the next rule change opens, or null when it already does. */
+  nextChangeAt: string | null;
 }
 
 export interface OpenOrder {
