@@ -95,38 +95,39 @@
     --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* Dark mode uses the landing's dark teal, so the app and the site read as one product. */
 .dark {
-    --background: oklch(0.145 0 0);
+    --background: #01303c;
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
+    --card: #063f4d;
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
+    --popover: #063f4d;
     --popover-foreground: oklch(0.985 0 0);
     /* Inti green stays the accent in dark mode. */
     --primary: #00eb96;
     --primary-foreground: #0b0b0f;
-    --secondary: oklch(0.269 0 0);
+    --secondary: #0b4a59;
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --muted: #0b4a59;
+    --muted-foreground: #a3c0c7;
+    --accent: #0b4a59;
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: #00be79;
-    --chat-user: oklch(0.42 0 0);
+    --chat-user: #0e5566;
     --chat-user-foreground: oklch(0.985 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
+    --sidebar: #063f4d;
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent: #0b4a59;
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
