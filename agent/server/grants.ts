@@ -14,10 +14,13 @@ export interface GrantRecord {
   expiresAt: string;
 }
 
-/** Days a grant stays valid; the Agent API allows up to 365. */
+/** Days a grant stays valid unless the user picks another choice; the Agent API allows up to 365. */
 export const GRANT_DAYS = 90;
-/** Shown on the user's grant list in the Agent API. */
-const GRANT_LABEL = "Inti trading";
+/** How long the user may let Inti trade before signing again. */
+export const GRANT_DAY_CHOICES = [7, 30, 90] as const;
+export type GrantDays = (typeof GRANT_DAY_CHOICES)[number];
+/** Shown on the user's grant list in the Agent API; it also tells Inti's grants from any other. */
+export const GRANT_LABEL = "Inti trading";
 
 export interface GrantStore {
   get(userId: string): GrantRecord | null;
@@ -108,9 +111,9 @@ export interface PreparedGrant {
   expiresAt: string;
 }
 
-/** Builds the grant_issue request: a fresh token every time, expiring GRANT_DAYS from now. */
-export function newGrantRequest(agentId: string, now: number): { token: string; expiresAt: string; body: Record<string, string> } {
+/** Builds the grant_issue request: a fresh token every time, expiring `days` from now. */
+export function newGrantRequest(agentId: string, now: number, days: GrantDays = GRANT_DAYS): { token: string; expiresAt: string; body: Record<string, string> } {
   const { token, commitment } = createGrantCredential();
-  const expiresAt = new Date(now + GRANT_DAYS * 86_400_000).toISOString();
+  const expiresAt = new Date(now + days * 86_400_000).toISOString();
   return { token, expiresAt, body: { type: "grant_issue", agent_id: agentId, label: GRANT_LABEL, credential: commitment, expires_at: expiresAt } };
 }

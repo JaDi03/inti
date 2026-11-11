@@ -47,7 +47,7 @@ const reportOnly = (): Brain => new ScriptedBrain(Array.from({ length: 50 }, () 
 const OWNER = { accountId: "ab".repeat(32), publicKey: `ed25519:${"1".repeat(44)}` };
 
 /** An Agent API stand-in that records what the server asked it for. */
-function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: string | null = null) {
+function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: string | null = null, earlierGrants = 0) {
   const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[]; policies: unknown[][] } = {
     prepared: [],
     submitted: [],
@@ -56,6 +56,8 @@ function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: s
     policies: [],
   };
   const agents: AgentAccounts = {
+    prepareRevokes: () =>
+      Promise.resolve(Array.from({ length: earlierGrants }, (_, i) => ({ correlationId: `revoke_${i + 1}`, intent: { standard: "nep413" }, expiresAt: "2027-02-08T22:12:39.100Z" }))),
     preparePolicy: (agentId, ownerAccount, bps) => {
       calls.policies.push([agentId, ownerAccount, bps]);
       if (cooldownUntil) return Promise.resolve({ status: "cooldown", availableAt: cooldownUntil });
@@ -330,6 +332,7 @@ describe("the user's own agent", () => {
       submit: () => Promise.reject(new Error("unused")),
       prepareGrant: () => Promise.reject(new Error("unused")),
       preparePolicy: () => Promise.reject(new Error("unused")),
+      prepareRevokes: () => Promise.reject(new Error("unused")),
     };
     const server = await app({ agents });
     const res = await post(server, "/api/agent/prepare", `Bearer ${await token()}`, OWNER);
@@ -399,6 +402,32 @@ describe("/api/agent/grant", () => {
     expect((await read()).json()).toMatchObject({ grant: null });
     await grants.put("did:privy:alice", { agentId: "agent_0", token: "ngt_x", expiresAt: "2027-02-08T12:00:00.000Z" });
     expect((await read()).json()).toMatchObject({ grant: null });
+  });
+
+  it("lasts 7, 30 or 90 days as the user picks, and nothing else", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const server = await app({ agents, now: () => NOW });
+    const auth = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/grant/prepare", auth, { days: 7 })).json()).toMatchObject({ expiresAt: "2026-11-17T12:00:00.000Z" });
+    expect(calls.grantBodies[0]?.expires_at).toBe("2026-11-17T12:00:00.000Z");
+    for (const body of [{ days: 10 }, { days: 365 }, { days: "7" }]) expect((await post(server, "/api/agent/grant/prepare", auth, body)).statusCode).toBe(400);
+  });
+
+  it("closes earlier grants only after the new one is live, and only for their own user", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE, null, 2);
+    const server = await app({ agents, now: () => NOW });
+    const alice = `Bearer ${await token()}`;
+    const mallory = `Bearer ${await token({ sub: "did:privy:mallory" })}`;
+    const prepared = await post(server, "/api/agent/grant/prepare", alice, {});
+    expect(prepared.json().revokes.map((r: { correlationId: string }) => r.correlationId)).toEqual(["revoke_1", "revoke_2"]);
+
+    const revoke = (auth: string, id = "revoke_1") => post(server, "/api/agent/grant/revoke/submit", auth, { correlationId: id, signedData: { standard: "nep413" } });
+    expect((await revoke(alice)).statusCode).toBe(404);
+    await post(server, "/api/agent/grant/submit", alice, { correlationId: "grant_1", signedData: { standard: "nep413" } });
+    expect((await revoke(mallory)).statusCode).toBe(404);
+    expect((await revoke(alice)).json()).toEqual({ status: "success" });
+    expect((await revoke(alice)).statusCode).toBe(404);
+    expect(calls.submittedTypes).toEqual(["grant_issue", "grant_revoke"]);
   });
 
   it("stops at the per-user daily cap of grant documents", async () => {
