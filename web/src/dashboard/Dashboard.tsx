@@ -64,9 +64,6 @@ export interface DashboardState {
   load: (quiet?: boolean) => Promise<void>;
 }
 
-/** How often an open dashboard reads itself again while the tab is in view. */
-const REFRESH_MS = 30_000;
-
 /** An on/off choice of the viewer, remembered in this browser only. */
 function useRememberedSwitch(key: string, initial: boolean): [boolean, () => void] {
   const [on, setOn] = useState(() => {
@@ -102,7 +99,6 @@ function useDashboard(
   status: Installed,
   getAccessToken: () => Promise<string | null>,
   grantSigned: boolean,
-  onChanged: () => void,
 ): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
@@ -132,24 +128,6 @@ function useDashboard(
     void load(readOnce.current);
     readOnce.current = true;
   }, [load, balances, grantSigned]);
-
-  // While the tab is in view, read the account and the dashboard again every 30 s and as soon as the
-  // user comes back to the tab, so orders and balances move without touching refresh.
-  const changed = useRef(onChanged);
-  changed.current = onChanged;
-  useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState !== "visible") return;
-      changed.current();
-      void load(true);
-    };
-    const timer = setInterval(tick, REFRESH_MS);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [load]);
 
   return { data, assets, loading, load };
 }
@@ -616,7 +594,7 @@ interface LayoutProps {
  * Phones: the chat or the portfolio, one at a time.
  */
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken, grantSigned, onChanged);
+  const state = useDashboard(address, client, status, getAccessToken, grantSigned);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
