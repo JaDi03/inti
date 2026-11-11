@@ -302,15 +302,15 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         icon={<ShieldCheck className="size-4 text-primary" />}
         title="Spending limits"
         extra={
-          <>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
-              {status.intiConnected ? "Inti is on" : "Inti is paused"}
-            </span>
-            <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
-              {hidden ? <EyeOff /> : <Eye />}
-            </Button>
-          </>
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
+            {status.intiConnected ? "Inti is on" : "Inti is paused"}
+          </span>
+        }
+        extraWhenOpen={
+          <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
+            {hidden ? <EyeOff /> : <Eye />}
+          </Button>
         }
       >
         <p className="mt-1 text-xs text-muted-foreground">A contract on your own account. Inti can only send what these limits allow, and only to your agent.</p>
@@ -398,8 +398,27 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
   );
 }
 
-/** A card the user can fold to its title; it remembers how the user left it. */
-function FoldCard({ id, icon, title, extra, className, children }: { id: string; icon: React.ReactNode; title: string; extra?: React.ReactNode; className?: string; children: React.ReactNode }) {
+/**
+ * A card the user can fold to its title; it remembers how the user left it. `extra` shows next to
+ * the title always, `extraWhenOpen` only while the card is open (controls for what it shows).
+ */
+function FoldCard({
+  id,
+  icon,
+  title,
+  extra,
+  extraWhenOpen,
+  className,
+  children,
+}: {
+  id: string;
+  icon: React.ReactNode;
+  title: string;
+  extra?: React.ReactNode;
+  extraWhenOpen?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
   const [open, toggle] = useRememberedSwitch(`inti-open-${id}`, true);
   return (
     <section className={cn("rounded-3xl border bg-card transition-[padding]", open ? "p-5" : "px-5 py-3", className)}>
@@ -409,7 +428,12 @@ function FoldCard({ id, icon, title, extra, className, children }: { id: string;
           <h2 className="truncate font-heading text-[17px] font-semibold">{title}</h2>
           <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
         </button>
-        {extra && <div className="-mr-2 flex shrink-0 items-center gap-1">{extra}</div>}
+        {(extra || (open && extraWhenOpen)) && (
+          <div className={cn("flex shrink-0 items-center gap-1", open && extraWhenOpen && "-mr-2")}>
+            {extra}
+            {open && extraWhenOpen}
+          </div>
+        )}
       </div>
       {open && children}
     </section>
