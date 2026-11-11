@@ -8,7 +8,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import { loadLimitsConfig, type LimitsConfig } from "../limits/config";
 
 /** Decimals of each asset's token on NEAR, as GET /v1/tokens lists them. */
-const DECIMALS: Record<AssetKey, number> = { gold: 6, euro: 18, pound: 18, bitcoin: 8 };
+export const DECIMALS: Record<AssetKey, number> = { gold: 6, euro: 18, pound: 18, bitcoin: 8 };
 
 interface Props {
   address: string;

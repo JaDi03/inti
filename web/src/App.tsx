@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { Coins, KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
-import { AssetsPanel } from "./assets/AssetsPanel";
+import { Dashboard } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -63,7 +63,8 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
-  const [assetsOpen, setAssetsOpen] = useState(false);
+  // On a phone the chat and the portfolio take turns; on a wide screen both show.
+  const [view, setView] = useState<"chat" | "portfolio">("chat");
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
   const creating = useRef(false);
@@ -166,6 +167,7 @@ export function App() {
   const creatingWallet = address === null && walletError === null;
   const checkingAccount = address !== null && limits.setup.kind === "ready" && limits.status === null;
   const working = creatingWallet || checkingAccount || activating || thinking;
+  const installed = limits.setup.kind === "ready" && limits.status?.kind === "installed" ? { setup: limits.setup, status: limits.status } : null;
 
   return (
     <div className="flex h-svh flex-col">
@@ -180,11 +182,6 @@ export function App() {
           {address && (
             <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setLimitsOpen(true)}>
               <ShieldCheck />
-            </Button>
-          )}
-          {address && (
-            <Button variant="ghost" size="icon" aria-label="Assets" title="Assets" onClick={() => setAssetsOpen(true)}>
-              <Coins />
             </Button>
           )}
           {address && (
@@ -206,7 +203,26 @@ export function App() {
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col items-center px-4">
+      {installed && (
+        <div className="flex justify-center px-4 pb-2 lg:hidden" role="tablist" aria-label="View">
+          <div className="flex w-full max-w-sm rounded-full bg-muted p-1 text-sm">
+            {(["chat", "portfolio"] as const).map((v) => (
+              <button
+                key={v}
+                role="tab"
+                aria-selected={view === v}
+                className={cn("h-9 flex-1 rounded-full font-medium capitalize transition-colors", view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}
+                onClick={() => setView(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+      <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", installed && view === "portfolio" && "hidden lg:flex")}>
         <div
           className={cn(
             "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
@@ -267,8 +283,29 @@ export function App() {
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
-      {limitsOpen && address && <SpendingLimitsPanel address={address} onClose={() => setLimitsOpen(false)} />}
-      {assetsOpen && address && <AssetsPanel address={address} onClose={() => setAssetsOpen(false)} />}
+      {installed && address && (
+        <aside className={cn("no-scrollbar min-h-0 overflow-y-auto px-4 pb-6 lg:block lg:w-[400px] lg:shrink-0 lg:pr-6 lg:pl-0", view === "chat" ? "hidden" : "flex-1")}>
+          <Dashboard
+            address={address}
+            config={installed.setup.config}
+            client={installed.setup.client}
+            status={installed.status}
+            getAccessToken={getAccessToken}
+            onManage={() => setLimitsOpen(true)}
+            className="mx-auto max-w-md"
+          />
+        </aside>
+      )}
+      </div>
+      {limitsOpen && address && (
+        <SpendingLimitsPanel
+          address={address}
+          onClose={() => {
+            setLimitsOpen(false);
+            void limits.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
