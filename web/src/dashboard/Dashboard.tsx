@@ -204,7 +204,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
                     </div>
                   </div>
                   {row?.enabled && (
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-neutral-950/10 px-2 py-0.5 text-[11px] font-semibold">
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground shadow-sm">
                       <Check className="size-3" /> Enabled
                     </span>
                   )}
