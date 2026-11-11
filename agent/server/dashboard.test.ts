@@ -28,7 +28,7 @@ function setup(lookups: Record<string, AgentLookup>) {
   const view: AgentView = {
     policy: (agentId) => {
       read.push(agentId);
-      return Promise.resolve(agentPolicy(OWNER) as never);
+      return Promise.resolve({ policy: agentPolicy(OWNER) } as never);
     },
     openOrders: () => Promise.resolve([ORDER]),
   };
@@ -41,15 +41,24 @@ const ALICE: AgentLookup = { status: "active", agentId: "agent_a", agentAccount:
 
 describe("dashboard", () => {
   it("summarizes the policy every user signs", () => {
-    expect(summarizePolicy(agentPolicy(OWNER) as never, OWNER)).toEqual({
+    expect(summarizePolicy({ policy: agentPolicy(OWNER) } as never, OWNER, NOW)).toEqual({
       frozen: false,
       canBuyNow: true,
       canPlaceLimitOrders: true,
       maxActionsPerHour: 30,
       maxPriceGapPercent: "3",
       sendsOnlyToOwner: true,
+      destinations: [OWNER],
+      maxDeviationBps: 300,
+      nextChangeAt: null,
     });
-    expect(summarizePolicy(agentPolicy(OWNER) as never, "ab".repeat(32)).sendsOnlyToOwner).toBe(false);
+    expect(summarizePolicy({ policy: agentPolicy(OWNER) } as never, "ab".repeat(32), NOW).sendsOnlyToOwner).toBe(false);
+  });
+
+  it("shows when the next rule change opens, only while it is still ahead", () => {
+    const at = (iso: string) => summarizePolicy({ policy: agentPolicy(OWNER, 100), cooldowns: { policy_change_available_at: iso } } as never, OWNER, NOW);
+    expect(at("2026-11-10T12:10:00.000Z")).toMatchObject({ nextChangeAt: "2026-11-10T12:10:00.000Z", maxDeviationBps: 100, maxPriceGapPercent: "1" });
+    expect(at("2026-11-10T11:50:00.000Z").nextChangeAt).toBeNull();
   });
 
   it("shows an open order in the owner's terms", () => {

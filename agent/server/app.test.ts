@@ -47,14 +47,20 @@ const reportOnly = (): Brain => new ScriptedBrain(Array.from({ length: 50 }, () 
 const OWNER = { accountId: "ab".repeat(32), publicKey: `ed25519:${"1".repeat(44)}` };
 
 /** An Agent API stand-in that records what the server asked it for. */
-function fakeAgents(existing: AgentLookup = { status: "none" }) {
-  const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[] } = {
+function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: string | null = null) {
+  const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[]; policies: unknown[][] } = {
     prepared: [],
     submitted: [],
     grantBodies: [],
     submittedTypes: [],
+    policies: [],
   };
   const agents: AgentAccounts = {
+    preparePolicy: (agentId, ownerAccount, bps) => {
+      calls.policies.push([agentId, ownerAccount, bps]);
+      if (cooldownUntil) return Promise.resolve({ status: "cooldown", availableAt: cooldownUntil });
+      return Promise.resolve({ status: "pending_signature", correlationId: `policy_${calls.policies.length}`, intent: { standard: "nep413", payload: {} }, preview: { summary: "p", policy: {} } });
+    },
     prepareGrant: (body) => {
       calls.grantBodies.push(body);
       return Promise.resolve({ correlationId: `grant_${calls.grantBodies.length}`, intent: { standard: "nep413", payload: {} }, preview: { summary: "g" } });
@@ -323,6 +329,7 @@ describe("the user's own agent", () => {
       prepare: () => Promise.reject(new Error("unused")),
       submit: () => Promise.reject(new Error("unused")),
       prepareGrant: () => Promise.reject(new Error("unused")),
+      preparePolicy: () => Promise.reject(new Error("unused")),
     };
     const server = await app({ agents });
     const res = await post(server, "/api/agent/prepare", `Bearer ${await token()}`, OWNER);
@@ -401,6 +408,57 @@ describe("/api/agent/grant", () => {
     for (let i = 0; i < 5; i++) expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(200);
     expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(429);
     expect(calls.grantBodies).toHaveLength(5);
+  });
+});
+
+describe("/api/agent/policy", () => {
+  const ACTIVE: AgentLookup = { status: "active", agentId: "agent_1", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
+  const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
+    server.inject({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json", origin: ORIGIN, ...(auth ? { authorization: auth } : {}) },
+      payload: JSON.stringify(payload),
+    });
+
+  it("prepares the change for the session's own agent and owner, and lets only that user submit it", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const server = await app({ agents });
+    const alice = `Bearer ${await token()}`;
+    const mallory = `Bearer ${await token({ sub: "did:privy:mallory" })}`;
+    const prepared = await post(server, "/api/agent/policy/prepare", alice, { maxDeviationBps: 100 });
+    expect(prepared.statusCode).toBe(200);
+    expect(prepared.json()).toMatchObject({ status: "pending_signature", correlationId: "policy_1" });
+    expect(calls.policies).toEqual([["agent_1", OWNER.accountId, 100]]);
+
+    expect((await post(server, "/api/agent/policy/submit", mallory, { correlationId: "policy_1", signedData: {} })).statusCode).toBe(404);
+    expect(calls.submitted).toEqual([]);
+    const submitted = await post(server, "/api/agent/policy/submit", alice, { correlationId: "policy_1", signedData: { standard: "nep413" } });
+    expect(submitted.json()).toEqual({ status: "success" });
+    expect(calls.submittedTypes).toEqual(["policy_update"]);
+  });
+
+  it("accepts only 1%, 2% or 3%, and no other field", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const server = await app({ agents });
+    const auth = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/policy/prepare", null, { maxDeviationBps: 100 })).statusCode).toBe(401);
+    for (const body of [{}, { maxDeviationBps: 50 }, { maxDeviationBps: 500 }, { maxDeviationBps: "100" }, { maxDeviationBps: 100, destinations: { mode: "any" } }]) {
+      expect((await post(server, "/api/agent/policy/prepare", auth, body)).statusCode).toBe(400);
+    }
+    expect(calls.policies).toEqual([]);
+  });
+
+  it("refuses without an agent, tells when the next change opens, and stops at the daily cap", async () => {
+    const auth = `Bearer ${await token()}`;
+    expect((await post(await app({ agents: fakeAgents().agents }), "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(409);
+    const waiting = await post(await app({ agents: fakeAgents(ACTIVE, "2026-11-11T20:00:00.000Z").agents }), "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 });
+    expect(waiting.statusCode).toBe(409);
+    expect(waiting.json()).toEqual({ error: "cooldown", availableAt: "2026-11-11T20:00:00.000Z" });
+
+    const server = await app({ agents: fakeAgents(ACTIVE).agents });
+    for (let i = 0; i < LIMITS.policyChangesPerUserPerDay; i++) expect((await post(server, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(200);
+    expect((await post(server, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(429);
   });
 });
 
