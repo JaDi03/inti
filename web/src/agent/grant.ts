@@ -108,7 +108,10 @@ export async function issueGrant({ accessToken, accountId, signer, days }: { acc
   const closings = revokes as OwnerMessage[];
 
   // The owner signer refuses anything that is not a grant or a closing for this account, before the wallet sees it.
-  await signer.approveMessages(accountId, [grant, ...closings].map((m) => m.intent.payload));
+  await signer.approveMessages(
+    accountId,
+    [grant, ...closings].map((m) => ({ message: m.intent.payload.message, recipient: m.intent.payload.recipient, nonce: m.nonce })),
+  );
   const sent = await signAndSend("/api/agent/grant/submit", accessToken, accountId, signer, grant);
   if (sent.status === "processing") throw new GrantError("Almost there: Inti's permission is still being saved. Check again in a minute.");
   if (sent.status !== "success" || typeof sent.expiresAt !== "string") throw new GrantError(GENERIC);

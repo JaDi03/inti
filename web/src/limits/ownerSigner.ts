@@ -27,7 +27,7 @@ export class OwnerSigner extends Signer {
   /** What the user approved in one confirmation, one entry per transaction, in signing order. */
   private approved: string[][] = [];
   /** Messages the user approved in one confirmation, in signing order. */
-  private approvedMessages: { message: string; recipient: string }[] = [];
+  private approvedMessages: { message: string; recipient: string; nonce: Uint8Array }[] = [];
 
   constructor(
     private readonly inner: Signer,
@@ -81,7 +81,8 @@ export class OwnerSigner extends Signer {
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     // Signed without asking again only if it is the next message the user already approved, unchanged.
     const next = this.approvedMessages.shift();
-    if (next === undefined || next.message !== params.message || next.recipient !== params.recipient) {
+    const sameNonce = next !== undefined && next.nonce.length === params.nonce.length && next.nonce.every((b, i) => b === params.nonce[i]);
+    if (next === undefined || next.message !== params.message || next.recipient !== params.recipient || !sameNonce) {
       this.approvedMessages = [];
       if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
     }
@@ -92,13 +93,13 @@ export class OwnerSigner extends Signer {
    * Shows every message of one user action in a single confirmation (a new grant and the closing
    * of earlier ones). Each one is then signed without asking again, in the same order.
    */
-  async approveMessages(accountId: string, messages: readonly { message: string; recipient: string }[]): Promise<void> {
+  async approveMessages(accountId: string, messages: readonly { message: string; recipient: string; nonce: Uint8Array }[]): Promise<void> {
     const publicKey = (await this.inner.getPublicKey()).toString();
     const lines = messages.flatMap((m) => describeOwnerMessage(m, accountId, publicKey, this.config, Date.now()));
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     this.approvedMessages = [];
     if (!(await this.confirm(lines))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
-    this.approvedMessages = messages.map((m) => ({ message: m.message, recipient: m.recipient }));
+    this.approvedMessages = messages.map((m) => ({ message: m.message, recipient: m.recipient, nonce: Uint8Array.from(m.nonce) }));
   }
 
   override async signDelegateAction(delegateAction: DelegateAction) {

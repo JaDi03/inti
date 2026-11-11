@@ -201,6 +201,17 @@ export interface GrantMessage {
   recipient: string;
 }
 
+/**
+ * A signed message's JSON, only when writing it back gives the very same text. The Agent API sends
+ * compact JSON, so anything else (a key written twice, extra spaces) is refused: what the user sees
+ * is then exactly what any reader of the message gets.
+ */
+function exactJson(message: string): Record<string, unknown> {
+  const parsed = JSON.parse(message) as unknown;
+  if (JSON.stringify(parsed) !== message) throw new SyntaxError("not exact JSON");
+  return parsed as Record<string, unknown>;
+}
+
 const GRANT_DOMAIN = "near-intents-agent-api.agent-grant.v6";
 export const GRANT_LABEL = "Inti trading";
 /** Longest grant the app signs; Inti asks for 90 days. */
@@ -214,7 +225,7 @@ const GRANT_KEYS = ["agent_id", "credential", "domain", "expires_at_ms", "issued
 export function describeGrant(grant: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
   let m: Record<string, unknown>;
   try {
-    m = JSON.parse(grant.message) as Record<string, unknown>;
+    m = exactJson(grant.message);
   } catch {
     refuse("the message is not a grant.");
   }
@@ -248,7 +259,7 @@ const MAX_POLICY_UPDATE_MS = 10 * 60_000;
 export function describePolicyUpdate(update: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
   let m: Record<string, unknown>;
   try {
-    m = JSON.parse(update.message) as Record<string, unknown>;
+    m = exactJson(update.message);
   } catch {
     refuse("the message is not a rule change.");
   }
@@ -279,7 +290,7 @@ const GRANT_REVOKE_KEYS = ["action", "agent_id", "domain", "expires_at_ms", "iss
 export function describeGrantRevoke(revoke: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
   let m: Record<string, unknown>;
   try {
-    m = JSON.parse(revoke.message) as Record<string, unknown>;
+    m = exactJson(revoke.message);
   } catch {
     refuse("the message is not a grant closing.");
   }

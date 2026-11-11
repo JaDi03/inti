@@ -290,11 +290,28 @@ describe("renewing the grant", () => {
     expect(wallet.signed).toHaveLength(2);
   });
 
-  it("asks again for a message that is not the one approved", async () => {
+  it("asks again for a message that is not the one approved, or the same text with another nonce", async () => {
     const wallet = userWallet();
     await wallet.signer.approveMessages(wallet.accountId, [grantFor(wallet)]);
     await wallet.signer.signNep413Message(wallet.accountId, closing(wallet));
     expect(wallet.shown).toHaveLength(2);
+
+    const again = userWallet();
+    const grant = grantFor(again);
+    await again.signer.approveMessages(again.accountId, [grant]);
+    await again.signer.signNep413Message(again.accountId, { ...grant, nonce: new Uint8Array(32).fill(9) });
+    expect(again.shown).toHaveLength(2);
+  });
+
+  it("refuses a message that is not written exactly as the Agent API writes it", async () => {
+    const wallet = userWallet();
+    const grant = grantFor(wallet);
+    const spaced = { ...grant, message: JSON.stringify(JSON.parse(grant.message), null, 1) };
+    // A key written twice: a reader that keeps the first one would see another owner.
+    const twice = { ...grant, message: grant.message.replace("{", `{"owner":{"account_id":"${"cd".repeat(32)}","public_key":"ed25519:x","type":"near"},`) };
+    await expect(wallet.signer.signNep413Message(wallet.accountId, spaced)).rejects.toThrow(RefusedSigningError);
+    await expect(wallet.signer.signNep413Message(wallet.accountId, twice)).rejects.toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(0);
   });
 
   it.each([

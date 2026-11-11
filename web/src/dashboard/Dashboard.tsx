@@ -41,6 +41,11 @@ const GROUPS: { title: string; keys: AssetKey[] }[] = [
 
 const NEAR_DECIMALS = 24;
 const HIDDEN = "••••";
+/**
+ * What one order reserves from Inti's fee allowance: 100 TGas at NEAR's lowest gas price
+ * (0.0001 NEAR per TGas). Below it the next order cannot be paid.
+ */
+const ONE_ORDER_FEE_YOCTO = 10n ** 22n; // 0.01 NEAR
 
 /** Dollar value for display only; amounts stay exact in atomic units everywhere else. */
 function usd(amount: string, price: number | null | undefined): number | null {
@@ -364,6 +369,11 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
               </span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">Inti pays each order&apos;s network fee from this. It is one total, not per day. Pausing and resuming Inti starts it over.</p>
+            {status.intiFeesLeft < ONE_ORDER_FEE_YOCTO && (
+              <p role="alert" className="mt-2 rounded-2xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                Inti&apos;s fees ran out, so it cannot place orders. Pause and resume Inti to start them over.
+              </p>
+            )}
           </>
         )}
         <div className="mt-3 flex items-start gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
