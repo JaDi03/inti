@@ -1,7 +1,7 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { Coins, KeyRound, LogOut, ShieldCheck } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Check, Copy, Eye, EyeOff, LogOut } from "lucide-react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
-import { AssetsPanel } from "./assets/AssetsPanel";
+import { PortfolioLayout, useHideAmounts } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -19,6 +19,9 @@ type Message = { id: number; from: "user" | "inti"; text: string; simulated?: bo
 
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
 const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 4 steps, right here.";
+
+/** First messages offered on an empty chat. None of them moves money: a purchase is always typed by the user. */
+const SUGGESTIONS = ["What can you buy for me?", "How much does $5 of gold cost right now?", "How much can you spend today?"];
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -35,6 +38,11 @@ function shortAddress(address: string): string {
 
 function Wordmark({ className }: { className?: string }) {
   return <span className={cn("font-heading font-bold tracking-tight text-primary", className)}>Inti</span>;
+}
+
+/** The chat alone until Inti is on; then the portfolio around it. */
+function WithPortfolio({ portfolio, children }: { portfolio: Omit<ComponentProps<typeof PortfolioLayout>, "children"> | null; children: ReactNode }) {
+  return portfolio ? <PortfolioLayout {...portfolio}>{children}</PortfolioLayout> : <>{children}</>;
 }
 
 function Welcome({ onLogin }: { onLogin: () => void }) {
@@ -63,7 +71,10 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
-  const [assetsOpen, setAssetsOpen] = useState(false);
+  // On a phone the chat and the portfolio take turns; on a wide screen both show.
+  const [view, setView] = useState<"chat" | "portfolio">("chat");
+  const hide = useHideAmounts("address");
+  const [copied, setCopied] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
   const creating = useRef(false);
@@ -166,6 +177,7 @@ export function App() {
   const creatingWallet = address === null && walletError === null;
   const checkingAccount = address !== null && limits.setup.kind === "ready" && limits.status === null;
   const working = creatingWallet || checkingAccount || activating || thinking;
+  const installed = limits.setup.kind === "ready" && limits.status?.kind === "installed" ? { setup: limits.setup, status: limits.status } : null;
 
   return (
     <div className="flex h-svh flex-col">
@@ -173,31 +185,29 @@ export function App() {
         <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {address && (
-            <code className="hidden rounded-full bg-muted px-3 py-1 text-xs sm:inline" title={address}>
-              {shortAddress(address)}
-            </code>
-          )}
-          {address && (
-            <Button variant="ghost" size="icon" aria-label="Spending limits" title="Spending limits" onClick={() => setLimitsOpen(true)}>
-              <ShieldCheck />
-            </Button>
-          )}
-          {address && (
-            <Button variant="ghost" size="icon" aria-label="Assets" title="Assets" onClick={() => setAssetsOpen(true)}>
-              <Coins />
-            </Button>
-          )}
-          {address && (
-            // Privy's own modal shows the key; it never reaches Inti's code.
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Export wallet"
-              title="Export wallet"
-              onClick={() => void exportWallet({ address }).catch(() => undefined)}
-            >
-              <KeyRound />
-            </Button>
+            <div className="flex items-center rounded-full bg-muted pl-3 text-xs">
+              <code title={hide.hidden ? undefined : address}>{hide.hidden ? "••••••••" : shortAddress(address)}</code>
+              <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={hide.hidden ? "Show address" : "Hide address"} onClick={hide.toggleHidden}>
+                {hide.hidden ? <EyeOff /> : <Eye />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="rounded-full"
+                aria-label={copied ? "Address copied" : "Copy address"}
+                onClick={() =>
+                  void navigator.clipboard.writeText(address).then(
+                    () => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    },
+                    () => undefined,
+                  )
+                }
+              >
+                {copied ? <Check className="text-primary" /> : <Copy />}
+              </Button>
+            </div>
           )}
           <ThemeToggle />
           <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
@@ -206,7 +216,44 @@ export function App() {
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col items-center px-4">
+      {installed && (
+        <div className="flex justify-center px-4 pb-2 lg:hidden" role="tablist" aria-label="View">
+          <div className="flex w-full max-w-sm rounded-full bg-muted p-1 text-sm">
+            {(["chat", "portfolio"] as const).map((v) => (
+              <button
+                key={v}
+                role="tab"
+                aria-selected={view === v}
+                className={cn("h-9 flex-1 rounded-full font-medium capitalize transition-colors", view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}
+                onClick={() => setView(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+      <WithPortfolio
+        portfolio={
+          installed && address
+            ? {
+                address,
+                config: installed.setup.config,
+                client: installed.setup.client,
+                status: installed.status,
+                getAccessToken,
+                onManage: () => setLimitsOpen(true),
+                // Privy's own window shows the key; it never reaches Inti's code.
+                onExport: () => void exportWallet({ address }).catch(() => undefined),
+                onChanged: () => void limits.refresh(),
+                view,
+              }
+            : null
+        }
+      >
+      <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", installed && view === "portfolio" && "hidden lg:flex")}>
         <div
           className={cn(
             "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
@@ -221,9 +268,25 @@ export function App() {
             </div>
           )}
           {empty && !activationCard && !creatingWallet && (
-            <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
+            <h1 className="mt-4 text-center font-heading text-2xl font-semibold text-foreground sm:text-3xl">
               {checkingAccount ? "Checking your account..." : "What do you want to do with your money?"}
             </h1>
+          )}
+          {empty && !activationCard && installed && (
+            // A first message the user can send with one tap.
+            <ul className="mt-6 flex flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((s) => (
+                <li key={s}>
+                  <button
+                    className="rounded-full border bg-card px-4 py-2 text-sm text-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+                    disabled={thinking}
+                    onClick={() => void send(s)}
+                  >
+                    {s}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 
@@ -263,12 +326,21 @@ export function App() {
         )}
 
         <div className={cn("flex w-full shrink-0 justify-center pb-6", empty && !activationCard ? "mt-8" : "mt-auto")}>
-          <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. invest $40 in NEAR" disabled={thinking} />
+          <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. buy $5 of gold" disabled={thinking} />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
-      {limitsOpen && address && <SpendingLimitsPanel address={address} onClose={() => setLimitsOpen(false)} />}
-      {assetsOpen && address && <AssetsPanel address={address} onClose={() => setAssetsOpen(false)} />}
+      </WithPortfolio>
+      </div>
+      {limitsOpen && address && (
+        <SpendingLimitsPanel
+          address={address}
+          onClose={() => {
+            setLimitsOpen(false);
+            void limits.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

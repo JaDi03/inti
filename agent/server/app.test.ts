@@ -8,6 +8,7 @@ import type { Brain } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
+import { LIMITS } from "./config.js";
 import type { GrantRecord, GrantStore } from "./grants.js";
 import { DailyQuota } from "./quota.js";
 
@@ -172,12 +173,17 @@ describe("POST /api/chat", () => {
     expect((await chat(server, `Bearer ${await token({ sub: "did:privy:bob" })}`, { message: "1" })).statusCode).toBe(200);
   });
 
-  it("limits requests per IP per minute", async () => {
+  it("limits requests per IP per minute, without counting the browser's preflights", async () => {
     const server = await app();
+    const preflight = () =>
+      server.inject({ method: "OPTIONS", url: "/api/chat", headers: { origin: ORIGIN, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } });
     const codes: number[] = [];
-    for (let i = 0; i < 11; i++) codes.push((await chat(server, null, { message: "hi" })).statusCode);
-    expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
-    expect(codes[10]).toBe(429);
+    for (let i = 0; i <= LIMITS.requestsPerIpPerMinute; i++) {
+      expect((await preflight()).statusCode).toBe(204);
+      codes.push((await chat(server, null, { message: "hi" })).statusCode);
+    }
+    expect(codes.slice(0, LIMITS.requestsPerIpPerMinute).every((c) => c === 401)).toBe(true);
+    expect(codes[LIMITS.requestsPerIpPerMinute]).toBe(429);
   });
 
   it("keeps each user's portfolio apart", async () => {
@@ -224,6 +230,26 @@ describe("POST /api/chat", () => {
     const res = await chat(await app({ brain: failing }), `Bearer ${await token()}`, { message: "hi" });
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe(JSON.stringify({ error: "agent_unavailable" }));
+  });
+});
+
+describe("GET /api/dashboard", () => {
+  it("answers only a signed-in user, with that user's own dashboard", async () => {
+    const asked: string[] = [];
+    const server = await app({
+      dashboard: (userId) => {
+        asked.push(userId);
+        return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null, ethereum: null, solana: null }, agent: null });
+      },
+    });
+    expect((await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN } })).statusCode).toBe(401);
+    const forged = await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN, authorization: `Bearer ${await token({ key: otherKey })}` } });
+    expect(forged.statusCode).toBe(401);
+    expect(asked).toEqual([]);
+    const ok = await server.inject({ method: "GET", url: "/api/dashboard?user=did:privy:bob", headers: { origin: ORIGIN, authorization: `Bearer ${await token()}` } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    expect(asked).toEqual(["did:privy:alice"]);
   });
 });
 

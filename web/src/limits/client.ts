@@ -33,6 +33,8 @@ export type LimitsStatus =
       spentToday: bigint;
       /** Token balance the agent can be funded from. */
       spendable: bigint;
+      /** NEAR the network keeps aside for the Spending Limits code and the account's data. */
+      setAside: bigint;
     };
 
 export class LimitsClient {
@@ -93,6 +95,7 @@ export class LimitsClient {
       limit: limit ? { perOrder: BigInt(limit.per_order), perDay: BigInt(limit.per_day) } : null,
       spentToday: BigInt(spent),
       spendable: BigInt(balance),
+      setAside: state.balance.usedOnStorage,
     };
   }
 

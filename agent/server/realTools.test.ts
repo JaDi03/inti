@@ -52,7 +52,9 @@ describe("realTools", () => {
     expect(view.money_for_orders_usd).toBe("0.35");
     expect(view.limits).toEqual({ per_order_usd: "1.06", left_today_usd: "3.55" });
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "gold", enabled: true, price_usd: 4016.03 }));
-    expect(view.assets).toContainEqual(expect.objectContaining({ key: "euro", enabled: false }));
+    expect(view.assets).toContainEqual(expect.objectContaining({ key: "euro", enabled: false, kind: "currency" }));
+    expect(view.assets).toContainEqual(expect.objectContaining({ key: "ethereum", symbol: "ETH", kind: "crypto" }));
+    expect(view.assets).toContainEqual(expect.objectContaining({ key: "solana", symbol: "SOL", kind: "crypto" }));
   });
 
   it("buys the fixed asset id with the dollar amount converted to wNEAR", async () => {

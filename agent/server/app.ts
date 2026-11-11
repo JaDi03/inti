@@ -11,6 +11,7 @@ import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
+import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
 import { newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
 import type { ChainPort } from "./orders.js";
@@ -27,6 +28,8 @@ export interface AppDeps {
   /** Real orders. Without them every chat runs on the simulated portfolio. */
   trading?: Trading;
   chain?: ChainPort;
+  /** The signed-in user's dashboard: prices, and their own agent's rules and open orders. */
+  dashboard?: Dashboard;
   now?: () => number;
   policy: () => Policy;
   newPortfolio: (tokens: readonly PricedToken[]) => SimulatedPortfolio;
@@ -100,7 +103,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     methods: ["GET", "POST"],
     allowedHeaders: ["Authorization", "Content-Type"],
   });
-  await app.register(rateLimit, { max: LIMITS.requestsPerIpPerMinute, timeWindow: "1 minute" });
+  // The browser's CORS preflight comes with every call; it reaches no handler, so it does not count.
+  await app.register(rateLimit, { max: LIMITS.requestsPerIpPerMinute, timeWindow: "1 minute", allowList: (req) => req.method === "OPTIONS" });
 
   app.addHook("onSend", async (_req, reply) => {
     reply.header("Cache-Control", "no-store");
@@ -146,6 +150,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     } catch (error) {
       return agentFailure(req, reply, error);
     }
+  });
+
+  // Read only. The agent comes from the session's user, so nobody can read another user's agent.
+  app.get("/api/dashboard", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    if (!deps.dashboard) return reply.code(503).send({ error: "unavailable" });
+    return deps.dashboard(userId);
   });
 
   // The document the user's wallet signs so Inti's server may trade for their agent.

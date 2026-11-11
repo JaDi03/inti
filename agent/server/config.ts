@@ -11,7 +11,8 @@ export const LIMITS = {
   messageChars: 1000,
   cyclesPerUserPerDay: 40,
   cyclesPerDayTotal: 400,
-  requestsPerIpPerMinute: 10,
+  /** Opening the app reads the agent and the dashboard; a few refreshes must fit, a flood must not. */
+  requestsPerIpPerMinute: 30,
   /** Users whose simulated portfolio stays in memory; the oldest is dropped first. */
   usersInMemory: 1000,
   /** Live token prices are re-read at most this often. */
