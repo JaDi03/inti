@@ -249,6 +249,7 @@ export function App() {
                 onExport: () => void exportWallet({ address }).catch(() => undefined),
                 onChanged: () => void limits.refresh(),
                 view,
+                grantSigned: grantDone,
               }
             : null
         }

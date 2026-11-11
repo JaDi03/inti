@@ -11,6 +11,8 @@ interface Props {
   getAccessToken: () => Promise<string | null>;
   /** Until when Inti may trade (ISO date), or null when it may not. */
   grantUntil: string | null;
+  /** Reads the dashboard again once the new permission is live. */
+  onSigned: () => void;
 }
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { dateStyle: "medium" });
@@ -19,12 +21,12 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { dateSty
  * Until when Inti may trade without asking, and a way to sign again for 7, 30 or 90 days. The new
  * permission replaces the earlier one; a shorter one means signing more often.
  */
-export function GrantRenewal({ address, signer, getAccessToken, grantUntil }: Props) {
+export function GrantRenewal({ address, signer, getAccessToken, grantUntil, onSigned }: Props) {
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState<GrantDays>(90);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The dashboard is re-read every few seconds; until it catches up, show the date just signed.
+  // Until the dashboard read catches up, show the date just signed.
   const [signedUntil, setSignedUntil] = useState<string | null>(null);
   const until = signedUntil ?? grantUntil;
 
@@ -36,6 +38,7 @@ export function GrantRenewal({ address, signer, getAccessToken, grantUntil }: Pr
       if (!token) throw new Error("Your session expired. Sign in again and retry.");
       setSignedUntil(await issueGrant({ accessToken: token, accountId: address, signer, days }));
       setOpen(false);
+      onSigned();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Inti's permission could not be renewed.");
     } finally {
