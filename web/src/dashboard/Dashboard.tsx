@@ -1,4 +1,4 @@
-import { Check, Clock, ExternalLink, Eye, EyeOff, Loader2, Lock, Plus, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Check, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -8,6 +8,7 @@ import { DECIMALS } from "../assets/AssetsPanel";
 import type { LimitsClient, LimitsStatus } from "../limits/client";
 import { useOwnerSigner } from "../limits/ConfirmSigning";
 import type { LimitsConfig } from "../limits/config";
+import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
 
@@ -45,11 +46,8 @@ export interface DashboardState {
   toggleHidden: () => void;
 }
 
-/** Prices, the agent's rules and the wallet's assets, read once for both halves of the dashboard. */
-export function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): DashboardState {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [assets, setAssets] = useState<AssetRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
+/** Whether amounts and the address show as dots; one switch for the whole app, remembered in this browser. */
+export function useHideAmounts(): { hidden: boolean; toggleHidden: () => void } {
   const [hidden, setHidden] = useState(() => {
     try {
       return localStorage.getItem(HIDE_KEY) === "1";
@@ -57,6 +55,23 @@ export function useDashboard(address: string, client: LimitsClient, status: Inst
       return false;
     }
   });
+  const toggleHidden = () =>
+    setHidden((h) => {
+      try {
+        localStorage.setItem(HIDE_KEY, h ? "0" : "1");
+      } catch {
+        // Storage can be blocked; the choice then lasts for this visit.
+      }
+      return !h;
+    });
+  return { hidden, toggleHidden };
+}
+
+/** Prices, the agent's rules and the wallet's assets, read once for both halves of the dashboard. */
+function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): Omit<DashboardState, "hidden" | "toggleHidden"> {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [assets, setAssets] = useState<AssetRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,17 +89,7 @@ export function useDashboard(address: string, client: LimitsClient, status: Inst
     void load();
   }, [load, status]);
 
-  const toggleHidden = () =>
-    setHidden((h) => {
-      try {
-        localStorage.setItem(HIDE_KEY, h ? "0" : "1");
-      } catch {
-        // Storage can be blocked; the choice then lasts for this visit.
-      }
-      return !h;
-    });
-
-  return { data, assets, loading, load, hidden, toggleHidden };
+  return { data, assets, loading, load };
 }
 
 interface MoneyProps {
@@ -140,7 +145,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
             </Button>
           </div>
         </div>
-        <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums">{show(money(total))}</p>
+        <p className="mt-1 h-10 text-4xl font-semibold tracking-tight tabular-nums">
+          {hidden ? <span className="text-3xl tracking-[0.25em]">●●●●●●</span> : money(total)}
+        </p>
         <dl className="mt-4 flex flex-col gap-2 text-sm">
           <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
           <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
@@ -167,7 +174,11 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
                       {a.kind === "real-world" ? "Real-world asset" : "Crypto"} · {a.symbol}
                     </p>
                   </div>
-                  {row?.enabled && <Check className="size-4 shrink-0" aria-label="Enabled" />}
+                  {row?.enabled && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-neutral-950/10 px-2 py-0.5 text-[11px] font-semibold">
+                      <Check className="size-3" /> Enabled
+                    </span>
+                  )}
                 </div>
                 <div>
                   {row?.enabled ? (
@@ -207,22 +218,58 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
   );
 }
 
+interface RulesProps {
+  address: string;
+  config: LimitsConfig;
+  client: LimitsClient;
+  status: Installed;
+  state: DashboardState;
+  /** Opens the Spending limits window to edit the limits. */
+  onManage: () => void;
+  /** Re-reads the account after the user changed something on it. */
+  onChanged: () => void;
+  className?: string;
+}
+
 /** The rules around the money: Spending Limits on the user's account and the agent's signed rules. */
-export function RulesPanel({ status, state, onManage, className }: { status: Installed; state: DashboardState; onManage: () => void; className?: string }) {
-  const { data, loading, hidden } = state;
+export function RulesPanel({ address, config, client, status, state, onManage, onChanged, className }: RulesProps) {
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const { data, loading, hidden, toggleHidden } = state;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const policy = data?.agent?.policy;
   const orders = data?.agent?.orders;
+  const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
+
+  const pauseOrResume = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await (status.intiConnected ? client.disconnectInti(address, signer) : client.reconnectInti(address, signer));
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The transaction failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className={cn("flex flex-col gap-4", className)}>
       <section className="rounded-3xl border bg-card p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 font-medium">
             <ShieldCheck className="size-4 text-primary" /> Spending limits
           </h2>
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
-            {status.intiConnected ? "Inti is on" : "Inti is paused"}
-          </span>
+          <div className="-mr-2 flex items-center gap-1">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
+              {status.intiConnected ? "Inti is on" : "Inti is paused"}
+            </span>
+            <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
+              {hidden ? <EyeOff /> : <Eye />}
+            </Button>
+          </div>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">A contract on your own account. Inti can only send what these limits allow, and only to your agent.</p>
         {status.limit ? (
@@ -230,7 +277,7 @@ export function RulesPanel({ status, state, onManage, className }: { status: Ins
             <div className="mt-4 flex justify-between text-sm">
               <span className="text-muted-foreground">Used in the last 24 h</span>
               <span className="tabular-nums">
-                {nearText(status.spentToday)} of {nearText(status.limit.perDay)} NEAR
+                {near(status.spentToday)} of {near(status.limit.perDay)} NEAR
               </span>
             </div>
             <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-muted">
@@ -241,7 +288,7 @@ export function RulesPanel({ status, state, onManage, className }: { status: Ins
             </div>
             <div className="mt-3 flex justify-between text-sm">
               <span className="text-muted-foreground">Most per order</span>
-              <span className="tabular-nums">{nearText(status.limit.perOrder)} NEAR</span>
+              <span className="tabular-nums">{near(status.limit.perOrder)} NEAR</span>
             </div>
           </>
         ) : (
@@ -250,12 +297,20 @@ export function RulesPanel({ status, state, onManage, className }: { status: Ins
         <div className="mt-3 flex items-start gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
           <Lock className="mt-0.5 size-3.5 shrink-0" />
           <span>
-            The network keeps {hidden ? HIDDEN : `${nearText(status.setAside)} NEAR`} of your account aside while these rules live on it. It comes back when you turn Inti off.
+            The network keeps {near(status.setAside)} NEAR of your account aside while these rules live on it. It comes back when you turn Inti off.
           </span>
         </div>
-        <Button variant="outline" className="mt-4 w-full rounded-full" onClick={onManage}>
-          Manage limits
-        </Button>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" className="rounded-full" disabled={busy} onClick={onManage}>
+            Edit limits
+          </Button>
+          <Button variant={status.intiConnected ? "outline" : "default"} className="rounded-full" disabled={busy} onClick={() => void pauseOrResume()}>
+            {busy ? <Loader2 className="animate-spin" /> : status.intiConnected ? <Pause /> : <Play />}
+            {status.intiConnected ? "Pause Inti" : "Resume Inti"}
+          </Button>
+        </div>
+        {error && <p className="mt-2 break-words text-sm text-destructive">{error}</p>}
+        {confirmDialog}
       </section>
 
       <section className="rounded-3xl border bg-card p-5">
@@ -304,6 +359,68 @@ export function RulesPanel({ status, state, onManage, className }: { status: Ins
   );
 }
 
+interface SecurityProps {
+  address: string;
+  config: LimitsConfig;
+  client: LimitsClient;
+  status: Installed;
+  /** Opens Privy's own window that shows the wallet's key; the key never reaches Inti's code. */
+  onExport: () => void;
+  onChanged: () => void;
+  className?: string;
+}
+
+/** What protects the account and the ways out: passkey, the wallet's key, and turning Inti off. */
+export function SecurityPanel({ address, config, client, status, onExport, onChanged, className }: SecurityProps) {
+  const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const turnOff = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const plan = client.releasePlan(address, status.spendable, status.intiConnected);
+      await signer.approveAll(plan);
+      await client.send(address, signer, plan);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The transaction failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className={cn("rounded-3xl border bg-card p-5", className)}>
+      <h2 className="flex items-center gap-2 font-medium">
+        <Lock className="size-4 text-primary" /> Security
+      </h2>
+      <div className="mt-3">
+        <PasskeyProtection />
+      </div>
+      <div className="mt-4 border-t pt-4">
+        <p className="text-sm font-medium">Your wallet&apos;s key</p>
+        <p className="mt-1 text-xs text-muted-foreground">The wallet is yours. Its key opens it in any NEAR wallet. Keep it secret: anyone with it controls your money.</p>
+        <Button variant="outline" size="sm" className="mt-2 rounded-full" onClick={onExport}>
+          <KeyRound /> Export wallet
+        </Button>
+      </div>
+      <div className="mt-4 border-t pt-4">
+        <p className="text-sm font-medium">Turn off Inti</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Inti stops working and your whole balance is back to normal, including the NEAR set aside for Inti. You can turn Inti on again later.
+        </p>
+        <Button variant="outline" size="sm" className="mt-2 rounded-full" disabled={busy} onClick={() => void turnOff()}>
+          {busy ? <Loader2 className="animate-spin" /> : <Power />} Turn off Inti
+        </Button>
+      </div>
+      {error && <p className="mt-2 break-words text-sm text-destructive">{error}</p>}
+      {confirmDialog}
+    </section>
+  );
+}
+
 interface LayoutProps {
   address: string;
   config: LimitsConfig;
@@ -311,6 +428,10 @@ interface LayoutProps {
   status: Installed;
   getAccessToken: () => Promise<string | null>;
   onManage: () => void;
+  onExport: () => void;
+  /** Re-reads the account after the user changed something on it. */
+  onChanged: () => void;
+  hide: { hidden: boolean; toggleHidden: () => void };
   /** On a phone, which one shows: the chat or the portfolio. */
   view: "chat" | "portfolio";
   children: React.ReactNode;
@@ -320,19 +441,25 @@ interface LayoutProps {
  * The chat with the portfolio around it. Wide screens: the rules on the left, the money on the
  * right. Medium screens: everything on the right. Phones: the chat or the portfolio, one at a time.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, view, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken);
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, hide, view, children }: LayoutProps) {
+  const state: DashboardState = { ...useDashboard(address, client, status, getAccessToken), ...hide };
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
+  const rules = { address, config, client, status, state, onManage, onChanged };
+  const security = { address, config, client, status, onExport, onChanged };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>
-        <RulesPanel status={status} state={state} onManage={onManage} />
+        <div className="flex flex-col gap-4">
+          <RulesPanel {...rules} />
+          <SecurityPanel {...security} />
+        </div>
       </aside>
       {children}
       <aside className={cn(side, view === "chat" ? "hidden" : "flex-1", "lg:block lg:w-[380px] lg:flex-none lg:shrink-0 lg:pr-6 lg:pl-0")}>
         <div className="mx-auto flex max-w-md flex-col gap-4">
           <MoneyPanel address={address} config={config} client={client} status={status} state={state} onManage={onManage} />
-          <RulesPanel status={status} state={state} onManage={onManage} className="xl:hidden" />
+          <RulesPanel {...rules} className="xl:hidden" />
+          <SecurityPanel {...security} className="xl:hidden" />
         </div>
       </aside>
     </>
