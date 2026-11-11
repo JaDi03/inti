@@ -8,6 +8,7 @@ import type { Brain } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
+import { LIMITS } from "./config.js";
 import type { GrantRecord, GrantStore } from "./grants.js";
 import { DailyQuota } from "./quota.js";
 
@@ -172,12 +173,17 @@ describe("POST /api/chat", () => {
     expect((await chat(server, `Bearer ${await token({ sub: "did:privy:bob" })}`, { message: "1" })).statusCode).toBe(200);
   });
 
-  it("limits requests per IP per minute", async () => {
+  it("limits requests per IP per minute, without counting the browser's preflights", async () => {
     const server = await app();
+    const preflight = () =>
+      server.inject({ method: "OPTIONS", url: "/api/chat", headers: { origin: ORIGIN, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } });
     const codes: number[] = [];
-    for (let i = 0; i < 11; i++) codes.push((await chat(server, null, { message: "hi" })).statusCode);
-    expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
-    expect(codes[10]).toBe(429);
+    for (let i = 0; i <= LIMITS.requestsPerIpPerMinute; i++) {
+      expect((await preflight()).statusCode).toBe(204);
+      codes.push((await chat(server, null, { message: "hi" })).statusCode);
+    }
+    expect(codes.slice(0, LIMITS.requestsPerIpPerMinute).every((c) => c === 401)).toBe(true);
+    expect(codes[LIMITS.requestsPerIpPerMinute]).toBe(429);
   });
 
   it("keeps each user's portfolio apart", async () => {

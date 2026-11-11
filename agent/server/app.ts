@@ -103,7 +103,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     methods: ["GET", "POST"],
     allowedHeaders: ["Authorization", "Content-Type"],
   });
-  await app.register(rateLimit, { max: LIMITS.requestsPerIpPerMinute, timeWindow: "1 minute" });
+  // The browser's CORS preflight comes with every call; it reaches no handler, so it does not count.
+  await app.register(rateLimit, { max: LIMITS.requestsPerIpPerMinute, timeWindow: "1 minute", allowList: (req) => req.method === "OPTIONS" });
 
   app.addHook("onSend", async (_req, reply) => {
     reply.header("Cache-Control", "no-store");
