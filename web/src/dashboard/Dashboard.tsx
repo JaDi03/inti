@@ -289,6 +289,8 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
   const [error, setError] = useState<string | null>(null);
   const policy = data?.agent?.policy;
   const agentAccount = data?.agent?.account;
+  // Inti's key is on, but what is left for fees cannot pay one more order.
+  const feesOut = (status.intiConnected && status.intiFeesLeft !== null && status.intiFeesLeft < ONE_ORDER_FEE_YOCTO);
   const orders = data?.agent?.orders;
   const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
 
@@ -312,9 +314,9 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         icon={<ShieldCheck className="size-4 text-primary" />}
         title="Spending limits"
         extra={
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
-            {status.intiConnected ? "Inti is on" : "Inti is paused"}
+          <span className={cn("flex items-center gap-1.5 text-xs", feesOut ? "font-medium text-destructive" : "text-muted-foreground")}>
+            <span className={cn("size-2 rounded-full", feesOut ? "bg-destructive" : status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
+            {feesOut ? "Inti can't trade" : status.intiConnected ? "Inti is on" : "Inti is paused"}
           </span>
         }
         extraWhenOpen={
@@ -369,7 +371,7 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
               </span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">Inti pays each order&apos;s network fee from this. It is one total, not per day. Pausing and resuming Inti starts it over.</p>
-            {status.intiFeesLeft < ONE_ORDER_FEE_YOCTO && (
+            {feesOut && (
               <p role="alert" className="mt-2 rounded-2xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 Inti&apos;s fees ran out, so it cannot place orders. Pause and resume Inti to start them over.
               </p>
