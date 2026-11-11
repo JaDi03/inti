@@ -233,7 +233,7 @@ describe("GET /api/dashboard", () => {
     const server = await app({
       dashboard: (userId) => {
         asked.push(userId);
-        return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null }, agent: null });
+        return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null, ethereum: null, solana: null }, agent: null });
       },
     });
     expect((await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN } })).statusCode).toBe(401);
