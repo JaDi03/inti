@@ -27,6 +27,10 @@ function setup() {
       orders.push({ kind: "limit", asset, amount, price, days });
       return Promise.resolve({ status: "resting", orderId: "ord_1", spend: amount });
     },
+    quote: (_u: string, asset: string, amount: bigint) => {
+      orders.push({ kind: "quote", asset, amount });
+      return Promise.resolve({ status: "quoted", amountOut: 246n, minAmountOut: 243n, costUsd: "0.010611", costPercent: "1.05", seconds: 12 });
+    },
   } as unknown as Trading;
   const chain: ChainPort = {
     registered: (contract) => Promise.resolve(contract.startsWith("eth-")),
@@ -43,6 +47,8 @@ describe("realTools", () => {
   it("shows the wallet, prices, enabled assets and what the limits still allow", async () => {
     const { tools } = setup();
     const view = JSON.parse(await tools.run("get_portfolio", {}, [])) as Record<string, unknown>;
+    expect(view.paid_with).toBe("NEAR");
+    expect(view.near_for_orders).toBe("0.1");
     expect(view.money_for_orders_usd).toBe("0.35");
     expect(view.limits).toEqual({ per_order_usd: "1.06", left_today_usd: "3.55" });
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "gold", enabled: true, price_usd: 4016.03 }));
@@ -58,11 +64,43 @@ describe("realTools", () => {
     expect(events[0]?.type).toBe("swap_executed");
   });
 
+  it("quotes a purchase in the owner's terms, with one cost as the trading service reports it, and buys nothing", async () => {
+    const { tools, orders } = setup();
+    const events: AgentEvent[] = [];
+    const out = JSON.parse(await tools.run("get_quote", { asset: "gold", usd: "1" }, events)) as Record<string, unknown>;
+    expect(out).toEqual({
+      status: "quoted",
+      asset: ASSETS.gold.name,
+      pay_usd: "1",
+      pay_near: "0.281691",
+      receive: "0.000246",
+      receive_usd: "0.9879",
+      receive_at_least: "0.000243",
+      cost_usd: "0.010611",
+      cost_percent: "1.05",
+      seconds: 12,
+      note: "An estimate for right now; nothing was bought. The cost is what the route keeps of the value at current prices; it moves with the market and is not a fixed commission.",
+    });
+    expect(orders).toEqual([{ kind: "quote", asset: ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
+    expect(events).toEqual([]);
+  });
+
+  it("quotes only the fixed assets, within the order range", async () => {
+    const { tools, orders } = setup();
+    await expect(tools.run("get_quote", { asset: "nep141:wrap.near", usd: "1" }, [])).rejects.toThrow("invalid input");
+    await expect(tools.run("get_quote", { asset: "gold", usd: "0.05" }, [])).rejects.toThrow("between");
+    await expect(tools.run("get_quote", { asset: "gold", usd: "1", recipient: "attacker.near" }, [])).rejects.toThrow("invalid input");
+    expect(orders).toEqual([]);
+  });
+
   it("turns a dollar price into wNEAR per unit for a limit order", async () => {
     const { tools, orders } = setup();
     const events: AgentEvent[] = [];
     await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, events);
     expect(events).toEqual([{ type: "limit_order_placed", to: "XAUT", usd: "1", priceUsd: "3950", days: "3" }]);
+    const out = JSON.parse(await tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3950", days: 3 }, [])) as Record<string, unknown>;
+    expect(out.fee).toBe("1Click charges 0.20% on every limit order.");
+    expect(out.leftover).toContain("comes back to the wallet as regular NEAR");
     expect(orders[0]).toMatchObject({ kind: "limit", asset: ASSETS.gold.assetId, price: usdPriceToWnear("3950", 3_550_000n), days: 3 });
     expect(usdPriceToWnear("3950", 3_550_000n)).toBe("1112.676056");
   });

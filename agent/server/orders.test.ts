@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { bandFromPolicy, buy, buyQuantity, FUNDING_ASSET, placeLimitBuy, priceInBand, sweep, tokenContract, type AgentPort, type ChainPort, type OrderAccount, type Settled } from "./orders.js";
+import {
+  agentApiPort,
+  bandFromPolicy,
+  buy,
+  buyQuantity,
+  FUNDING_ASSET,
+  placeLimitBuy,
+  priceInBand,
+  sweep,
+  tokenContract,
+  type AgentPort,
+  type ChainPort,
+  type OrderAccount,
+  type Settled,
+} from "./orders.js";
 
 const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
 const ACCOUNT: OrderAccount = { owner: "91".repeat(32), agentId: "agent_1", grantToken: "ngt_x" };
@@ -39,6 +53,7 @@ function world(
   const agent: AgentPort = {
     available: () => Promise.resolve(new Map(agentHeld)),
     minOut: () => Promise.resolve(opts.minOut === undefined ? 240n : opts.minOut),
+    quote: () => Promise.resolve(null),
     swap: (_a, from, to, amount) => {
       log.push(`swap ${amount}`);
       const outcome = opts.swap ?? "success";
@@ -193,6 +208,40 @@ describe("buyQuantity", () => {
     // 0.275 wNEAR at 1100 wNEAR per XAUT buys 0.00025 XAUT (250 atomic, 6 decimals).
     expect(buyQuantity(275n * 10n ** 21n, "1100", 6, 24)).toBe(250n);
     expect(buyQuantity(3n * 10n ** 23n, "1131.5", 6, 24)).toBe(265n);
+  });
+});
+
+describe("agentApiPort.quote", () => {
+  /** A fetch that answers every call with `body` and records what was asked. */
+  const answering = (status: number, body: unknown) => {
+    const asked: { url: string; body: unknown }[] = [];
+    const fetcher = ((url: URL, init?: RequestInit) => {
+      asked.push({ url: url.toString(), body: JSON.parse(String(init?.body)) as unknown });
+      return Promise.resolve(new Response(JSON.stringify(body), { status }));
+    }) as typeof fetch;
+    return { asked, port: agentApiPort("key", "https://api.example", fetcher) };
+  };
+
+  it("asks a dry swap and reads what arrives, the minimum, the fee and the time", async () => {
+    // Shape of a real dry answer from the Agent API: 1 USD of wNEAR to XAUT.
+    const { asked, port } = answering(200, {
+      dry: true,
+      type: "swap",
+      quote: { amount_out: "246", min_amount_out: "243", time_estimate_seconds: 12 },
+      spend: { amount_usd: "1.001610", budget: {} },
+      owner_approval: false,
+      fee: { amount_usd: "0.010611", percent: "1.05" },
+      warnings: [{ code: "insufficient_balance", detail: "", available_amount: "0" }],
+    });
+    expect(await port.quote("agent_1", FUNDING_ASSET, GOLD, 279n * 10n ** 21n)).toEqual({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.010611", costPercent: "1.05", seconds: 12 });
+    expect(asked).toEqual([
+      { url: "https://api.example/v1/agents/agent_1/swap", body: { origin_asset: FUNDING_ASSET, destination_asset: GOLD, amount: "279000000000000000000000", dry: true } },
+    ]);
+  });
+
+  it("is null when the service refuses or answers something unexpected", async () => {
+    expect(await answering(400, { errors: [{ code: "unsupported_token" }] }).port.quote("agent_1", FUNDING_ASSET, GOLD, 1n)).toBeNull();
+    expect(await answering(200, { quote: { amount_out: "-1", min_amount_out: "1" } }).port.quote("agent_1", FUNDING_ASSET, GOLD, 1n)).toBeNull();
   });
 });
 

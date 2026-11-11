@@ -15,7 +15,10 @@ import {
   type ChainPort,
   type LimitResult,
   type OrderAccount,
+  type SwapQuote,
 } from "./orders.js";
+
+export type QuoteResult = ({ status: "quoted" } & SwapQuote) | { status: "refused"; code: "no_agent" | "no_route" };
 
 /** Why an order never started. */
 export type NotStarted = { status: "refused"; code: "no_agent" | "no_grant" | "busy" | "unknown_asset" | "price_out_of_band" | "no_price" | "too_small" };
@@ -68,6 +71,14 @@ export function trading(deps: TradingDeps) {
         if ("status" in account) return account;
         return buy(deps.chain, deps.agent, account, { buyAsset: asset, amount });
       }),
+
+    /** What buying `asset` with `amount` (atomic wNEAR) would give and cost now. Needs no grant: nothing moves. */
+    async quote(userId: string, asset: string, amount: bigint): Promise<QuoteResult> {
+      const agent = await deps.agents.find(userId);
+      if (agent.status !== "active") return { status: "refused", code: "no_agent" };
+      const q = await deps.agent.quote(agent.agentId, FUNDING_ASSET, asset, amount);
+      return q ? { status: "quoted", ...q } : { status: "refused", code: "no_route" };
+    },
 
     /**
      * Buys `asset` with up to `spend` (atomic wNEAR) if it reaches `price` (wNEAR per whole token)

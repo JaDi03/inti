@@ -5,7 +5,7 @@ import type { PricedToken } from "../core/portfolio.js";
 import { ToolInputError, type AgentEvent } from "../core/tools.js";
 import { fromAtomic } from "../policy/units.js";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../policy/assets.js";
-import { FUNDING_ASSET, FUNDING_TOKEN, tokenContract, type ChainPort } from "./orders.js";
+import { FUNDING_ASSET, FUNDING_TOKEN, tokenContract, type ChainPort, type SwapQuote } from "./orders.js";
 import type { Trading } from "./trading.js";
 
 /** Smallest and largest order the model may ask for, in USD; the signed limits still apply on top. */
@@ -20,6 +20,7 @@ const asset = z.enum(ASSET_KEYS).describe("Which asset to buy, by its key from g
 
 const inputs = {
   get_portfolio: z.strictObject({}),
+  get_quote: z.strictObject({ asset, usd }),
   buy_now: z.strictObject({ asset, usd, reason: z.string().min(1).max(300).describe("One sentence: why this purchase serves the request") }),
   buy_at_price: z.strictObject({
     asset,
@@ -35,8 +36,11 @@ const inputs = {
 type ToolName = keyof typeof inputs;
 
 const descriptions: Record<ToolName, string> = {
-  get_portfolio: "The owner's wallet, the assets you can buy with their prices and whether each is enabled, and what the owner's limits still allow today.",
-  buy_now: "Buy an asset now for an amount in US dollars. The result goes to the owner's wallet. The code checks the owner's limits first.",
+  get_portfolio:
+    "The owner's wallet, the assets you can buy with their prices and whether each is enabled, the owner's NEAR set aside for orders, and what the owner's limits still allow today.",
+  get_quote:
+    "What buying an asset now for an amount in US dollars would cost, without buying: the NEAR it takes, what the owner would receive and its value, and the cost (what the route keeps of the value at current prices). Use it for any question about price, cost or fees of buying now.",
+  buy_now: "Buy an asset now for an amount in US dollars, paid with the owner's NEAR. The result goes to the owner's wallet. The code checks the owner's limits first.",
   buy_at_price: "Place an order that buys the asset only if its price falls to price_usd within the given days. The money waits with the agent until it fills or expires.",
   ask_user: "Ask the owner a question when the request is unclear. Ends the cycle.",
 };
@@ -87,6 +91,26 @@ export function usdPriceToWnear(priceUsd: string, nearUsdMicro: bigint): string 
 }
 
 /**
+ * A quote in the owner's terms: the NEAR it takes, what arrives and its dollar value, and one
+ * cost: what the route keeps of the value at current prices, as the trading service reports it.
+ */
+export function quoteView(payUsd: string, wnear: bigint, quote: SwapQuote, decimals: number, priceMicro: bigint) {
+  const receivedMicro = (quote.amountOut * priceMicro) / 10n ** BigInt(decimals);
+  return {
+    pay_usd: payUsd,
+    pay_near: fromAtomic(((wnear + 10n ** 18n - 1n) / 10n ** 18n).toString(), 6),
+    receive: fromAtomic(quote.amountOut.toString(), decimals),
+    // Four decimals: on small amounts, cents alone would hide most of the cost.
+    receive_usd: `${receivedMicro / 1_000_000n}.${((receivedMicro % 1_000_000n) / 100n).toString().padStart(4, "0")}`,
+    receive_at_least: fromAtomic(quote.minAmountOut.toString(), decimals),
+    cost_usd: quote.costUsd,
+    cost_percent: quote.costPercent,
+    seconds: quote.seconds,
+    note: "An estimate for right now; nothing was bought. The cost is what the route keeps of the value at current prices; it moves with the market and is not a fixed commission.",
+  };
+}
+
+/**
  * The tools that act on one owner's real funds. What can be bought, where it goes and how much
  * are decided here and in Spending Limits, never by the model.
  */
@@ -125,10 +149,22 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
             }),
           );
           return JSON.stringify({
+            paid_with: "NEAR",
+            near_for_orders: fromAtomic(wnear.toString(), 24),
             money_for_orders_usd: toUsd(wnear),
             limits: limit ? { per_order_usd: toUsd(limit.perOrder), left_today_usd: toUsd(limit.perDay > spent ? limit.perDay - spent : 0n) } : null,
             assets,
           });
+        }
+        case "get_quote": {
+          const input = parsed.data as z.infer<typeof inputs.get_quote>;
+          const a = ASSETS[input.asset as AssetKey];
+          const { byId, wnear } = await spend(input.usd);
+          const bought = byId.get(a.assetId);
+          if (!bought?.price) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
+          const result = await deps.trading.quote(deps.userId, a.assetId, wnear);
+          if (result.status !== "quoted") return JSON.stringify({ status: "refused", reason: REASONS[result.code] ?? result.code });
+          return JSON.stringify({ status: "quoted", asset: a.name, ...quoteView(input.usd, wnear, result, bought.decimals, priceToMicro(bought.price)) });
         }
         case "buy_now": {
           const input = parsed.data as z.infer<typeof inputs.buy_now>;
@@ -151,7 +187,15 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
           const result = await deps.trading.buyAtPrice(deps.userId, a.assetId, wnear, price, input.days);
           if (result.status === "resting") {
             events.push({ type: "limit_order_placed", to: a.symbol, usd: input.usd, priceUsd: input.price_usd, days: String(input.days) });
-            return JSON.stringify({ status: "order_placed", asset: a.name, usd: input.usd, price_usd: input.price_usd, days: input.days });
+            return JSON.stringify({
+              status: "order_placed",
+              asset: a.name,
+              usd: input.usd,
+              price_usd: input.price_usd,
+              days: input.days,
+              fee: "1Click charges 0.20% on every limit order.",
+              leftover: "If the order expires or is cancelled, the money comes back to the wallet as regular NEAR; to place another order the owner adds NEAR for orders again in Spending limits.",
+            });
           }
           if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The order is still being placed." });
           events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: result.code, reason: REASONS[result.code] ?? result.code });
