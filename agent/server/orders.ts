@@ -45,6 +45,8 @@ export type Settled = "success" | "failed" | "pending";
 export interface AgentPort {
   available(agentId: string): Promise<Map<string, bigint>>;
   minOut(agentId: string, from: string, to: string, amount: bigint): Promise<bigint | null>;
+  /** What a swap would give and cost right now, or null when there is no route. Moves nothing. */
+  quote(agentId: string, from: string, to: string, amount: bigint): Promise<SwapQuote | null>;
   swap(account: OrderAccount, from: string, to: string, amount: bigint, minOut: bigint): Promise<Settled>;
   /** Sends `amount` of `asset` from the agent to the owner's NEAR wallet. */
   withdraw(account: OrderAccount, asset: string, amount: bigint): Promise<Settled>;
@@ -56,6 +58,15 @@ export interface AgentPort {
   openLimitOrders(agentId: string): Promise<number>;
   /** The price bound the user signed for limit orders (basis points), or null when limit orders are not allowed. */
   signedPriceBound(agentId: string): Promise<number | null>;
+}
+
+/** A dry swap quote: atomic amounts out, the trading service's fee and how long it expects to take. */
+export interface SwapQuote {
+  amountOut: bigint;
+  minAmountOut: bigint;
+  feeUsd: string | null;
+  feePercent: string | null;
+  seconds: number | null;
 }
 
 /** A resting buy: receive `quantity` (atomic) of `buyAsset`, paying at most `price` funding tokens per whole unit. */
@@ -265,7 +276,12 @@ const atomic = z.string().regex(/^\d+$/);
 const balancesSchema = z.object({ balances: z.array(z.object({ asset_id: z.string(), available_raw: atomic })) });
 const statusSchema = z.object({ correlation_id: z.string(), status: z.string() });
 const quoteSchema = z.object({ quote: z.object({ min_amount_out: atomic }) });
-const limitPreviewSchema = z.object({ quote: z.object({ spend_amount: atomic }) });
+const decimalString = z.string().regex(/^\d+(\.\d+)?$/);
+const dryQuoteSchema = z.object({
+  quote: z.object({ amount_out: atomic, min_amount_out: atomic, time_estimate_seconds: z.number().nonnegative().nullish() }),
+  fee: z.object({ amount_usd: decimalString, percent: decimalString }).nullish(),
+});
+const limitPreviewSchema =z.object({ quote: z.object({ spend_amount: atomic }) });
 const placedSchema = statusSchema.extend({ details: z.object({ order_id: z.string().nullish() }).nullish() });
 const openOrdersSchema = z.object({ data: z.array(z.unknown()) });
 const errorSchema = z.object({ errors: z.array(z.object({ code: z.string() })) });
@@ -330,6 +346,20 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
       try {
         const quote = quoteSchema.parse(await call(agentPath(agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), dry: true }));
         return BigInt(quote.quote.min_amount_out);
+      } catch {
+        return null;
+      }
+    },
+    async quote(agentId, from, to, amount) {
+      try {
+        const dry = dryQuoteSchema.parse(await call(agentPath(agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), dry: true }));
+        return {
+          amountOut: BigInt(dry.quote.amount_out),
+          minAmountOut: BigInt(dry.quote.min_amount_out),
+          feeUsd: dry.fee?.amount_usd ?? null,
+          feePercent: dry.fee?.percent ?? null,
+          seconds: dry.quote.time_estimate_seconds ?? null,
+        };
       } catch {
         return null;
       }

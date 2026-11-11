@@ -27,6 +27,10 @@ function setup() {
       orders.push({ kind: "limit", asset, amount, price, days });
       return Promise.resolve({ status: "resting", orderId: "ord_1", spend: amount });
     },
+    quote: (_u: string, asset: string, amount: bigint) => {
+      orders.push({ kind: "quote", asset, amount });
+      return Promise.resolve({ status: "quoted", amountOut: 246n, minAmountOut: 243n, feeUsd: "0.010611", feePercent: "1.05", seconds: 12 });
+    },
   } as unknown as Trading;
   const chain: ChainPort = {
     registered: (contract) => Promise.resolve(contract.startsWith("eth-")),
@@ -43,6 +47,8 @@ describe("realTools", () => {
   it("shows the wallet, prices, enabled assets and what the limits still allow", async () => {
     const { tools } = setup();
     const view = JSON.parse(await tools.run("get_portfolio", {}, [])) as Record<string, unknown>;
+    expect(view.paid_with).toBe("NEAR");
+    expect(view.near_for_orders).toBe("0.1");
     expect(view.money_for_orders_usd).toBe("0.35");
     expect(view.limits).toEqual({ per_order_usd: "1.06", left_today_usd: "3.55" });
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "gold", enabled: true, price_usd: 4016.03 }));
@@ -56,6 +62,36 @@ describe("realTools", () => {
     expect(out.status).toBe("bought");
     expect(orders).toEqual([{ kind: "now", asset: ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
     expect(events[0]?.type).toBe("swap_executed");
+  });
+
+  it("quotes a purchase in the owner's terms, with the fee and the total cost, and buys nothing", async () => {
+    const { tools, orders } = setup();
+    const events: AgentEvent[] = [];
+    const out = JSON.parse(await tools.run("get_quote", { asset: "gold", usd: "1" }, events)) as Record<string, unknown>;
+    expect(out).toEqual({
+      status: "quoted",
+      asset: ASSETS.gold.name,
+      pay_usd: "1",
+      pay_near: "0.281691",
+      receive: "0.000246",
+      receive_usd: "0.98",
+      receive_at_least: "0.000243",
+      fee_usd: "0.010611",
+      fee_percent: "1.05",
+      total_cost_percent: "1.20",
+      seconds: 12,
+      note: "An estimate at current prices; nothing was bought.",
+    });
+    expect(orders).toEqual([{ kind: "quote", asset: ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
+    expect(events).toEqual([]);
+  });
+
+  it("quotes only the fixed assets, within the order range", async () => {
+    const { tools, orders } = setup();
+    await expect(tools.run("get_quote", { asset: "nep141:wrap.near", usd: "1" }, [])).rejects.toThrow("invalid input");
+    await expect(tools.run("get_quote", { asset: "gold", usd: "0.05" }, [])).rejects.toThrow("between");
+    await expect(tools.run("get_quote", { asset: "gold", usd: "1", recipient: "attacker.near" }, [])).rejects.toThrow("invalid input");
+    expect(orders).toEqual([]);
   });
 
   it("turns a dollar price into wNEAR per unit for a limit order", async () => {
