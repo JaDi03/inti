@@ -106,7 +106,8 @@ export function bandFromPolicy(maxDeviationBps: number): bigint {
  */
 export function protectedMinOut(quote: Pick<SwapQuote, "amountOut" | "minAmountOut">, boundBps: number | null): bigint {
   if (boundBps === null) return quote.minAmountOut;
-  const floor = (quote.amountOut * BigInt(10_000 - boundBps)) / 10_000n;
+  // Rounded up, so the floor is never even one unit below the chosen percent.
+  const floor = (quote.amountOut * BigInt(10_000 - boundBps) + 9_999n) / 10_000n;
   return floor > quote.minAmountOut ? floor : quote.minAmountOut;
 }
 

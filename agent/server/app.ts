@@ -187,6 +187,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (userId === null) return reply;
     const choice = prepareGrantBody.safeParse(req.body ?? {});
     if (!choice.success) return reply.code(400).send({ error: "bad_request" });
+    let taken = false;
     try {
       const agent = await deps.agents.find(userId);
       if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
@@ -195,6 +196,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         req.log.warn({ userId, cap: allowed }, "grant_quota_refused");
         return reply.code(429).send({ error: "rate_limited" });
       }
+      taken = true;
       const { token, expiresAt, body } = newGrantRequest(agent.agentId, now(), choice.data.days);
       // Read before the new grant exists, so only the earlier ones are ever closed.
       const revokes = await deps.agents.prepareRevokes(agent.agentId);
@@ -204,6 +206,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       req.log.info({ userId, days: choice.data.days ?? GRANT_DAYS, revokes: revokes.length }, "grant_prepared");
       return { status: "pending_signature", correlationId: prepared.correlationId, intent: prepared.intent, preview: prepared.preview, expiresAt, revokes };
     } catch (error) {
+      // Nothing was prepared, so the try does not count against the user or everyone else.
+      if (taken) grantQuota.giveBack(userId);
       return agentFailure(req, reply, error);
     }
   });
@@ -255,6 +259,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (userId === null) return reply;
     const body = preparePolicyBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    let taken = false;
     try {
       const agent = await deps.agents.find(userId);
       if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
@@ -263,8 +268,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         req.log.warn({ userId, cap: allowed }, "policy_quota_refused");
         return reply.code(429).send({ error: "rate_limited" });
       }
+      taken = true;
       const prepared = await deps.agents.preparePolicy(agent.agentId, agent.ownerAccount, body.data.maxDeviationBps);
-      if (prepared.status === "cooldown") return reply.code(409).send({ error: "cooldown", availableAt: prepared.availableAt });
+      if (prepared.status === "cooldown") {
+        // NEAR Intents is still waiting between changes: nothing was prepared, so the try does not count.
+        policyQuota.giveBack(userId);
+        return reply.code(409).send({ error: "cooldown", availableAt: prepared.availableAt });
+      }
       if (pendingPolicies.size >= LIMITS.pendingPolicyChangesInMemory) {
         const oldest = pendingPolicies.keys().next().value;
         if (oldest !== undefined) pendingPolicies.delete(oldest);
@@ -273,6 +283,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       req.log.info({ userId, bps: body.data.maxDeviationBps }, "policy_prepared");
       return prepared;
     } catch (error) {
+      if (taken) policyQuota.giveBack(userId);
       return agentFailure(req, reply, error);
     }
   });

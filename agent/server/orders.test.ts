@@ -139,6 +139,8 @@ describe("buy", () => {
     await buy(wide.chain, wide.agent, ACCOUNT, ORDER, noWait);
     expect(wide.minOuts).toEqual([9_800n]);
     expect(protectedMinOut({ amountOut: 10_000n, minAmountOut: 9_800n }, null)).toBe(9_800n);
+    // 1% below 10001 is 9900.99: the floor rounds up to 9901, never down to 9900.
+    expect(protectedMinOut({ amountOut: 10_001n, minAmountOut: 9_000n }, 100)).toBe(9_901n);
   });
 
   it("leaves a slow funding or swap to the sweep instead of guessing", async () => {

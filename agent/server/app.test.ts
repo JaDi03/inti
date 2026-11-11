@@ -489,6 +489,19 @@ describe("/api/agent/policy", () => {
     for (let i = 0; i < LIMITS.policyChangesPerUserPerDay; i++) expect((await post(server, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(200);
     expect((await post(server, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(429);
   });
+
+  it("does not count a try that prepared nothing against the daily cap", async () => {
+    const auth = `Bearer ${await token()}`;
+    const waiting = await app({ agents: fakeAgents(ACTIVE, "2026-11-11T20:00:00.000Z").agents });
+    for (let i = 0; i <= LIMITS.policyChangesPerUserPerDay; i++) expect((await post(waiting, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(409);
+
+    const failing = fakeAgents(ACTIVE).agents;
+    failing.preparePolicy = () => Promise.reject(new AgentsUnavailableError("agents_unavailable"));
+    failing.prepareRevokes = () => Promise.reject(new AgentsUnavailableError("agents_unavailable"));
+    const down = await app({ agents: failing });
+    for (let i = 0; i <= LIMITS.policyChangesPerUserPerDay; i++) expect((await post(down, "/api/agent/policy/prepare", auth, { maxDeviationBps: 200 })).statusCode).toBe(502);
+    for (let i = 0; i <= LIMITS.grantsPerUserPerDay; i++) expect((await post(down, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(502);
+  });
 });
 
 describe("bearerToken", () => {
