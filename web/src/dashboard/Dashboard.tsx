@@ -15,14 +15,17 @@ import { fetchDashboard, type DashboardData } from "./dashboardClient";
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
-/** One color per asset, dark text on a light tile so it reads in both themes. */
+/**
+ * One color per asset, taken from its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
+ * blue for both currencies), in the same light shade with dark text so it reads in both themes.
+ */
 const TILE: Record<AssetKey, string> = {
-  gold: "bg-amber-300",
+  gold: "bg-yellow-300",
   euro: "bg-sky-300",
-  pound: "bg-violet-300",
+  pound: "bg-blue-300",
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
-  solana: "bg-fuchsia-300",
+  solana: "bg-purple-300",
 };
 
 /** The areas of the dashboard, by what each asset is. */
@@ -181,7 +184,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
 
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
-        <h2 className="mb-2.5 px-1 text-lg font-semibold tracking-tight text-foreground">{group.title}</h2>
+        <h2 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h2>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -391,11 +394,11 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
 function FoldCard({ id, icon, title, extra, className, children }: { id: string; icon: React.ReactNode; title: string; extra?: React.ReactNode; className?: string; children: React.ReactNode }) {
   const [open, toggle] = useRememberedSwitch(`inti-open-${id}`, true);
   return (
-    <section className={cn("rounded-3xl border bg-card p-5", className)}>
+    <section className={cn("rounded-3xl border bg-card transition-[padding]", open ? "p-5" : "px-5 py-3", className)}>
       <div className="flex items-center gap-1">
         <button className="-my-1 flex min-w-0 flex-1 items-center gap-2 py-1 text-left font-medium" aria-expanded={open} onClick={toggle}>
           {icon}
-          <h2 className="truncate">{title}</h2>
+          <h2 className="truncate font-heading text-[17px] font-semibold">{title}</h2>
           <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
         </button>
         {extra && <div className="-mr-2 flex shrink-0 items-center gap-1">{extra}</div>}

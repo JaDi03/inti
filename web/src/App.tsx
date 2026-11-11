@@ -268,7 +268,7 @@ export function App() {
             </div>
           )}
           {empty && !activationCard && !creatingWallet && (
-            <h1 className="mt-4 text-center text-2xl font-semibold text-foreground sm:text-3xl">
+            <h1 className="mt-4 text-center font-heading text-2xl font-semibold text-foreground sm:text-3xl">
               {checkingAccount ? "Checking your account..." : "What do you want to do with your money?"}
             </h1>
           )}
