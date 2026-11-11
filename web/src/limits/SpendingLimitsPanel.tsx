@@ -74,6 +74,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
   const [error, setError] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -95,6 +96,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
       const hashes = await action();
       setLastTx(Array.isArray(hashes) ? (hashes.at(-1) ?? null) : hashes);
       setEditing(false);
+      setAdding(false);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "The transaction failed.");
@@ -179,8 +181,20 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             onSubmit={(next) => void run("Saving...", () => client.setLimit(address, signer, next))}
             onCancel={() => setEditing(false)}
           />
+        ) : adding ? (
+          <AddForOrdersForm
+            decimals={decimals}
+            symbol={symbol}
+            max={LimitsClient.maxForOrders(status.available)}
+            busy={busy}
+            onSubmit={(value) => void run("Adding NEAR for orders...", () => client.addForOrders(address, signer, value))}
+            onCancel={() => setAdding(false)}
+          />
         ) : (
           <div className="mt-5 flex flex-wrap gap-2">
+            <Button disabled={busy !== null} onClick={() => setAdding(true)}>
+              Add NEAR for orders
+            </Button>
             <Button variant="outline" disabled={busy !== null} onClick={() => setEditing(true)}>
               Edit limits
             </Button>
@@ -202,7 +216,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
           <PasskeyProtection />
         </div>
 
-        {!editing && (
+        {!editing && !adding && (
           <div className="mt-5 rounded-xl border p-3 text-sm">
             <p className="font-medium">Turn off Inti</p>
             <p className="mt-1 text-muted-foreground">
@@ -322,6 +336,55 @@ export function LimitForm({ decimals, symbol, initial, withFunding, submitLabel,
             Cancel
           </Button>
         )}
+      </div>
+    </form>
+  );
+}
+
+interface AddForOrdersProps {
+  decimals: number;
+  symbol: string;
+  /** Most the user can add, already leaving room for network fees. */
+  max: bigint;
+  busy: string | null;
+  onSubmit: (amount: bigint) => void;
+  onCancel: () => void;
+}
+
+/** Moves more of the user's NEAR into the balance orders are funded from; it never leaves the account. */
+export function AddForOrdersForm({ decimals, symbol, max, busy, onSubmit, onCancel }: AddForOrdersProps) {
+  const [value, setValue] = useState(fromAtomic((DEFAULT_FUND < max ? DEFAULT_FUND : max).toString(), decimals));
+  const parsed = parse(value, decimals);
+  const problem =
+    max === 0n
+      ? `Your account has no free ${symbol} to add. Send some to your account first.`
+      : parsed === null || parsed === 0n
+        ? "Enter an amount greater than zero."
+        : parsed > max
+          ? `You can add at most ${display(max, decimals)} ${symbol}. A little stays free for network fees.`
+          : null;
+
+  return (
+    <form
+      className="mt-4 flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (problem || parsed === null) return;
+        onSubmit(parsed);
+      }}
+    >
+      <p className="text-sm text-muted-foreground">
+        Inti pays for your orders from this balance. It stays in your account. You can add up to {display(max, decimals)} {symbol}.
+      </p>
+      <AmountField label="Add for orders" symbol={symbol} value={value} onChange={setValue} />
+      {problem && <p className="text-sm text-destructive">{problem}</p>}
+      <div className="flex gap-2">
+        <Button type="submit" size="lg" className="rounded-full px-5" disabled={problem !== null || busy !== null}>
+          Add NEAR
+        </Button>
+        <Button type="button" variant="ghost" size="lg" onClick={onCancel} disabled={busy !== null}>
+          Cancel
+        </Button>
       </div>
     </form>
   );
