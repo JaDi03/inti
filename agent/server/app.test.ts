@@ -95,6 +95,13 @@ function memoryGrants(): GrantStore & { records: Map<string, GrantRecord> } {
   };
 }
 
+/** A dashboard that records whose kept copy was dropped. */
+function forgetfulDashboard() {
+  const forgotten: string[] = [];
+  const dashboard = Object.assign(() => Promise.reject(new Error("not read in this test")), { forget: (userId: string) => void forgotten.push(userId) });
+  return { dashboard, forgotten };
+}
+
 async function app(overrides: Partial<AppDeps> = {}) {
   return buildApp({
     verify,
@@ -245,10 +252,13 @@ describe("GET /api/dashboard", () => {
   it("answers only a signed-in user, with that user's own dashboard", async () => {
     const asked: string[] = [];
     const server = await app({
-      dashboard: (userId) => {
-        asked.push(userId);
-        return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null, ethereum: null, solana: null }, agent: null });
-      },
+      dashboard: Object.assign(
+        (userId: string) => {
+          asked.push(userId);
+          return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null, ethereum: null, solana: null }, agent: null });
+        },
+        { forget: () => undefined },
+      ),
     });
     expect((await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN } })).statusCode).toBe(401);
     const forged = await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN, authorization: `Bearer ${await token({ key: otherKey })}` } });
@@ -355,10 +365,12 @@ describe("/api/agent/grant", () => {
   it("issues a 90-day grant, keeps the token on the server and shows only its expiry", async () => {
     const { agents, calls } = fakeAgents(ACTIVE);
     const grants = memoryGrants();
-    const server = await app({ agents, grants, now: () => NOW });
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ agents, grants, dashboard, now: () => NOW });
     const auth = `Bearer ${await token()}`;
 
     const prepared = await post(server, "/api/agent/grant/prepare", auth, {});
+    expect(forgotten).toEqual([]);
     expect(prepared.statusCode).toBe(200);
     expect(prepared.body).not.toContain("ngt_");
     const body = calls.grantBodies[0];
@@ -369,6 +381,7 @@ describe("/api/agent/grant", () => {
     expect(submitted.json()).toEqual({ status: "success", expiresAt: "2027-02-08T12:00:00.000Z" });
     expect(calls.submittedTypes).toEqual(["grant_issue"]);
     expect(grants.get("did:privy:alice")?.token).toMatch(/^ngt_/);
+    expect(forgotten).toEqual(["did:privy:alice"]);
 
     const read = await server.inject({ method: "GET", url: "/api/agent", headers: { origin: ORIGIN, authorization: auth } });
     expect(read.json()).toEqual({ ...ACTIVE, grant: { expiresAt: "2027-02-08T12:00:00.000Z" } });
@@ -452,7 +465,8 @@ describe("/api/agent/policy", () => {
 
   it("prepares the change for the session's own agent and owner, and lets only that user submit it", async () => {
     const { agents, calls } = fakeAgents(ACTIVE);
-    const server = await app({ agents });
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ agents, dashboard });
     const alice = `Bearer ${await token()}`;
     const mallory = `Bearer ${await token({ sub: "did:privy:mallory" })}`;
     const prepared = await post(server, "/api/agent/policy/prepare", alice, { maxDeviationBps: 100 });
@@ -465,6 +479,7 @@ describe("/api/agent/policy", () => {
     const submitted = await post(server, "/api/agent/policy/submit", alice, { correlationId: "policy_1", signedData: { standard: "nep413" } });
     expect(submitted.json()).toEqual({ status: "success" });
     expect(calls.submittedTypes).toEqual(["policy_update"]);
+    expect(forgotten).toEqual(["did:privy:alice"]);
   });
 
   it("accepts only 1%, 2% or 3%, and no other field", async () => {

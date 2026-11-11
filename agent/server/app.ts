@@ -225,6 +225,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if (outcome === "success") {
         await deps.grants.put(userId, pending.record);
         remember(issuedGrants, body.data.correlationId, userId);
+        deps.dashboard?.forget(userId);
       }
       if (outcome !== "processing") pendingGrants.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "grant_submitted");
@@ -297,6 +298,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (pendingPolicies.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
     try {
       const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "policy_update");
+      if (outcome === "success") deps.dashboard?.forget(userId);
       if (outcome !== "processing") pendingPolicies.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "policy_submitted");
       return { status: outcome };
@@ -341,6 +343,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (pendingAgents.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
     try {
       const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData);
+      if (outcome === "success") deps.dashboard?.forget(userId);
       if (outcome !== "processing") pendingAgents.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "agent_submitted");
       return { status: outcome };
