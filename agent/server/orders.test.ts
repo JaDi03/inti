@@ -7,6 +7,7 @@ import {
   FUNDING_ASSET,
   placeLimitBuy,
   priceInBand,
+  protectedMinOut,
   sweep,
   tokenContract,
   type AgentPort,
@@ -28,7 +29,8 @@ function world(
     spent?: bigint;
     fundFails?: boolean;
     credit?: boolean;
-    minOut?: bigint | null;
+    quote?: { amountOut: bigint; minAmountOut: bigint } | null;
+    bound?: number | null;
     swap?: Settled;
     rate?: bigint;
     preview?: { spend: bigint } | { refused: string };
@@ -38,6 +40,7 @@ function world(
 ) {
   const agentHeld = new Map<string, bigint>();
   const log: string[] = [];
+  const minOuts: bigint[] = [];
   const chain: ChainPort = {
     registered: (contract) => Promise.resolve((opts.registered ?? [tokenContract(GOLD)]).includes(contract)),
     limit: () => Promise.resolve({ perOrder: opts.perOrder ?? NEAR / 2n, perDay: opts.perDay ?? NEAR }),
@@ -52,10 +55,13 @@ function world(
   };
   const agent: AgentPort = {
     available: () => Promise.resolve(new Map(agentHeld)),
-    minOut: () => Promise.resolve(opts.minOut === undefined ? 240n : opts.minOut),
-    quote: () => Promise.resolve(null),
-    swap: (_a, from, to, amount) => {
+    quote: () => {
+      const q = opts.quote === undefined ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
+      return Promise.resolve(q && { ...q, costUsd: null, costPercent: null, seconds: null });
+    },
+    swap: (_a, from, to, amount, minOut) => {
       log.push(`swap ${amount}`);
+      minOuts.push(minOut);
       const outcome = opts.swap ?? "success";
       if (outcome === "success") {
         agentHeld.set(from, (agentHeld.get(from) ?? 0n) - amount);
@@ -76,9 +82,9 @@ function world(
       return Promise.resolve({ settled, orderId: settled === "success" ? "ord_1" : null });
     },
     openLimitOrders: () => Promise.resolve(opts.openOrders ?? 0),
-    signedPriceBound: () => Promise.resolve(300),
+    signedPriceBound: () => Promise.resolve(opts.bound === undefined ? 300 : opts.bound),
   };
-  return { chain, agent, agentHeld, log };
+  return { chain, agent, agentHeld, log, minOuts };
 }
 
 const noWait = () => Promise.resolve();
@@ -115,12 +121,24 @@ describe("buy", () => {
   });
 
   it("returns the money when there is no route or the swap fails", async () => {
-    const noRoute = world({ minOut: null });
+    const noRoute = world({ quote: null });
     expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "no_route" });
     expect(noRoute.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
     const failed = world({ swap: "failed" });
     expect(await buy(failed.chain, failed.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "swap_failed" });
     expect(failed.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
+  });
+
+  it("never accepts less than the price protection the user signed", async () => {
+    // 1% of a quoted 10000 is a floor of 9900, tighter than the quote's own 9800.
+    const tight = world({ quote: { amountOut: 10_000n, minAmountOut: 9_800n }, bound: 100 });
+    await buy(tight.chain, tight.agent, ACCOUNT, ORDER, noWait);
+    expect(tight.minOuts).toEqual([9_900n]);
+    // A quote already tighter than 3% keeps its own minimum.
+    const wide = world({ quote: { amountOut: 10_000n, minAmountOut: 9_800n }, bound: 300 });
+    await buy(wide.chain, wide.agent, ACCOUNT, ORDER, noWait);
+    expect(wide.minOuts).toEqual([9_800n]);
+    expect(protectedMinOut({ amountOut: 10_000n, minAmountOut: 9_800n }, null)).toBe(9_800n);
   });
 
   it("leaves a slow funding or swap to the sweep instead of guessing", async () => {

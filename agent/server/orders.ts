@@ -44,7 +44,6 @@ export type Settled = "success" | "failed" | "pending";
 /** The agent's side, through the Agent API under the user's grant. */
 export interface AgentPort {
   available(agentId: string): Promise<Map<string, bigint>>;
-  minOut(agentId: string, from: string, to: string, amount: bigint): Promise<bigint | null>;
   /** What a swap would give and cost right now, or null when there is no route. Moves nothing. */
   quote(agentId: string, from: string, to: string, amount: bigint): Promise<SwapQuote | null>;
   swap(account: OrderAccount, from: string, to: string, amount: bigint, minOut: bigint): Promise<Settled>;
@@ -102,6 +101,16 @@ export function bandFromPolicy(maxDeviationBps: number): bigint {
 }
 
 /**
+ * The least a swap may return: the quote's own minimum, or tighter when the price protection the
+ * user signed asks for it. One setting covers both price orders and buying now.
+ */
+export function protectedMinOut(quote: Pick<SwapQuote, "amountOut" | "minAmountOut">, boundBps: number | null): bigint {
+  if (boundBps === null) return quote.minAmountOut;
+  const floor = (quote.amountOut * BigInt(10_000 - boundBps)) / 10_000n;
+  return floor > quote.minAmountOut ? floor : quote.minAmountOut;
+}
+
+/**
  * Whether `price` (funding tokens per whole bought token) is within `bandBps` of the market,
  * from the USD prices of both tokens in micro-dollars.
  */
@@ -143,15 +152,18 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const contract = tokenContract(order.buyAsset);
   // The result can only reach the wallet if the wallet can hold the token.
   if (!contract || !(await chain.registered(contract, account.owner))) return { status: "refused", code: "asset_not_enabled" };
+  // Read before any money moves: the user's own price protection decides the least they accept.
+  const bound = await agent.signedPriceBound(account.agentId);
   const funded = await fund(chain, agent, account, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
   if (funded !== "funded") return { status: "refused", code: funded };
 
-  const minOut = await agent.minOut(account.agentId, FUNDING_ASSET, order.buyAsset, order.amount);
-  if (minOut === null) {
+  const quote = await agent.quote(account.agentId, FUNDING_ASSET, order.buyAsset, order.amount);
+  if (quote === null) {
     await agent.withdraw(account, FUNDING_ASSET, order.amount);
     return { status: "returned", code: "no_route" };
   }
+  const minOut = protectedMinOut(quote, bound);
   const held = (await agent.available(account.agentId)).get(order.buyAsset) ?? 0n;
   const swapped = await agent.swap(account, FUNDING_ASSET, order.buyAsset, order.amount, minOut);
   if (swapped === "pending") return { status: "pending" };
@@ -279,7 +291,6 @@ const REQUEST_TIMEOUT_MS = 150_000;
 const atomic = z.string().regex(/^\d+$/);
 const balancesSchema = z.object({ balances: z.array(z.object({ asset_id: z.string(), available_raw: atomic })) });
 const statusSchema = z.object({ correlation_id: z.string(), status: z.string() });
-const quoteSchema = z.object({ quote: z.object({ min_amount_out: atomic }) });
 const decimalString = z.string().regex(/^\d+(\.\d+)?$/);
 const dryQuoteSchema = z.object({
   quote: z.object({ amount_out: atomic, min_amount_out: atomic, time_estimate_seconds: z.number().nonnegative().nullish() }),
@@ -345,14 +356,6 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
     async available(agentId) {
       const view = balancesSchema.parse(await call(`${agentPath(agentId, "balances")}?source=public`));
       return new Map(view.balances.map((b) => [b.asset_id, BigInt(b.available_raw)] as const));
-    },
-    async minOut(agentId, from, to, amount) {
-      try {
-        const quote = quoteSchema.parse(await call(agentPath(agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), dry: true }));
-        return BigInt(quote.quote.min_amount_out);
-      } catch {
-        return null;
-      }
     },
     async quote(agentId, from, to, amount) {
       try {
