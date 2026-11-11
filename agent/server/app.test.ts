@@ -227,6 +227,26 @@ describe("POST /api/chat", () => {
   });
 });
 
+describe("GET /api/dashboard", () => {
+  it("answers only a signed-in user, with that user's own dashboard", async () => {
+    const asked: string[] = [];
+    const server = await app({
+      dashboard: (userId) => {
+        asked.push(userId);
+        return Promise.resolve({ prices: { near: 3.58, gold: null, euro: null, pound: null, bitcoin: null }, agent: null });
+      },
+    });
+    expect((await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN } })).statusCode).toBe(401);
+    const forged = await server.inject({ method: "GET", url: "/api/dashboard", headers: { origin: ORIGIN, authorization: `Bearer ${await token({ key: otherKey })}` } });
+    expect(forged.statusCode).toBe(401);
+    expect(asked).toEqual([]);
+    const ok = await server.inject({ method: "GET", url: "/api/dashboard?user=did:privy:bob", headers: { origin: ORIGIN, authorization: `Bearer ${await token()}` } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    expect(asked).toEqual(["did:privy:alice"]);
+  });
+});
+
 describe("the user's own agent", () => {
   const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
     server.inject({

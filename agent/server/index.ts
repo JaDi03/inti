@@ -8,6 +8,7 @@ import { demoPolicy, demoPortfolio, fetchTokens } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { agentApiAccounts } from "./agents.js";
 import { buildApp } from "./app.js";
+import { agentApiView, dashboard } from "./dashboard.js";
 import { privyVerifier } from "./auth.js";
 import { LIMITS, loadConfig } from "./config.js";
 import { fileGrantStore, grantKey } from "./grants.js";
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
     grants,
     trading: orders,
     chain,
+    dashboard: dashboard({ agents, grants, view: agentApiView(config.agentApiKey, config.agentApiUrl), tokens }),
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
     allowedOrigins: config.allowedOrigins,
