@@ -16,7 +16,7 @@ type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
 /**
- * One color per asset, taken from its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
+ * One color per asset that matches its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
  * blue for both currencies), in the same light shade with dark text so it reads in both themes.
  */
 const TILE: Record<AssetKey, string> = {
