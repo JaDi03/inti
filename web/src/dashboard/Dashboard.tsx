@@ -90,16 +90,19 @@ function useDashboard(address: string, client: LimitsClient, status: Installed, 
     try {
       const token = await getAccessToken();
       const [server, rows] = await Promise.all([token ? fetchDashboard(token) : Promise.resolve(null), client.assets(address).catch(() => null)]);
-      setData(server);
-      setAssets(rows);
+      // A failed read keeps what is already on screen instead of blanking it.
+      if (server) setData(server);
+      if (rows) setAssets(rows);
     } finally {
       setLoading(false);
     }
   }, [address, client, getAccessToken]);
 
+  // Read again only when the account's balances or limits really changed, not on every re-render.
+  const balances = `${status.available}:${status.spendable}:${status.spentToday}:${status.intiConnected}`;
   useEffect(() => {
     void load();
-  }, [load, status]);
+  }, [load, balances]);
 
   return { data, assets, loading, load };
 }
@@ -112,11 +115,13 @@ interface MoneyProps {
   state: DashboardState;
   /** Opens the Spending limits window (add NEAR, edit limits, pause or turn off Inti). */
   onManage: () => void;
+  /** The wallet card, the asset areas, or both. */
+  part: "wallet" | "assets" | "both";
   className?: string;
 }
 
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
-export function MoneyPanel({ address, config, client, status, state, onManage, className }: MoneyProps) {
+export function MoneyPanel({ address, config, client, status, state, onManage, part, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
@@ -146,6 +151,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
+      {part !== "assets" && (
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -171,10 +177,11 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
           <Plus /> Add NEAR for orders
         </Button>
       </section>
+      )}
 
-      {GROUPS.map((group) => (
+      {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
-        <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">{group.title}</h2>
+        <h2 className="mb-2.5 px-1 text-lg font-semibold tracking-tight text-foreground">{group.title}</h2>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -225,7 +232,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
         </ul>
       </section>
       ))}
-      <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
+      {part !== "wallet" && (
+        <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
+      )}
 
       {error && <p className="break-words text-sm text-destructive">{error}</p>}
       {lastTx && (
@@ -473,18 +482,21 @@ interface LayoutProps {
 }
 
 /**
- * The chat with the portfolio around it. Wide screens: the rules on the left, the money on the
- * right. Medium screens: everything on the right. Phones: the chat or the portfolio, one at a time.
+ * The chat with the portfolio around it. Wide screens: what the user sets up (wallet, limits,
+ * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
+ * Phones: the chat or the portfolio, one at a time.
  */
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged };
   const security = { address, config, client, status, onExport, onChanged };
+  const money = { address, config, client, status, state, onManage };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>
         <div className="flex flex-col gap-4">
+          <MoneyPanel {...money} part="wallet" />
           <RulesPanel {...rules} />
           <SecurityPanel {...security} />
         </div>
@@ -492,7 +504,8 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
       {children}
       <aside className={cn(side, view === "chat" ? "hidden" : "flex-1", "lg:block lg:w-[380px] lg:flex-none lg:shrink-0 lg:pr-6 lg:pl-0")}>
         <div className="mx-auto flex max-w-md flex-col gap-4">
-          <MoneyPanel address={address} config={config} client={client} status={status} state={state} onManage={onManage} />
+          <MoneyPanel {...money} part="wallet" className="xl:hidden" />
+          <MoneyPanel {...money} part="assets" />
           <RulesPanel {...rules} className="xl:hidden" />
           <SecurityPanel {...security} className="xl:hidden" />
         </div>
