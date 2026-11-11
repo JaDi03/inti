@@ -74,7 +74,7 @@ describe("realTools", () => {
       pay_usd: "1",
       pay_near: "0.281691",
       receive: "0.000246",
-      receive_usd: "0.98",
+      receive_usd: "0.9879",
       receive_at_least: "0.000243",
       fee_usd: "0.010611",
       fee_percent: "1.05",

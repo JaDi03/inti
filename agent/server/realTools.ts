@@ -103,7 +103,8 @@ export function quoteView(payUsd: string, wnear: bigint, quote: SwapQuote, decim
     pay_usd: payUsd,
     pay_near: fromAtomic(((wnear + 10n ** 18n - 1n) / 10n ** 18n).toString(), 6),
     receive: fromAtomic(quote.amountOut.toString(), decimals),
-    receive_usd: microToUsd(receivedMicro),
+    // Four decimals: on small amounts, cents alone would hide most of the cost.
+    receive_usd: `${receivedMicro / 1_000_000n}.${((receivedMicro % 1_000_000n) / 100n).toString().padStart(4, "0")}`,
     receive_at_least: fromAtomic(quote.minAmountOut.toString(), decimals),
     fee_usd: quote.feeUsd,
     fee_percent: quote.feePercent,
