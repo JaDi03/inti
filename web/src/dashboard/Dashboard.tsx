@@ -11,6 +11,7 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
@@ -282,6 +283,7 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const policy = data?.agent?.policy;
+  const agentAccount = data?.agent?.account;
   const orders = data?.agent?.orders;
   const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
 
@@ -339,6 +341,31 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         ) : (
           <p className="mt-3 text-sm">No limit set yet.</p>
         )}
+        <div className="mt-3 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Money can only go to</span>
+            {agentAccount &&
+              (agentAccount === status.agent ? (
+                <span className="flex items-center gap-1 text-xs text-primary">
+                  <Check className="size-3.5" /> Your agent
+                </span>
+              ) : (
+                <span className="text-xs text-destructive">Not your agent&apos;s wallet</span>
+              ))}
+          </div>
+          <AddressLine address={status.agent} label="destination" className="mt-1" />
+        </div>
+        {status.intiFeesLeft !== null && (
+          <>
+            <div className="mt-2 flex justify-between text-sm">
+              <span className="text-muted-foreground">Fees left for Inti</span>
+              <span className="tabular-nums">
+                {near(status.intiFeesLeft)} of {near(config.intiKeyAllowanceYocto)} NEAR
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Inti pays each order&apos;s network fee from this. It is one total, not per day. Pausing and resuming Inti starts it over.</p>
+          </>
+        )}
         <div className="mt-3 flex items-start gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
           <Lock className="mt-0.5 size-3.5 shrink-0" />
           <span>
@@ -360,6 +387,12 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
 
       <FoldCard id="agent" icon={<Sparkles className="size-4 text-primary" />} title="Your agent's rules">
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
+        {agentAccount && (
+          <div className="mt-3">
+            <p className="text-sm">Agent wallet</p>
+            <AddressLine address={agentAccount} label="agent wallet" className="mt-1" />
+          </div>
+        )}
         {policy ? (
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             <Rule ok={policy.sendsOnlyToOwner} text="Sends only to you" />

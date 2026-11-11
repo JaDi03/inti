@@ -28,7 +28,7 @@ export interface OpenOrder {
 
 export interface DashboardData {
   prices: Record<"near" | AssetKey, number | null>;
-  agent: { grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
 
 /** Prices and the user's own agent, from Inti's server. Null when the server cannot be reached. */
