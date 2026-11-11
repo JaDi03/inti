@@ -237,6 +237,82 @@ describe("signing with the user's account key", () => {
   });
 });
 
+describe("renewing the grant", () => {
+  /** A grant closing shaped exactly like the Agent API's (fields read from a live grant_revoke). */
+  function closing(wallet: Wallet, changes: Record<string, unknown> = {}) {
+    const now = Date.now();
+    const message = {
+      action: "revoke_grant",
+      agent_id: "ab".repeat(32),
+      domain: "near-intents-agent-api.owner-admin.v2",
+      expires_at_ms: now + 300_000,
+      issued_at_ms: now,
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      recipient: config.agentApiHost,
+      target_id: "46".repeat(32),
+      tenant_id: "01".repeat(32),
+      ...changes,
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  }
+  const grantFor = (wallet: Wallet) => {
+    const now = Date.now();
+    const message = {
+      agent_id: "ab".repeat(32),
+      credential: "cd".repeat(32),
+      domain: "near-intents-agent-api.agent-grant.v6",
+      expires_at_ms: now + 7 * 86_400_000,
+      issued_at_ms: now,
+      label: "Inti trading",
+      network: "mainnet",
+      nonce: "ef".repeat(32),
+      owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
+      owner_epoch: 1,
+      recipient: config.agentApiHost,
+      tenant_id: "01".repeat(32),
+      wallet_id: "685aeccf-ee19-4b46-b1c7-292d96870202",
+    };
+    return { message: JSON.stringify(message), recipient: config.agentApiHost, nonce: new Uint8Array(32) };
+  };
+
+  it("shows the new grant and the closing in one confirmation, then signs both without asking again", async () => {
+    const wallet = userWallet();
+    const grant = grantFor(wallet);
+    const close = closing(wallet);
+    await wallet.signer.approveMessages(wallet.accountId, [grant, close]);
+    await wallet.signer.signNep413Message(wallet.accountId, grant);
+    await wallet.signer.signNep413Message(wallet.accountId, close);
+    expect(wallet.shown).toHaveLength(1);
+    expect(wallet.shown[0]?.at(-1)).toBe("Close Inti's earlier permission, so only the new one stays.");
+    expect(wallet.signed).toHaveLength(2);
+  });
+
+  it("asks again for a message that is not the one approved", async () => {
+    const wallet = userWallet();
+    await wallet.signer.approveMessages(wallet.accountId, [grantFor(wallet)]);
+    await wallet.signer.signNep413Message(wallet.accountId, closing(wallet));
+    expect(wallet.shown).toHaveLength(2);
+  });
+
+  it.each([
+    ["another owner", { owner: { account_id: "cd".repeat(32), public_key: "ed25519:x", type: "near" } }],
+    ["another service", { recipient: "evil.example" }],
+    ["testnet", { network: "testnet" }],
+    ["no grant", { target_id: "x" }],
+    ["an expired closing", { expires_at_ms: Date.now() - 1000 }],
+    ["an extra field", { policy: {} }],
+  ])("refuses a closing with %s", async (_name, changes) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signNep413Message(wallet.accountId, closing(wallet, changes))).rejects.toThrow(RefusedSigningError);
+    await expect(wallet.signer.approveMessages(wallet.accountId, [grantFor(wallet), closing(wallet, changes)])).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+});
+
 describe("changing the price protection", () => {
   /** A rule change shaped exactly like the Agent API's (fields read from a live policy_update). */
   function ruleChange(wallet: Wallet, changes: Record<string, unknown> = {}) {

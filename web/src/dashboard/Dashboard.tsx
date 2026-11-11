@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -11,6 +11,7 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
 
@@ -379,16 +380,7 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         {policy && (
           <PriceProtection address={address} signer={signer} getAccessToken={getAccessToken} current={policy.maxDeviationBps} nextChangeAt={policy.nextChangeAt} />
         )}
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm">
-          <Clock className="size-4 shrink-0 text-muted-foreground" />
-          {data?.agent?.grantUntil ? (
-            <span>
-              Inti may trade for you until <strong>{new Date(data.agent.grantUntil).toLocaleDateString("en-US", { dateStyle: "medium" })}</strong>
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Inti has no permission to trade for you yet.</span>
-          )}
-        </div>
+        {data?.agent && <GrantRenewal address={address} signer={signer} getAccessToken={getAccessToken} grantUntil={data.agent.grantUntil} />}
         <h3 className="mt-4 text-sm font-medium">Orders waiting for a price</h3>
         {orders && orders.length > 0 ? (
           <ul className="mt-2 flex flex-col gap-2">

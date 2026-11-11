@@ -270,11 +270,37 @@ export function describePolicyUpdate(update: GrantMessage, accountId: string, pu
   ];
 }
 
-/** Plain-language lines for the only messages the app signs: a grant, or a price protection change. */
+const GRANT_REVOKE_KEYS = ["action", "agent_id", "domain", "expires_at_ms", "issued_at_ms", "network", "nonce", "owner", "owner_epoch", "recipient", "target_id", "tenant_id"];
+
+/**
+ * Plain-language lines for closing one earlier grant of the user's agent. Closing only takes a
+ * permission away, but the message must still be the user's own, for this service, on mainnet.
+ */
+export function describeGrantRevoke(revoke: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
+  let m: Record<string, unknown>;
+  try {
+    m = JSON.parse(revoke.message) as Record<string, unknown>;
+  } catch {
+    refuse("the message is not a grant closing.");
+  }
+  if (typeof m !== "object" || m === null || Object.keys(m).sort().join(",") !== GRANT_REVOKE_KEYS.join(",")) refuse("the message is not a grant closing.");
+  if (m.action !== "revoke_grant" || m.domain !== OWNER_ADMIN_DOMAIN || m.network !== "mainnet") refuse("the message is not a mainnet grant closing.");
+  if (revoke.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the grant closing is for ${String(m.recipient)}.`);
+  const owner = m.owner as Record<string, unknown> | null;
+  if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the grant closing names another owner.");
+  if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the grant closing names no agent.");
+  if (typeof m.target_id !== "string" || !/^[0-9a-f]{64}$/.test(m.target_id)) refuse("the grant closing names no grant.");
+  const expires = m.expires_at_ms;
+  if (typeof expires !== "number" || expires <= now || expires - now > MAX_POLICY_UPDATE_MS) refuse("the grant closing has expired.");
+  return ["Close Inti's earlier permission, so only the new one stays."];
+}
+
+/** Plain-language lines for the only messages the app signs: a grant, closing an earlier one, or a price protection change. */
 export function describeOwnerMessage(message: GrantMessage, accountId: string, publicKey: string, config: LimitsConfig, now: number): string[] {
-  return message.message.includes(`"domain":"${OWNER_ADMIN_DOMAIN}"`)
-    ? describePolicyUpdate(message, accountId, publicKey, config, now)
-    : describeGrant(message, accountId, publicKey, config, now);
+  if (!message.message.includes(`"domain":"${OWNER_ADMIN_DOMAIN}"`)) return describeGrant(message, accountId, publicKey, config, now);
+  return message.message.includes(`"action":"revoke_grant"`)
+    ? describeGrantRevoke(message, accountId, publicKey, config, now)
+    : describePolicyUpdate(message, accountId, publicKey, config, now);
 }
 
 /**
