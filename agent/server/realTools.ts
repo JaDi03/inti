@@ -53,7 +53,7 @@ export const realToolSpecs = (Object.keys(inputs) as ToolName[]).map((name) => {
 
 /** Plain-language reasons the model can pass on to the owner. */
 const REASONS: Record<string, string> = {
-  asset_not_enabled: "this asset is not enabled in the owner's wallet yet; the owner can enable it in Assets",
+  asset_not_enabled: "this asset is not enabled in the owner's wallet yet; the owner can tap Enable on its card in the portfolio",
   token_not_allowed: "the owner's limits do not allow orders yet",
   over_order_limit: "the amount is above the owner's limit per order",
   over_daily_limit: "the amount is above what the owner's daily limit still allows",
