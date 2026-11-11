@@ -73,7 +73,7 @@ export function App() {
   const [limitsOpen, setLimitsOpen] = useState(false);
   // On a phone the chat and the portfolio take turns; on a wide screen both show.
   const [view, setView] = useState<"chat" | "portfolio">("chat");
-  const hide = useHideAmounts();
+  const hide = useHideAmounts("address");
   const [copied, setCopied] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
@@ -187,7 +187,7 @@ export function App() {
           {address && (
             <div className="flex items-center rounded-full bg-muted pl-3 text-xs">
               <code title={hide.hidden ? undefined : address}>{hide.hidden ? "••••••••" : shortAddress(address)}</code>
-              <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={hide.hidden ? "Show amounts and address" : "Hide amounts and address"} onClick={hide.toggleHidden}>
+              <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={hide.hidden ? "Show address" : "Hide address"} onClick={hide.toggleHidden}>
                 {hide.hidden ? <EyeOff /> : <Eye />}
               </Button>
               <Button
@@ -248,7 +248,6 @@ export function App() {
                 // Privy's own window shows the key; it never reaches Inti's code.
                 onExport: () => void exportWallet({ address }).catch(() => undefined),
                 onChanged: () => void limits.refresh(),
-                hide,
                 view,
               }
             : null

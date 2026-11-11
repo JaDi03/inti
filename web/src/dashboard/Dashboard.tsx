@@ -1,4 +1,4 @@
-import { Check, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Check, ChevronDown, Clock, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
@@ -25,8 +25,6 @@ const TILE: Record<AssetKey, string> = {
 
 const NEAR_DECIMALS = 24;
 const HIDDEN = "••••";
-/** The viewer's choice to hide amounts, remembered in this browser only. */
-const HIDE_KEY = "inti-hide-balances";
 
 /** Dollar value for display only; amounts stay exact in atomic units everywhere else. */
 function usd(amount: string, price: number | null | undefined): number | null {
@@ -42,33 +40,38 @@ export interface DashboardState {
   assets: AssetRow[] | null;
   loading: boolean;
   load: () => Promise<void>;
-  hidden: boolean;
-  toggleHidden: () => void;
 }
 
-/** Whether amounts and the address show as dots; one switch for the whole app, remembered in this browser. */
-export function useHideAmounts(): { hidden: boolean; toggleHidden: () => void } {
-  const [hidden, setHidden] = useState(() => {
+/** An on/off choice of the viewer, remembered in this browser only. */
+function useRememberedSwitch(key: string, initial: boolean): [boolean, () => void] {
+  const [on, setOn] = useState(() => {
     try {
-      return localStorage.getItem(HIDE_KEY) === "1";
+      const saved = localStorage.getItem(key);
+      return saved === null ? initial : saved === "1";
     } catch {
-      return false;
+      return initial;
     }
   });
-  const toggleHidden = () =>
-    setHidden((h) => {
+  const toggle = () =>
+    setOn((v) => {
       try {
-        localStorage.setItem(HIDE_KEY, h ? "0" : "1");
+        localStorage.setItem(key, v ? "0" : "1");
       } catch {
         // Storage can be blocked; the choice then lasts for this visit.
       }
-      return !h;
+      return !v;
     });
+  return [on, toggle];
+}
+
+/** Whether one part of the screen shows its amounts as dots; each part has its own switch. */
+export function useHideAmounts(part: "address" | "money" | "rules"): { hidden: boolean; toggleHidden: () => void } {
+  const [hidden, toggleHidden] = useRememberedSwitch(`inti-hide-${part}`, false);
   return { hidden, toggleHidden };
 }
 
 /** Prices, the agent's rules and the wallet's assets, read once for both halves of the dashboard. */
-function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): Omit<DashboardState, "hidden" | "toggleHidden"> {
+function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -106,7 +109,8 @@ interface MoneyProps {
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
 export function MoneyPanel({ address, config, client, status, state, onManage, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
-  const { data, assets, loading, load, hidden, toggleHidden } = state;
+  const { data, assets, loading, load } = state;
+  const { hidden, toggleHidden } = useHideAmounts("money");
   const [busy, setBusy] = useState<AssetKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
@@ -159,7 +163,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
 
       <section>
         <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">What Inti can buy for you</h2>
-        <ul className="grid grid-cols-2 gap-3">
+        <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {ASSET_KEYS.map((key) => {
             const a = ASSETS[key];
             const row = assets?.find((r) => r.key === key);
@@ -170,9 +174,8 @@ export function MoneyPanel({ address, config, client, status, state, onManage, c
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-wide">{a.name}</p>
-                    <p className="text-xs opacity-70">
-                      {a.kind === "real-world" ? "Real-world asset" : "Crypto"} · {a.symbol}
-                    </p>
+                    <p className="text-xs opacity-70">{a.kind === "real-world" ? "Real-world asset" : "Crypto"}</p>
+                    <p className="text-xs opacity-70">{a.symbol}</p>
                   </div>
                   {row?.enabled && (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-neutral-950/10 px-2 py-0.5 text-[11px] font-semibold">
@@ -234,7 +237,8 @@ interface RulesProps {
 /** The rules around the money: Spending Limits on the user's account and the agent's signed rules. */
 export function RulesPanel({ address, config, client, status, state, onManage, onChanged, className }: RulesProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
-  const { data, loading, hidden, toggleHidden } = state;
+  const { data, loading } = state;
+  const { hidden, toggleHidden } = useHideAmounts("rules");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const policy = data?.agent?.policy;
@@ -256,12 +260,12 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      <section className="rounded-3xl border bg-card p-5">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 font-medium">
-            <ShieldCheck className="size-4 text-primary" /> Spending limits
-          </h2>
-          <div className="-mr-2 flex items-center gap-1">
+      <FoldCard
+        id="limits"
+        icon={<ShieldCheck className="size-4 text-primary" />}
+        title="Spending limits"
+        extra={
+          <>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className={cn("size-2 rounded-full", status.intiConnected ? "bg-primary" : "bg-muted-foreground")} />
               {status.intiConnected ? "Inti is on" : "Inti is paused"}
@@ -269,8 +273,9 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
             <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
               {hidden ? <EyeOff /> : <Eye />}
             </Button>
-          </div>
-        </div>
+          </>
+        }
+      >
         <p className="mt-1 text-xs text-muted-foreground">A contract on your own account. Inti can only send what these limits allow, and only to your agent.</p>
         {status.limit ? (
           <>
@@ -310,13 +315,10 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           </Button>
         </div>
         {error && <p className="mt-2 break-words text-sm text-destructive">{error}</p>}
-        {confirmDialog}
-      </section>
+      </FoldCard>
+      {confirmDialog}
 
-      <section className="rounded-3xl border bg-card p-5">
-        <h2 className="flex items-center gap-2 font-medium">
-          <Sparkles className="size-4 text-primary" /> Your agent&apos;s rules
-        </h2>
+      <FoldCard id="agent" icon={<Sparkles className="size-4 text-primary" />} title="Your agent's rules">
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
         {policy ? (
           <ul className="mt-3 flex flex-col gap-2 text-sm">
@@ -354,8 +356,26 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         ) : (
           <p className="mt-1 text-sm text-muted-foreground">None right now.</p>
         )}
-      </section>
+      </FoldCard>
     </div>
+  );
+}
+
+/** A card the user can fold to its title; it remembers how the user left it. */
+function FoldCard({ id, icon, title, extra, className, children }: { id: string; icon: React.ReactNode; title: string; extra?: React.ReactNode; className?: string; children: React.ReactNode }) {
+  const [open, toggle] = useRememberedSwitch(`inti-open-${id}`, true);
+  return (
+    <section className={cn("rounded-3xl border bg-card p-5", className)}>
+      <div className="flex items-center gap-1">
+        <button className="-my-1 flex min-w-0 flex-1 items-center gap-2 py-1 text-left font-medium" aria-expanded={open} onClick={toggle}>
+          {icon}
+          <h2 className="truncate">{title}</h2>
+          <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+        </button>
+        {extra && <div className="-mr-2 flex shrink-0 items-center gap-1">{extra}</div>}
+      </div>
+      {open && children}
+    </section>
   );
 }
 
@@ -392,10 +412,8 @@ export function SecurityPanel({ address, config, client, status, onExport, onCha
   };
 
   return (
-    <section className={cn("rounded-3xl border bg-card p-5", className)}>
-      <h2 className="flex items-center gap-2 font-medium">
-        <Lock className="size-4 text-primary" /> Security
-      </h2>
+    <>
+    <FoldCard id="security" icon={<Lock className="size-4 text-primary" />} title="Security" className={className}>
       <div className="mt-3">
         <PasskeyProtection />
       </div>
@@ -416,8 +434,9 @@ export function SecurityPanel({ address, config, client, status, onExport, onCha
         </Button>
       </div>
       {error && <p className="mt-2 break-words text-sm text-destructive">{error}</p>}
-      {confirmDialog}
-    </section>
+    </FoldCard>
+    {confirmDialog}
+    </>
   );
 }
 
@@ -431,7 +450,6 @@ interface LayoutProps {
   onExport: () => void;
   /** Re-reads the account after the user changed something on it. */
   onChanged: () => void;
-  hide: { hidden: boolean; toggleHidden: () => void };
   /** On a phone, which one shows: the chat or the portfolio. */
   view: "chat" | "portfolio";
   children: React.ReactNode;
@@ -441,8 +459,8 @@ interface LayoutProps {
  * The chat with the portfolio around it. Wide screens: the rules on the left, the money on the
  * right. Medium screens: everything on the right. Phones: the chat or the portfolio, one at a time.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, hide, view, children }: LayoutProps) {
-  const state: DashboardState = { ...useDashboard(address, client, status, getAccessToken), ...hide };
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged };
   const security = { address, config, client, status, onExport, onChanged };
