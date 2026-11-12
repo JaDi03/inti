@@ -1,6 +1,7 @@
 # The Inti agent API. deploy/install.sh installs it as /etc/systemd/system/inti-agent.service.
-# It runs as the system user inti, reads the code in /opt/inti (owned by inti-build) and its
-# settings in /etc/inti/inti.env, and may write only to /var/lib/inti (the grants and Inti's key).
+# It runs as the system user inti from the live release in /opt/inti/current (owned by root),
+# reads its settings in /etc/inti/inti.env, and may write only to /var/lib/inti (the grants and
+# Inti's key).
 [Unit]
 Description=Inti agent API
 After=network-online.target
@@ -9,7 +10,7 @@ Wants=network-online.target
 [Service]
 User=inti
 Group=inti
-WorkingDirectory=/opt/inti
+WorkingDirectory=/opt/inti/current
 ExecStart=/usr/local/bin/node --env-file=/etc/inti/inti.env --import tsx agent/server/index.ts
 Restart=on-failure
 RestartSec=5
@@ -18,8 +19,6 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/inti
-# The service needs the code, not its git history.
-InaccessiblePaths=-/opt/inti/.git
 ProtectProc=invisible
 ProcSubset=pid
 ProtectKernelTunables=true

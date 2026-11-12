@@ -7,14 +7,14 @@
 
 	handle /api/* {
 		header {
-			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			Strict-Transport-Security "max-age=31536000"
 			X-Content-Type-Options "nosniff"
 		}
 		reverse_proxy 127.0.0.1:8787
 	}
 
 	handle {
-		root * /opt/inti/web/dist
+		root * /opt/inti/current/web/dist
 		try_files {path} /index.html
 		header {
 {HEADERS}
