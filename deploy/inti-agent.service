@@ -1,0 +1,29 @@
+# The Inti agent API as a systemd service. scripts/server-update.sh installs it to
+# /etc/systemd/system/inti-agent.service. It runs as the unprivileged user inti from
+# /home/inti/app and may write only to /home/inti/data (grants file, Inti key file).
+[Unit]
+Description=Inti agent API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=inti
+Group=inti
+WorkingDirectory=/home/inti/app
+ExecStart=/usr/local/bin/node --env-file=/home/inti/app/.env --import tsx agent/server/index.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/inti/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
