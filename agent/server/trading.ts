@@ -4,6 +4,7 @@ import { ASSET_KEYS, ASSETS } from "../policy/assets.js";
 import type { AgentAccounts } from "./agents.js";
 import { usableGrant, type GrantStore } from "./grants.js";
 import {
+  AgentApiRefusal,
   bandFromPolicy,
   buy,
   buyQuantity,
@@ -24,7 +25,15 @@ import {
   type SwapQuote,
 } from "./orders.js";
 
-export type QuoteResult = ({ status: "quoted" } & SwapQuote) | { status: "refused"; code: "no_agent" | "no_route" };
+/** One user's sweep: assets sent home, assets that could not be sent, or why it failed. */
+export interface SweepReport {
+  userId: string;
+  sent: string[];
+  stuck: string[];
+  error?: string;
+}
+
+export type QuoteResult =({ status: "quoted" } & SwapQuote) | { status: "refused"; code: "no_agent" | "no_route" };
 
 /** Why an order never started. */
 export type NotStarted = {
@@ -210,15 +219,20 @@ export function trading(deps: TradingDeps) {
         return placeLimitBuy(deps.chain, deps.agent, account, { buyAsset: asset, quantity, price, deadline });
       }),
 
-    /** Sends home whatever each user's agent holds. Users with an order in flight are skipped this round. */
-    async sweepAll(userIds: Iterable<string>): Promise<{ userId: string; sent: string[] }[]> {
-      const done: { userId: string; sent: string[] }[] = [];
+    /**
+     * Sends home whatever each user's agent holds. Users with an order in flight are skipped this
+     * round. Reports every user with something sent, something stuck, or a sweep that failed.
+     */
+    async sweepAll(userIds: Iterable<string>): Promise<SweepReport[]> {
+      const done: SweepReport[] = [];
       for (const userId of userIds) {
         const result = await exclusive(userId, async () => {
           const account = await accountOf(userId);
-          return "status" in account ? [] : sweep(deps.chain, deps.agent, account);
-        }).catch(() => []);
-        if (Array.isArray(result) && result.length > 0) done.push({ userId, sent: result });
+          return "status" in account ? null : sweep(deps.chain, deps.agent, account);
+        }).catch((error: unknown) => ({ error: error instanceof AgentApiRefusal ? error.code : "unavailable" }));
+        if (result === null || "status" in result) continue;
+        if ("error" in result) done.push({ userId, sent: [], stuck: [], error: result.error });
+        else if (result.sent.length > 0 || result.stuck.length > 0) done.push({ userId, ...result });
       }
       return done;
     },

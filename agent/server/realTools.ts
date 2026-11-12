@@ -81,6 +81,7 @@ const REASONS: Record<string, string> = {
   no_route: "there was no way to trade this asset right now; what was sent went back to the wallet",
   swap_failed: "the trade failed; what was sent went back to the wallet",
   placement_failed: "the order could not be placed; the money went back to the wallet",
+  shield_failed: "the money could not be moved into the agent's private balance, so nothing was traded; it went back to the wallet",
 };
 
 const pricesOf = async (tokens: () => Promise<PricedToken[]>) => {

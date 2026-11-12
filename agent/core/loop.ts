@@ -107,7 +107,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         const content = options.tools ? await options.tools.run(call.name, call.input, events) : runTool(call.name, call.input, ctx);
         results.push({ callId: call.id, content, isError: false });
       } catch (error) {
-        const message = error instanceof ToolInputError ? error.message : "tool failed";
+        // An unexpected failure confirms nothing: the model must not report the action as done.
+        const message =
+          error instanceof ToolInputError ? error.message : "tool failed before confirming anything; tell the owner it is not confirmed and to check their wallet, never that it happened";
         results.push({ callId: call.id, content: JSON.stringify({ error: message }), isError: true });
       }
     }

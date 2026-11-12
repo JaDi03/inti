@@ -36,7 +36,11 @@ async function main(): Promise<void> {
     if (sweeping) return;
     sweeping = true;
     try {
-      for (const { userId, sent } of await orders.sweepAll(grants.users())) app.log.info({ userId, assets: sent.length }, "agent_swept");
+      for (const { userId, sent, stuck, error } of await orders.sweepAll(grants.users())) {
+        if (sent.length > 0) app.log.info({ userId, assets: sent.length }, "agent_swept");
+        // Money that stays on an agent is never silent: each round says what and why.
+        if (stuck.length > 0 || error) app.log.warn({ userId, stuck, error }, "agent_sweep_stuck");
+      }
     } catch (error) {
       app.log.error({ err: error instanceof Error ? error.message : "unknown" }, "sweep_failed");
     } finally {
