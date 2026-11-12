@@ -27,7 +27,7 @@ async function main(): Promise<void> {
 
   const agents = agentApiAccounts(config.agentApiKey, config.agentApiUrl);
   const grants = await fileGrantStore(config.grantFile, grantKey(config.grantKey));
-  const chain = nearChain(config.nearRpcUrl, await loadIntiKey(config.intiKeyFile));
+  const chain = nearChain(config.nearRpcUrl, await loadIntiKey(config.intiKeyFile, config.intiPublicKey));
   const orders = trading({ agents, grants, chain, agent: agentApiPort(config.agentApiKey, config.agentApiUrl), tokens });
 
   // What an agent holds goes back to its owner's wallet: at start, then every few minutes.

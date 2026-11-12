@@ -63,6 +63,8 @@ const envSchema = z.object({
   SERVER_GRANT_KEY: z.base64().refine((v) => Buffer.from(v, "base64").length === 32),
   /** JSON file with Inti's function-call key ({ publicKey, secretKey }); it can only call fund_agent. */
   SERVER_INTI_KEY_FILE: z.string().min(1),
+  /** The public key the web app asks users to trust; the key file must hold its private half. */
+  INTI_KEY_PUBLIC: z.string().startsWith("ed25519:"),
   SERVER_NEAR_RPC_URL: z.url().default("https://free.rpc.fastnear.com"),
 });
 
@@ -80,6 +82,7 @@ export interface ServerConfig {
   grantFile: string;
   grantKey: string;
   intiKeyFile: string;
+  intiPublicKey: string;
   nearRpcUrl: string;
 }
 
@@ -110,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     grantFile: e.SERVER_GRANT_FILE,
     grantKey: e.SERVER_GRANT_KEY,
     intiKeyFile: e.SERVER_INTI_KEY_FILE,
+    intiPublicKey: e.INTI_KEY_PUBLIC,
     nearRpcUrl: e.SERVER_NEAR_RPC_URL,
   };
 }

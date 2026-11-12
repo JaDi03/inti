@@ -320,11 +320,16 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
 /** Gas for one order: Spending Limits asks for at least 80 TGas. */
 const FUND_GAS = 100_000_000_000_000n;
 
-/** Reads Inti's key file and checks that its secret key really is the published public key. */
-export async function loadIntiKey(path: string): Promise<KeyPairString> {
+/**
+ * Reads Inti's key file and checks that its secret key really is the public key the web app
+ * asks users to trust (INTI_KEY_PUBLIC); otherwise every order would fail on chain.
+ */
+export async function loadIntiKey(path: string, expectedPublicKey: string): Promise<KeyPairString> {
   const file = z.object({ publicKey: z.string(), secretKey: z.string().startsWith("ed25519:") }).parse(JSON.parse(await readFile(path, "utf8")));
   const secret = file.secretKey as KeyPairString;
-  if (KeyPair.fromString(secret).getPublicKey().toString() !== file.publicKey) throw new Error("Inti key file does not match its public key");
+  const actual = KeyPair.fromString(secret).getPublicKey().toString();
+  if (actual !== file.publicKey) throw new Error("Inti key file does not match its public key");
+  if (actual !== expectedPublicKey) throw new Error("INTI_KEY_PUBLIC is not the public key of SERVER_INTI_KEY_FILE");
   return secret;
 }
 
