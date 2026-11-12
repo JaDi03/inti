@@ -80,17 +80,22 @@ cd inti
 sudo bash deploy/install.sh
 ```
 
-`.env` is moved to `/etc/inti/inti.env`, so no copy with your keys stays in the folder you cloned. To change a setting, edit that file, or write a new `.env` in the folder, and run the command again.
+The script first updates the folder with `git pull`, then installs exactly that commit. It runs as root, so whoever can push to the branch you cloned decides what runs on your server: clone a repository you trust, or your own fork.
+
+`.env` is merged into `/etc/inti/inti.env` and removed, so no copy with your keys stays in the folder you cloned. To change a setting, edit that file, or write a new `.env` with only the settings to change, and run the command again. The key that encrypts the grants is made once and never replaced.
+
+Each install is a new release. If the new one does not start, the previous one keeps running.
 
 | What | Where |
 |---|---|
-| The code, owned by the system user `inti-build`, which installs packages and builds the app and cannot read any key | `/opt/inti` |
+| The live release (code, packages and built app), owned by root; the previous one is kept | `/opt/inti/current`, `/opt/inti/releases` |
+| Where the system user `inti-build` builds the app; it cannot read any key | `/var/lib/inti-build` |
 | Settings, readable only by root and `inti` | `/etc/inti/inti.env` |
 | Inti's key and the users' grants, readable only by `inti` | `/var/lib/inti` |
-| The API, run by the system user `inti`, which reads the code but cannot change it, and restarted if it stops | systemd: `inti-agent` (`journalctl -u inti-agent -f`) |
+| The API, run by the system user `inti`, which cannot change the code, and restarted if it stops | systemd: `inti-agent` (`journalctl -u inti-agent -f`) |
 | The app with HTTPS, and `/api` to the API | Caddy: `/etc/caddy/inti.caddy` |
 
-Users authorize Inti's key on their own account. To move to a new server without asking them to do it again, copy `/var/lib/inti/inti-key.json` and `/var/lib/inti/grants.json` to the new server's `/var/lib/inti/`, and `SERVER_GRANT_KEY` into its `.env`, before you run the script. It keeps a key and grants that are already there.
+Users authorize Inti's key on their own account. Keep a copy of `/var/lib/inti/inti-key.json` and of `SERVER_GRANT_KEY` from `/etc/inti/inti.env`. To move to a new server without asking users to do it again, copy `inti-key.json` and `grants.json` to the new server's `/var/lib/inti/`, and put `SERVER_GRANT_KEY` in its `.env`, before you run the script. It keeps a key and grants that are already there.
 
 ## Project Structure
 
