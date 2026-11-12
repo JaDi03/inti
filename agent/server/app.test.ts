@@ -17,7 +17,7 @@ const { tokens } = JSON.parse(readFileSync(new URL("../core/fixtures/priced-toke
   tokens: PricedToken[];
 };
 const APP_ID = "test-app";
-const ORIGIN = "https://hellointi.xyz";
+const ORIGIN = "https://example.com";
 
 let privateKey: CryptoKey;
 let otherKey: CryptoKey;
