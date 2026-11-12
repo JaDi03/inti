@@ -54,7 +54,7 @@ caddy validate --config "$CADDY_NEW" --adapter caddyfile >/dev/null 2>&1 \
 if ! cmp -s "$CADDY_NEW" /etc/caddy/Caddyfile; then
   [ -f /etc/caddy/Caddyfile ] && cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak-$(date +%Y%m%d%H%M%S)"
   install -m 644 "$CADDY_NEW" /etc/caddy/Caddyfile
-  systemctl reload caddy
+  systemctl reload-or-restart caddy
   echo "== Caddyfile updated (previous one kept as /etc/caddy/Caddyfile.bak-*)"
 fi
 rm -f "$CADDY_NEW"

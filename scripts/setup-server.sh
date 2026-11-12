@@ -46,6 +46,7 @@ if ! command -v caddy >/dev/null; then
   apt-get update -q
   apt-get install -y -q caddy
 fi
+systemctl enable --now --quiet caddy
 echo "== $(caddy version)"
 
 # The agent runs as inti, which has no login shell and no sudo.
