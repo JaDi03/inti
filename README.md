@@ -84,8 +84,6 @@ To run the app, copy `.env.example` to `.env` and fill in your own values:
 | `SERVER_GRANT_KEY` | the command in `.env.example` |
 | `SERVER_INTI_KEY_FILE`, `INTI_KEY_PUBLIC` | `pnpm new-key` creates the key file and prints both lines; copy them into `.env` |
 
-In the Privy dashboard, add your site's domain to the app's allowed domains, so the login works there.
-
 Then start the server and the web app:
 
 ```bash
@@ -115,7 +113,7 @@ The app and its API on your own server, at `https://your-domain.com`. You need U
 git clone https://github.com/JaDi03/inti.git
 cd inti
 cp .env.example .env
-nano .env                       # INTI_SITE and your four keys (see the table above)
+nano .env                       # INTI_SITE and the four keys at the top of the file
 sudo bash deploy/install.sh
 ```
 
