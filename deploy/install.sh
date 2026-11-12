@@ -129,7 +129,7 @@ print(u.hostname if u.scheme == "https" and u.hostname else "")' "$agent_api")
 say "1/7 Tools"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git curl xz-utils ca-certificates gpg \
-  debian-keyring debian-archive-keyring apt-transport-https python3 >/dev/null
+  debian-keyring debian-archive-keyring apt-transport-https python3 iproute2 procps >/dev/null
 # Node from nodejs.org, checked against the pinned sha256, owned by root whatever the archive says.
 if [ "$(/usr/local/bin/node -v 2>/dev/null)" != "v$NODE_VERSION" ]; then
   tmp=$(mktemp -d)
@@ -189,11 +189,21 @@ for path in sys.argv[2:]:
     finally:
         os.close(fd)
 PY
-# Inti's own temporary files, so nothing another user put in /tmp is loaded while the key is made.
-install -d -m 700 -o inti -g inti "$DATA/tmp"
 
 say "3/7 Settings"
 install -d -m 750 -o root -g inti "$CONF"
+# Kept until the new release answers, so a failed install can put everything back.
+[ -f "$SETTINGS" ] && cp -p "$SETTINGS" "$CONF/inti.env.previous"
+# A failure before the new release goes live leaves the settings the running release started with.
+switched=0
+restore_settings() {
+  local status=$?
+  if [ "$status" != 0 ] && [ "$switched" = 0 ] && [ -f "$CONF/inti.env.previous" ]; then
+    install -m 640 -o root -g inti "$CONF/inti.env.previous" "$SETTINGS"
+    echo "The installed settings were left as they were." >&2
+  fi
+}
+trap restore_settings EXIT
 # The new .env is merged into the installed settings. The key that encrypts the grants is made
 # once and never replaced: a different one would make every saved grant unreadable.
 python3 - "$SETTINGS" "${NEW:-}" "$GRANT_FILE" <<'PY'
@@ -252,7 +262,7 @@ echo "commit ${commit:0:12}"
 
 KEY_CREATED=0
 if ! python3 -c 'import os, sys; os.lstat(sys.argv[1])' "$KEY_FILE" 2>/dev/null; then
-  as_inti env TMPDIR="$DATA/tmp" bash -c "cd $next && node --import tsx agent/cli/new-key.ts $KEY_FILE" >/dev/null
+  as_inti bash -c "cd $next && node --import tsx agent/cli/new-key.ts $KEY_FILE" >/dev/null
   KEY_CREATED=1
 fi
 # Read without following a link or waiting on a pipe, from a file inti owns.
@@ -295,6 +305,10 @@ build_log=$(mktemp)
 } > "$build_log" 2>&1 || { tail -n 30 "$build_log"; rm -f "$build_log"; fail "the web app did not build"; }
 grep -E 'built in' "$build_log" || true
 rm -f "$build_log"
+# A package may have left a process running as inti-build; none may outlive the build.
+pkill -KILL -u inti-build 2>/dev/null || true
+for _ in $(seq 10); do pgrep -u inti-build >/dev/null || break; sleep 1; done
+! pgrep -u inti-build >/dev/null || fail "processes of inti-build are still running"
 # inti-build hands over the built app as a tar stream, so it can only pass on files it can read.
 # Root unpacks only plain files and folders: Caddy serves this folder and can read its own TLS
 # keys, so a link must never reach it.
@@ -337,29 +351,48 @@ fi
 
 say "6/7 Start"
 previous=$(readlink "$CURRENT" 2>/dev/null || true)
+UNIT=/etc/systemd/system/inti-agent.service
+[ -f "$UNIT" ] && cp -p "$UNIT" "$CONF/inti-agent.service.previous"
 switch_to() {
   ln -sfn "$1" "$CURRENT.new"
   mv -T "$CURRENT.new" "$CURRENT"
 }
+# The API is up only when /health answers and the port belongs to the service's own process, not
+# to anything else that may be listening there.
+answers() {
+  local main
+  for _ in $(seq 30); do  # the agent takes a few seconds to start
+    main=$(systemctl show -p MainPID --value inti-agent)
+    if [ "${main:-0}" != 0 ] && curl -s -m 2 "http://127.0.0.1:$PORT/health" >/dev/null &&
+      ss -ltnpH "sport = :$PORT" | grep -q "pid=$main,"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+# Puts back the previous release, its settings and its unit, and checks that it answers again.
+rollback() {
+  trap - ERR
+  journalctl -u inti-agent -n 20 --no-pager || true
+  [ -n "$previous" ] && [ -d "$previous" ] || fail "the new release did not start: journalctl -u inti-agent -n 50"
+  switch_to "$previous"
+  [ -f "$CONF/inti.env.previous" ] && install -m 640 -o root -g inti "$CONF/inti.env.previous" "$SETTINGS"
+  [ -f "$CONF/inti-agent.service.previous" ] && install -m 644 "$CONF/inti-agent.service.previous" "$UNIT"
+  systemctl daemon-reload
+  systemctl restart inti-agent || true
+  answers || fail "the new release did not start, and the previous one does not answer either: journalctl -u inti-agent -n 50"
+  fail "the new release did not start; the previous release, settings and service are running again"
+}
 switch_to "$RELEASES/$release"
-install -m 644 "$SRC/deploy/inti-agent.service" /etc/systemd/system/inti-agent.service
+switched=1
+trap rollback ERR
+install -m 644 "$SRC/deploy/inti-agent.service" "$UNIT"
 systemctl daemon-reload
 systemctl enable -q inti-agent
 systemctl restart inti-agent
-healthy=0
-for _ in $(seq 30); do  # the agent takes a few seconds to start
-  curl -s -m 2 "http://127.0.0.1:$PORT/health" >/dev/null && { healthy=1; break; }
-  sleep 1
-done
-if [ "$healthy" != 1 ]; then
-  journalctl -u inti-agent -n 20 --no-pager || true
-  if [ -n "$previous" ] && [ -d "$previous" ]; then
-    switch_to "$previous"
-    systemctl restart inti-agent
-    fail "the new release did not start; the previous one is running again"
-  fi
-  fail "the agent does not answer: journalctl -u inti-agent -n 50"
-fi
+answers || rollback
+trap - ERR
 
 # Caddy: the whole configuration, with this site in it, is checked before it goes live, so a
 # clash with another site never takes the others down.
