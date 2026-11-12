@@ -4,6 +4,7 @@ import { agentApiAccounts } from "./agents.js";
 
 const OWNER = "91".repeat(32);
 const AGENT = "ea".repeat(32);
+const SITE = "Inti trading (getinti.xyz)";
 
 const live = (id: string, changes: Record<string, unknown> = {}) => ({
   grant_id: id.repeat(64),
@@ -57,8 +58,15 @@ describe("prepareRevokes", () => {
       ...["5", "6", "7", "8", "9", "a"].map((id) => live(id)),
     ];
     const { accounts, generated } = api(null, grants);
-    expect(await accounts.prepareRevokes(AGENT)).toHaveLength(5);
+    expect(await accounts.prepareRevokes(AGENT, SITE)).toHaveLength(5);
     expect(generated.map((g) => (g as { grant_id: string }).grant_id[0])).toEqual(["1", "5", "6", "7", "8"]);
     expect(generated.every((g) => (g as { type: string }).type === "grant_revoke")).toBe(true);
+  });
+
+  it("closes this site's grants and older unlabeled ones, never another site's", async () => {
+    const grants = [live("1", { label: SITE }), live("2", { label: "Inti trading (localhost:5173)" }), live("3")];
+    const { accounts, generated } = api(null, grants);
+    expect(await accounts.prepareRevokes(AGENT, SITE)).toHaveLength(2);
+    expect(generated.map((g) => (g as { grant_id: string }).grant_id[0])).toEqual(["1", "3"]);
   });
 });

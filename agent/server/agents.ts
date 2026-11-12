@@ -1,7 +1,7 @@
 import type { AgentView, StatusResponse } from "@near-intents-agent-api/sdk";
 import { z } from "zod";
 import { agentPolicy, type PriceProtectionBps } from "../policy/agentPolicy.js";
-import { GRANT_LABEL } from "./grants.js";
+import { LEGACY_GRANT_LABEL } from "../policy/grantLabel.js";
 
 /** The owner of an agent: the user's own NEAR account and its full-access key. */
 export interface AgentOwner {
@@ -42,7 +42,8 @@ export interface AgentAccounts {
    * The documents the owner signs to close Inti's earlier grants that are still live, so a new
    * grant replaces them instead of adding to them. Grants with another label are never touched.
    */
-  prepareRevokes(agentId: string): Promise<PreparedRevoke[]>;
+  /** Closings for the live grants labeled `label` (and older unlabeled-site ones), for the user to sign. */
+  prepareRevokes(agentId: string, label: string): Promise<PreparedRevoke[]>;
 }
 
 export interface PreparedRevoke {
@@ -153,11 +154,12 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
         throw unavailable(error);
       }
     },
-    async prepareRevokes(agentId) {
+    async prepareRevokes(agentId, label) {
       try {
         const page = grantsSchema.parse(await request(`/v1/agents/${encodeURIComponent(agentId)}/grants`));
+        // Only this site's grants, plus the ones issued before sites had their own label.
         const live = page.data
-          .filter((g) => g.label === GRANT_LABEL && g.revoked_at === null && Date.parse(g.expires_at) > Date.now())
+          .filter((g) => (g.label === label || g.label === LEGACY_GRANT_LABEL) && g.revoked_at === null && Date.parse(g.expires_at) > Date.now())
           .slice(0, MAX_REVOKES_PER_RENEWAL);
         return await Promise.all(
           live.map(async (g) => {
