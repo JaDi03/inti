@@ -60,13 +60,6 @@ The LLM decides; the code enforces the limits. Each cycle the model gets the own
 - `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
 - `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
 
-`pnpm cycle` runs one cycle from the terminal on a simulated portfolio (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move. It needs only `NEAR_AI_API_KEY` in `.env`:
-
-```bash
-pnpm cycle "I want some NEAR exposure without much risk"
-pnpm cycle --propose "Put half of my USDC into NEAR"
-```
-
 ### Agent server
 
 `agent/server/` exposes the agent to the web app: `POST /api/chat` runs one cycle for the signed-in user, and the `/api/agent/*` routes create the user's agent on the Agent API and the trading grant the user signs. The server checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret. Orders are real: they spend the user's funds within the limits the user signed.
@@ -122,7 +115,8 @@ agent/                 the investment agent (TypeScript)
   brains/              model adapters: NEAR AI Cloud, scripted brain for tests
   policy/              Agent API policy: build, preview, verify
   engine/              Intent schema and parseIntent
-  cli/cycle.ts         run one agent cycle from the terminal
+  cli/new-key.ts       create Inti's key for a local setup
+  server/              the API the web app calls
   index.ts             public exports
 contracts/
   spending-limits/     NEAR contract on the user's own account (Rust)
