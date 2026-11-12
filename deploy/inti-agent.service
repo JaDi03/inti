@@ -1,6 +1,6 @@
 # The Inti agent API. deploy/install.sh installs it as /etc/systemd/system/inti-agent.service.
-# It runs as the system user inti, reads its settings from /etc/inti/inti.env and may write
-# only to /var/lib/inti (the users' grants and Inti's key).
+# It runs as the system user inti, reads the code in /opt/inti (owned by inti-build) and its
+# settings in /etc/inti/inti.env, and may write only to /var/lib/inti (the grants and Inti's key).
 [Unit]
 Description=Inti agent API
 After=network-online.target
@@ -18,6 +18,10 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/inti
+# The service needs the code, not its git history.
+InaccessiblePaths=-/opt/inti/.git
+ProtectProc=invisible
+ProcSubset=pid
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
@@ -35,6 +39,10 @@ AmbientCapabilities=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# A refused call returns an error instead of killing the process (Node tries to raise its file
+# limit at start and carries on when it cannot).
+SystemCallErrorNumber=EPERM
 # Files the agent creates are readable only by inti.
 UMask=0077
 MemoryMax=512M
