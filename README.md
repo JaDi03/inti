@@ -36,10 +36,9 @@ Node 24, pnpm 11. You need your own NEAR AI Cloud key, Agent API partner key and
 
 ```bash
 pnpm install
-cp .env.example .env
-node scripts/new-keys.mjs ../inti-key.json   # set SERVER_INTI_KEY_FILE=../inti-key.json and the two printed lines
-pnpm server                                   # API on :8787
-pnpm web:dev                                  # app on :5173
+node scripts/init-env.mjs --data ../inti-data   # creates .env and Inti's key; fill in the block it lists
+pnpm server                                      # API on :8787
+pnpm web:dev                                     # app on :5173
 ```
 
 ## Deploy
@@ -47,16 +46,12 @@ pnpm web:dev                                  # app on :5173
 Ubuntu 24.04 server with root over ssh, ports 80 and 443 open, and DNS for the app and API hosts.
 
 ```bash
-# once: Node, pnpm, Caddy, user inti, clone in /home/inti/app
-ssh root@HOST 'bash -s -- <your repo url>' < scripts/setup-server.sh
-
-# once: secrets, mode 600, owned by inti (production values: see the end of .env.example)
-ssh root@HOST 'install -m 600 -o inti -g inti /dev/stdin /home/inti/app/.env' < .env.production
-ssh root@HOST 'install -m 600 -o inti -g inti /dev/stdin /home/inti/data/inti-key.json' < ../inti-key.json
-
-# every release: pull main, build, publish, render the Caddyfile from .env, restart if needed
-bash scripts/deploy.sh root@HOST
+bash scripts/deploy.sh root@HOST --init               # once: installs, clones, creates .env and Inti's key
+ssh -t root@HOST sudo -u inti nano /home/inti/app/.env  # fill in the "Fill in" block
+bash scripts/deploy.sh root@HOST                      # deploy, and again for every release
 ```
+
+`--branch <name>` deploys another branch (default `main`); `--repo <url>` another repo (default your `origin`). Inti's key and `SERVER_GRANT_KEY` are created on the server once and never replaced, because users sign for that key.
 
 The agent runs as `inti` under `deploy/inti-agent.service` and can write only to `/home/inti/data`. Root on the server never executes a file `inti` can modify: the build and the Caddyfile render (`scripts/caddyfile.mjs`) run as `inti`, and the unit file is sent from your checkout.
 
