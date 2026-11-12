@@ -49,7 +49,7 @@ const envSchema = z.object({
   /** Partner key of the NEAR Intents Agent API. It can create agents, never move their funds. */
   NEAR_INTENTS_AGENT_API_KEY: z.string().min(1),
   NEAR_INTENTS_AGENT_API_URL: z.url().default(DEFAULT_AGENT_API_URL),
-  /** Exact origins allowed to call the API, comma separated (e.g. https://hellointi.xyz). */
+  /** Exact origins allowed to call the API, comma separated (e.g. https://example.com). */
   SERVER_ALLOWED_ORIGINS: z.string().min(1),
   SERVER_HOST: z.string().default("127.0.0.1"),
   SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
