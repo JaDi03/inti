@@ -170,6 +170,15 @@ describe("buy", () => {
     expect(failed.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
   });
 
+  it("says the money came back only once it did, when the return itself is refused or slow", async () => {
+    const noRoute = world({ quote: null, withdraw: "failed" });
+    expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    const failedSwap = world({ swap: "failed", withdraw: "failed" });
+    expect(await buy(failedSwap.chain, failedSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    const slowReturn = world({ swap: "failed", withdraw: "pending" });
+    expect(await buy(slowReturn.chain, slowReturn.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+  });
+
   it("never accepts less than the price protection the user signed", async () => {
     // 1% of a quoted 10000 is a floor of 9900, tighter than the quote's own 9800.
     const tight = world({ quote: { amountOut: 10_000n, minAmountOut: 9_800n }, bound: 100 });
@@ -321,6 +330,11 @@ describe("placeLimitBuy", () => {
     const w = world({ place: "failed" });
     expect(await placeLimitBuy(w.chain, w.agent, ACCOUNT, LIMIT, noWait)).toEqual({ status: "returned", code: "placement_failed" });
     expect(w.log.at(-1)).toBe(`withdraw wNEAR ${275n * 10n ** 21n}`);
+  });
+
+  it("says the money came back only once it did, when the return after a failed placement is refused", async () => {
+    const w = world({ place: "failed", withdraw: "failed" });
+    expect(await placeLimitBuy(w.chain, w.agent, ACCOUNT, LIMIT, noWait)).toEqual({ status: "pending" });
   });
 });
 

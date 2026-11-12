@@ -185,19 +185,16 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   if (funded === "returned") return { status: "returned", code: "shield_failed" };
   if (funded !== "funded") return { status: "refused", code: funded };
 
+  // Says "returned" only once the money is back; a refused or slow return is left to the sweep.
+  const giveBack = async (code: "no_route" | "swap_failed"): Promise<BuyResult> =>
+    (await agent.withdraw(account, FUNDING_ASSET, order.amount)) === "success" ? { status: "returned", code } : { status: "pending" };
   const quote = await agent.quote(account.agentId, FUNDING_ASSET, order.buyAsset, order.amount);
-  if (quote === null) {
-    await agent.withdraw(account, FUNDING_ASSET, order.amount);
-    return { status: "returned", code: "no_route" };
-  }
+  if (quote === null) return giveBack("no_route");
   const minOut = protectedMinOut(quote, bound);
   const held = (await agent.available(account.agentId)).get(order.buyAsset) ?? 0n;
   const swapped = await agent.swap(account, FUNDING_ASSET, order.buyAsset, order.amount, minOut);
   if (swapped === "pending") return { status: "pending" };
-  if (swapped === "failed") {
-    await agent.withdraw(account, FUNDING_ASSET, order.amount);
-    return { status: "returned", code: "swap_failed" };
-  }
+  if (swapped === "failed") return giveBack("swap_failed");
   const received = ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held;
   if (received <= 0n) return { status: "pending" };
   const sent = await agent.withdraw(account, order.buyAsset, received);
@@ -317,8 +314,8 @@ export async function placeLimitBuy(chain: ChainPort, agent: AgentPort, account:
   const placed = await agent.placeLimit(account, order);
   if (placed.settled === "success") return { status: "resting", orderId: placed.orderId, spend: preview.spend };
   if (placed.settled === "pending") return { status: "pending" };
-  await agent.withdraw(account, FUNDING_ASSET, preview.spend);
-  return { status: "returned", code: "placement_failed" };
+  // Says "returned" only once the money is back; a refused or slow return is left to the sweep.
+  return (await agent.withdraw(account, FUNDING_ASSET, preview.spend)) === "success" ? { status: "returned", code: "placement_failed" } : { status: "pending" };
 }
 
 /** What one sweep sent home, and what it tried to send but could not (`asset` or `asset (public)`). */
