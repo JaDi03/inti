@@ -18,9 +18,9 @@ export const PRICE_PROTECTION_BPS = [100, 200, 300] as const;
 export type PriceProtectionBps = (typeof PRICE_PROTECTION_BPS)[number];
 
 /**
- * The rules every user's agent starts with. It may trade (swaps and limit orders, in public or
- * private), and the only place anything can leave to is its owner: their NEAR Intents account or
- * their NEAR wallet. It carries no amounts of its own, because how much reaches the agent is
+ * The rules every user's agent starts with. It may trade (swaps and limit orders, on its
+ * confidential balance), and the only place anything can leave to is its owner: their NEAR
+ * Intents account, as a confidential transfer, or their NEAR wallet. It carries no amounts of its own, because how much reaches the agent is
  * capped by Spending Limits on the owner's account. The owner may later pick a tighter price
  * protection; nothing else changes.
  */
@@ -36,7 +36,7 @@ export function agentPolicy(ownerAccountId: string, maxDeviationBps: PriceProtec
     destinations: {
       mode: "only",
       list: [
-        { action: "transfer", address: ownerAccountId, confidential: false },
+        // The Agent API takes only confidential transfer destinations in a newly signed policy.
         { action: "transfer", address: ownerAccountId, confidential: true },
         { action: "withdraw", chain: "near", address: ownerAccountId, memo: null },
       ],

@@ -131,6 +131,12 @@ describe("the rules every agent starts with", () => {
     for (const destination of policy.destinations.list) expect(destination.address).toBe(owner);
   });
 
+  it("names only confidential transfer destinations, the only kind the Agent API takes in a new policy", () => {
+    const transfers = policy.destinations.list.filter((d) => d.action === "transfer");
+    expect(transfers.length).toBeGreaterThan(0);
+    for (const t of transfers) expect(t).toMatchObject({ confidential: true });
+  });
+
   it("allows trading, private balances and limit orders within the API maximum", () => {
     expect([...policy.actions].sort()).toEqual(["limit_order", "swap", "transfer", "withdraw"]);
     expect(policy.confidential).toBe(true);
