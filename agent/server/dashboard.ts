@@ -141,7 +141,7 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
     }
   };
 
-  return async (userId: string): Promise<DashboardView> => {
+  const read = async (userId: string): Promise<DashboardView> => {
     const hit = cache.get(userId);
     if (hit && now() - hit.at < DASHBOARD_TTL_MS) return hit.data;
 
@@ -167,6 +167,11 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
     cache.set(userId, { at: now(), data });
     return data;
   };
+  // Called after the user signs a change, so their next read shows it instead of the kept copy.
+  const forget = (userId: string): void => {
+    cache.delete(userId);
+  };
+  return Object.assign(read, { forget });
 }
 
 export type Dashboard = ReturnType<typeof dashboard>;

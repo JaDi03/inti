@@ -15,19 +15,21 @@ interface Props {
   current: number | null;
   /** When NEAR Intents accepts the next change, or null when it already does. */
   nextChangeAt: string | null;
+  /** Reads the dashboard again once the change is live. */
+  onSigned: () => void;
 }
 
 /**
  * How far from the market Inti may buy: one setting for price orders and buying now. Each change
  * is a new rule the user signs; NEAR Intents applies it, so not even Inti can go past it.
  */
-export function PriceProtection({ address, signer, getAccessToken, current, nextChangeAt }: Props) {
+export function PriceProtection({ address, signer, getAccessToken, current, nextChangeAt, onSigned }: Props) {
   const [saved, setSaved] = useState<number | null>(null);
   const [busy, setBusy] = useState<PriceProtectionBps | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The dashboard is re-read every few seconds; until it catches up, show what the user just signed.
+  // Until the dashboard read catches up, show what the user just signed; once it has, its wait applies.
   const shown = saved ?? current;
-  const waitUntil = saved === null ? nextChangeAt : null;
+  const waitUntil = saved === null || saved === current ? nextChangeAt : null;
 
   const choose = async (bps: PriceProtectionBps) => {
     if (bps === shown) return;
@@ -38,6 +40,7 @@ export function PriceProtection({ address, signer, getAccessToken, current, next
       if (!token) throw new Error("Your session expired. Sign in again and retry.");
       await setPriceProtection({ accessToken: token, accountId: address, signer, bps });
       setSaved(bps);
+      onSigned();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Your price protection could not be changed.");
     } finally {

@@ -1,5 +1,5 @@
 import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,8 @@ export interface DashboardState {
   data: DashboardData | null;
   assets: AssetRow[] | null;
   loading: boolean;
-  load: () => Promise<void>;
+  /** Reads everything again; `quiet` replaces the numbers in place without showing a spinner. */
+  load: (quiet?: boolean) => Promise<void>;
 }
 
 /** An on/off choice of the viewer, remembered in this browser only. */
@@ -92,29 +93,41 @@ export function useHideAmounts(part: "address" | "money" | "rules"): { hidden: b
 }
 
 /** Prices, the agent's rules and the wallet's assets, read once for both halves of the dashboard. */
-function useDashboard(address: string, client: LimitsClient, status: Installed, getAccessToken: () => Promise<string | null>): DashboardState {
+function useDashboard(
+  address: string,
+  client: LimitsClient,
+  status: Installed,
+  getAccessToken: () => Promise<string | null>,
+  grantSigned: boolean,
+): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const token = await getAccessToken();
-      const [server, rows] = await Promise.all([token ? fetchDashboard(token) : Promise.resolve(null), client.assets(address).catch(() => null)]);
-      // A failed read keeps what is already on screen instead of blanking it.
-      if (server) setData(server);
-      if (rows) setAssets(rows);
-    } finally {
-      setLoading(false);
-    }
-  }, [address, client, getAccessToken]);
+  const load = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setLoading(true);
+      try {
+        const token = await getAccessToken();
+        const [server, rows] = await Promise.all([token ? fetchDashboard(token) : Promise.resolve(null), client.assets(address).catch(() => null)]);
+        // A failed read keeps what is already on screen instead of blanking it.
+        if (server) setData(server);
+        if (rows) setAssets(rows);
+      } finally {
+        if (!quiet) setLoading(false);
+      }
+    },
+    [address, client, getAccessToken],
+  );
 
-  // Read again only when the account's balances or limits really changed, not on every re-render.
-  const balances = `${status.available}:${status.spendable}:${status.spentToday}:${status.intiConnected}`;
+  // Read again only when the account's balances, limits or Inti's permission really changed, not on
+  // every re-render. The first read says it is reading; later ones replace the numbers in place.
+  const balances = `${status.available}:${status.spendable}:${status.spentToday}:${status.intiConnected}:${status.intiFeesLeft}`;
+  const readOnce = useRef(false);
   useEffect(() => {
-    void load();
-  }, [load, balances]);
+    void load(readOnce.current);
+    readOnce.current = true;
+  }, [load, balances, grantSigned]);
 
   return { data, assets, loading, load };
 }
@@ -423,9 +436,18 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           <p className="mt-3 text-sm text-muted-foreground">{loading ? "Reading your agent..." : "Your agent's rules are not available right now."}</p>
         )}
         {policy && (
-          <PriceProtection address={address} signer={signer} getAccessToken={getAccessToken} current={policy.maxDeviationBps} nextChangeAt={policy.nextChangeAt} />
+          <PriceProtection
+            address={address}
+            signer={signer}
+            getAccessToken={getAccessToken}
+            current={policy.maxDeviationBps}
+            nextChangeAt={policy.nextChangeAt}
+            onSigned={() => void state.load(true)}
+          />
         )}
-        {data?.agent && <GrantRenewal address={address} signer={signer} getAccessToken={getAccessToken} grantUntil={data.agent.grantUntil} />}
+        {data?.agent && (
+          <GrantRenewal address={address} signer={signer} getAccessToken={getAccessToken} grantUntil={data.agent.grantUntil} onSigned={() => void state.load(true)} />
+        )}
         <h3 className="mt-4 text-sm font-medium">Orders waiting for a price</h3>
         {orders && orders.length > 0 ? (
           <ul className="mt-2 flex flex-col gap-2">
@@ -561,6 +583,8 @@ interface LayoutProps {
   onChanged: () => void;
   /** On a phone, which one shows: the chat or the portfolio. */
   view: "chat" | "portfolio";
+  /** True once the user signed Inti's first permission, so the dashboard reads it at once. */
+  grantSigned: boolean;
   children: React.ReactNode;
 }
 
@@ -569,8 +593,8 @@ interface LayoutProps {
  * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
  * Phones: the chat or the portfolio, one at a time.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken);
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken, grantSigned);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };

@@ -91,4 +91,14 @@ describe("dashboard", () => {
     await d("did:privy:alice");
     expect(read).toHaveLength(2);
   });
+
+  it("reads again right after the user's kept copy is dropped, and only theirs", async () => {
+    const { d, read } = setup({ "did:privy:alice": ALICE, "did:privy:carol": { ...ALICE, agentId: "agent_c" } });
+    await d("did:privy:alice");
+    await d("did:privy:carol");
+    d.forget("did:privy:alice");
+    await d("did:privy:alice");
+    await d("did:privy:carol");
+    expect(read).toEqual(["agent_a", "agent_c", "agent_a"]);
+  });
 });
