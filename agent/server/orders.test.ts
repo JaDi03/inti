@@ -18,7 +18,7 @@ import {
 } from "./orders.js";
 
 const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
-const BTC = "nep141:btc.omft.near";
+const BTC = "nep141:nbtc.bridge.near";
 const NAME: Record<string, string> = { [GOLD]: "GOLD", [BTC]: "BTC", [FUNDING_ASSET]: "wNEAR" };
 const ACCOUNT: OrderAccount = { owner: "91".repeat(32), agentId: "agent_1", grantToken: "ngt_x" };
 const NEAR = 10n ** 24n;
