@@ -83,19 +83,18 @@ ssh root@your-server 'bash -s -- https://github.com/you/inti.git' < scripts/setu
 On your computer, after `pnpm install`:
 
 ```bash
-node scripts/new-keys.mjs inti-key.json
+node scripts/new-keys.mjs ../inti-key.json
 ```
 
-It writes Inti's key to `inti-key.json` and prints `INTI_KEY_PUBLIC` and `SERVER_GRANT_KEY` for your `.env`. Each user adds that public key to their own NEAR account with permission to call only `fund_agent`. Keep the file: a new key means every user has to sign again.
+It writes Inti's key to `../inti-key.json`, outside the clone so it can never be committed, and prints `INTI_KEY_PUBLIC` and `SERVER_GRANT_KEY` for your `.env`. Clear the terminal after copying them. Each user adds that public key to their own NEAR account with permission to call only `fund_agent`. Keep the file safe: a new key means every user has to sign again.
 
 ### 3. Write the production `.env` and copy it up
 
-Start from `.env.example`. The lines under "Production server" there say which values change on a server. Then:
+Start from `.env.example` and save it as `.env.production`. The lines under "Production server" there say which values change on a server. Then copy both secrets up; each lands readable only by the user `inti`:
 
 ```bash
-scp .env.production root@your-server:/home/inti/app/.env
-scp inti-key.json root@your-server:/home/inti/data/inti-key.json
-ssh root@your-server 'chown inti:inti /home/inti/data/inti-key.json && chmod 600 /home/inti/data/inti-key.json'
+ssh root@your-server 'install -m 600 -o inti -g inti /dev/stdin /home/inti/app/.env' < .env.production
+ssh root@your-server 'install -m 600 -o inti -g inti /dev/stdin /home/inti/data/inti-key.json' < ../inti-key.json
 ```
 
 ### 4. Deploy
@@ -104,7 +103,7 @@ ssh root@your-server 'chown inti:inti /home/inti/data/inti-key.json && chmod 600
 bash scripts/deploy.sh root@your-server
 ```
 
-The server pulls `main`, installs, builds the web app, publishes it, writes its Caddyfile from your `.env` (`scripts/caddyfile.mjs`, with the headers in `web/security-headers.json`), installs the service (`deploy/inti-agent.service`) and restarts the agent when its code changed. Then the script checks your app and API from your computer. Run the same command after every merge to `main`.
+The server pulls `main`, installs, builds the web app, publishes it, writes its Caddyfile from your `.env` (`scripts/caddyfile.mjs`, with the headers in `web/security-headers.json`), installs the service (`deploy/inti-agent.service`, sent from your clone) and restarts the agent when its code changed. Root on the server never runs a file the user `inti` can change: the build and the Caddyfile run as `inti`, and root only checks and installs the result. Then the script checks your app and API from your computer. Run the same command after every merge to `main`.
 
 ## Project Structure
 
