@@ -81,12 +81,13 @@ To run the app, copy `.env.example` to `.env` and fill in your own values:
 | `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
 | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
 | `SERVER_GRANT_KEY` | the command in `.env.example` |
-| `SERVER_INTI_KEY_FILE`, `INTI_KEY_PUBLIC` | `pnpm new-key` creates the key file and prints both |
+| `SERVER_INTI_KEY_FILE`, `INTI_KEY_PUBLIC` | `pnpm new-key` creates the key file and prints both lines; copy them into `.env` |
+
+In the Privy dashboard, add your site's domain to the app's allowed domains, so the login works there.
 
 Then start the server and the web app:
 
 ```bash
-pnpm new-key
 pnpm server    # agent API on http://localhost:8787
 pnpm web:dev   # app on http://localhost:5173
 ```
