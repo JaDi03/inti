@@ -26,6 +26,11 @@ grep -qE '^SERVER_GRANT_FILE=/home/inti/data/' "$APP/.env" && ! grep -qE '^SERVE
 chown -h inti:inti "$APP/.env"
 chmod 600 "$APP/.env"
 
+# Reads one value from .env; a file written on Windows may end its lines with \r.
+env_value() {
+  grep -E "^$1=" "$APP/.env" | tail -n 1 | cut -d= -f2- | tr -d '\r'
+}
+
 as_inti() {
   runuser -u inti -- env HOME=/home/inti PATH=/usr/local/bin:/usr/bin:/bin \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 bash -c "cd $APP && $1"
@@ -86,7 +91,7 @@ if [ "$BEFORE" != "$AFTER" ] && as_inti "git diff --name-only $BEFORE $AFTER" \
 fi
 if [ "$CODE_CHANGED" = yes ] || [ "$UNIT_CHANGED" = yes ] || ! systemctl is-active --quiet inti-agent; then
   systemctl restart inti-agent
-  PORT=$(grep -E '^SERVER_PORT=' "$APP/.env" | cut -d= -f2)
+  PORT=$(env_value SERVER_PORT)
   for i in $(seq 1 30); do
     curl -s -m 2 "http://127.0.0.1:${PORT:-8787}/health" >/dev/null 2>&1 && break
     sleep 1
@@ -99,6 +104,6 @@ else
 fi
 echo "== services: $(systemctl is-active inti-agent caddy | tr '\n' ' ')"
 # scripts/deploy.sh reads this line to check both addresses from outside the server.
-WEB_ORIGIN=$(grep -E '^SERVER_ALLOWED_ORIGINS=' "$APP/.env" | cut -d= -f2 | cut -d, -f1)
-API_ORIGIN=$(grep -E '^INTI_API_URL=' "$APP/.env" | cut -d= -f2)
+WEB_ORIGIN=$(env_value SERVER_ALLOWED_ORIGINS | cut -d, -f1)
+API_ORIGIN=$(env_value INTI_API_URL)
 echo "== urls: $WEB_ORIGIN $API_ORIGIN"
