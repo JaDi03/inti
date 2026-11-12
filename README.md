@@ -4,9 +4,9 @@
 ![node](https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white)
 ![typescript](https://img.shields.io/badge/typescript-6-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 
-Inti is a natural-language investment agent built on NEAR Intents.
+Inti is an investment agent on NEAR. You say in plain words what to buy or sell, and it does it from your own wallet, within limits you sign.
 
-> TL;DR: say what you want to do with your money in plain words. Inti turns it into a structured intent that an interface-independent engine can check.
+Giving an AI agent money usually means giving it your keys. With Inti your funds stay in your wallet. Inti gets a key that can only send orders, and a contract on your own account refuses any order above your limits.
 
 ---
 
@@ -21,52 +21,37 @@ Inti is a natural-language investment agent built on NEAR Intents.
 
 ## How It Works
 
-The engine accepts only structured `Intent` objects, never raw text. Any interface can build one.
+1. **Sign in** with email or Google. [Privy](https://docs.privy.io) creates a NEAR wallet for you.
+2. **Set your limits**: how much one order may spend, and how much in a day. The app installs the Spending Limits contract on your account and adds Inti's key, which can call only `fund_agent` (`web/src/limits/client.ts`).
+3. **Create your agent** on the NEAR Intents [Agent API](https://docs.agentsonintents.com) and sign a trading permission (a grant) for 7, 30 or 90 days.
+4. **Chat**: "buy $5 of gold", "sell half my bitcoin for euros", "buy Solana if it drops to $150". The agent quotes, buys, sells or places an order that waits for a price.
+5. **Results go to your wallet.** Anything left with the agent is sent back to your wallet every 5 minutes.
 
-```mermaid
-flowchart LR
-  A[Interface] -->|Intent JSON| B[parseIntent]
-  B -->|valid Intent| C[Engine]
-  B -->|zod error| D[Rejected]
-```
+The agent buys and sells gold (XAUT), euro (EURe), bitcoin, ether and Solana, and pays with NEAR (`agent/policy/assets.ts`).
 
-Today the engine validates two intent kinds, `swap` and `transfer`. Amounts are decimal strings, never floats.
+### The agent
 
-```ts
-import { parseIntent } from "./agent/index.js";
+The model decides; the code and the contract enforce the limits.
 
-parseIntent({
-  kind: "swap",
-  from: { symbol: "USDC", chain: "base" },
-  to: { symbol: "NEAR", chain: "near" },
-  amount: "10",
-}); // returns the Intent
-// amount: "-1" throws a zod error
-```
-
-### Agent policy
-
-The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-api/policies-and-limits) runs an agent under a policy its owner signs. Inti builds that policy and checks it before anyone signs:
-
-1. `buildPolicy(draft)` turns a draft in human units ("25 USDC per transaction") into the exact `Policy` type of `@near-intents-agent-api/sdk`. It only emits destinations in `only` mode and never enables `native` methods, so funds can only leave to addresses the owner listed.
-2. `describePolicy(policy, tokens)` writes the plain-language preview the owner reads before signing.
-3. `assertPolicyMatches(built, preview.policy)` compares the policy the API returns for signing with the one Inti built, and throws on any difference.
-
-### Agent cycle
-
-The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
-
-- `agent/core/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
+- `agent/core/loop.ts`: the loop. A brain is any object with a `step()` method.
 - `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
-- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
+- `agent/server/realTools.ts`: the seven tools the model can call: `get_portfolio`, `get_quote`, `buy_now`, `buy_at_price`, `get_sell_quote`, `sell_now` and `ask_user`. The model picks an asset by name and an amount in dollars; it never writes an address.
 
-### Agent server
+Until you have an agent and a live grant, the chat runs on a simulated portfolio and no funds move.
 
-`agent/server/` exposes the agent to the web app: `POST /api/chat` runs one cycle for the signed-in user, and the `/api/agent/*` routes create the user's agent on the Agent API and the trading grant the user signs. The server checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret. Orders are real: they spend the user's funds within the limits the user signed.
+### The limits
 
-### Web app
+```rust
+require!(new_spent <= limit.per_day.0, "over the daily limit");
+```
 
-`web/` is the app. The user signs in with email or Google through [Privy](https://docs.privy.io), which creates an embedded NEAR wallet (an implicit account). `PrivyNearSigner` plugs that wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
+`contracts/spending-limits/src/lib.rs`: before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits. To stop Inti at once, delete its key from your account. Details: [Spending Limits contract](contracts/spending-limits/README.md).
+
+### Server and web app
+
+`agent/server/` is the API the web app calls: `POST /api/chat` runs the agent for the signed-in user, and the `/api/agent/*` routes create the user's agent and the grant the user signs. It checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret.
+
+`web/` is the app. `PrivyNearSigner` plugs the Privy wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
 
 ## Run Your Own Server
 
@@ -111,13 +96,11 @@ Users authorize Inti's key on their own account. To move to a new server without
 
 ```
 agent/                 the investment agent (TypeScript)
-  core/                loop, tools, limit checks, portfolio
+  core/                loop, simulated portfolio, money math
   brains/              model adapters: NEAR AI Cloud, scripted brain for tests
-  policy/              Agent API policy: build, preview, verify
-  engine/              Intent schema and parseIntent
+  policy/              the assets the agent trades, token units
+  server/              the API the web app calls, orders and grants
   cli/new-key.ts       create Inti's key for a local setup
-  server/              the API the web app calls
-  index.ts             public exports
 contracts/
   spending-limits/     NEAR contract on the user's own account (Rust)
 web/                   app: login, Spending Limits, chat (React)
@@ -126,12 +109,13 @@ deploy/                install.sh and the server files it sets up
 
 ## Tech Stack
 
-- **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
+- **[NEAR Intents](https://docs.near-intents.org)**: the swaps and price orders behind every buy and sell
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
 - **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)
 - **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
-- **[near-api-js](https://github.com/near/near-api-js)**: NEP-413 and NEP-366 encoding
-- **[zod](https://zod.dev)**: intent schema validation
+- **[near-api-js](https://github.com/near/near-api-js)**: NEAR transactions, NEP-413 and NEP-366 encoding
+- **[fastify](https://fastify.dev)**: the API server
+- **[zod](https://zod.dev)**: checks settings, requests and the model's tool calls
 - **[vitest](https://vitest.dev)**: tests
 - **[TypeScript](https://www.typescriptlang.org)**: language
 
