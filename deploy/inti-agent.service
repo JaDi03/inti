@@ -20,9 +20,23 @@ ProtectHome=read-only
 ReadWritePaths=/home/inti/data
 ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+PrivateDevices=true
 RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
 LockPersonality=true
+# No Linux capabilities: the port is above 1024 and nothing needs root powers.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Files the agent creates are readable only by inti.
+UMask=0077
 MemoryMax=512M
 
 [Install]

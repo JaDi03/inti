@@ -4,19 +4,27 @@
 # the server always runs the version from the deployer's checkout.
 # Steps: pull, install, build the web, publish it, install the service unit, render the
 # Caddyfile from .env, restart the agent when its code or unit changed, check health.
+#
+# Everything under /home/inti can be changed by the user inti, and code from dependencies runs
+# as inti during install and build. So root never executes or installs a file from there: the
+# build and the Caddyfile render run as inti, root only validates and installs their output, and
+# the service unit arrives from the deployer's checkout in UNIT_FILE_B64 (set by deploy.sh).
 set -euo pipefail
 
 APP=/home/inti/app
 WEB=/var/www/inti
 
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
-[ -d "$APP/.git" ] || { echo "$APP is not a clone; run scripts/setup-server.sh first"; exit 1; }
-[ -f "$APP/.env" ] || { echo "$APP/.env is missing; copy your production .env there (see README, Self-host)"; exit 1; }
+[ -n "${UNIT_FILE_B64:-}" ] || { echo "run through scripts/deploy.sh, which sends the service unit"; exit 1; }
+[ ! -L "$APP" ] && [ -d "$APP/.git" ] || { echo "$APP is not a clone; run scripts/setup-server.sh first"; exit 1; }
+[ ! -L "$APP/.env" ] && [ -f "$APP/.env" ] \
+  || { echo "$APP/.env is missing or a link; copy your production .env there (see README, Self-host)"; exit 1; }
 
 # The service may write only to /home/inti/data, so the grants file must live there.
-grep -qE '^SERVER_GRANT_FILE=/home/inti/data/' "$APP/.env" \
-  || { echo "SERVER_GRANT_FILE in $APP/.env must be a path under /home/inti/data/"; exit 1; }
-chown inti:inti "$APP/.env" && chmod 600 "$APP/.env"
+grep -qE '^SERVER_GRANT_FILE=/home/inti/data/' "$APP/.env" && ! grep -qE '^SERVER_GRANT_FILE=.*\.\.' "$APP/.env" \
+  || { echo "SERVER_GRANT_FILE in $APP/.env must be a path under /home/inti/data/ without '..'"; exit 1; }
+chown -h inti:inti "$APP/.env"
+chmod 600 "$APP/.env"
 
 as_inti() {
   runuser -u inti -- env HOME=/home/inti PATH=/usr/local/bin:/usr/bin:/bin \
@@ -34,7 +42,13 @@ as_inti "pnpm web:build" | grep -E 'built in|error' || true
 
 install -d -m 755 "$(dirname "$WEB")"
 rm -rf "$WEB.new"
-cp -r "$APP/web/dist" "$WEB.new"
+cp -r --no-dereference "$APP/web/dist" "$WEB.new"
+# A build has no links; one here could make Caddy serve a file from outside the web folder.
+if [ -n "$(find "$WEB.new" -type l -print -quit)" ]; then
+  echo "web build contains symbolic links; not published"
+  rm -rf "$WEB.new"
+  exit 1
+fi
 chmod -R a+rX "$WEB.new"
 rm -rf "$WEB.old"
 [ -d "$WEB" ] && mv "$WEB" "$WEB.old"
@@ -42,16 +56,19 @@ mv "$WEB.new" "$WEB"
 echo "== web published (previous one in $WEB.old)"
 
 UNIT_CHANGED=no
-if ! cmp -s "$APP/deploy/inti-agent.service" /etc/systemd/system/inti-agent.service; then
-  cp "$APP/deploy/inti-agent.service" /etc/systemd/system/inti-agent.service
+UNIT_NEW=$(mktemp)
+printf '%s' "$UNIT_FILE_B64" | base64 -d > "$UNIT_NEW"
+if ! cmp -s "$UNIT_NEW" /etc/systemd/system/inti-agent.service; then
+  install -m 644 "$UNIT_NEW" /etc/systemd/system/inti-agent.service
   systemctl daemon-reload
   systemctl enable --quiet inti-agent
   UNIT_CHANGED=yes
   echo "== service unit installed"
 fi
+rm -f "$UNIT_NEW"
 
 CADDY_NEW=$(mktemp)
-node "$APP/scripts/caddyfile.mjs" "$APP/.env" > "$CADDY_NEW"
+as_inti "node scripts/caddyfile.mjs .env" > "$CADDY_NEW"
 caddy validate --config "$CADDY_NEW" --adapter caddyfile >/dev/null 2>&1 \
   || { echo "rendered Caddyfile is invalid:"; caddy validate --config "$CADDY_NEW" --adapter caddyfile; exit 1; }
 if ! cmp -s "$CADDY_NEW" /etc/caddy/Caddyfile; then

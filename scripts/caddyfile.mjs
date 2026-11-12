@@ -49,7 +49,12 @@ ${headerLines.join("\n")}
 \tfile_server
 }`,
   `${apiUrl.hostname} {
-\theader -Server
+\theader {
+\t\tStrict-Transport-Security "max-age=31536000; includeSubDomains"
+\t\tX-Content-Type-Options "nosniff"
+\t\tReferrer-Policy "no-referrer"
+\t\t-Server
+\t}
 \treverse_proxy 127.0.0.1:${port}
 }`,
 ];

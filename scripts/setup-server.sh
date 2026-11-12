@@ -9,6 +9,9 @@ set -euo pipefail
 
 REPO_URL=${1:?usage: setup-server.sh <git clone url>}
 NODE_VERSION=24.22.2
+# sha256 of node-v24.22.2-linux-x64.tar.xz from nodejs.org/dist/v24.22.2/SHASUMS256.txt. It lives
+# here, not downloaded with the tarball, so a tampered download server cannot change both.
+NODE_SHA256=48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 . /etc/os-release
@@ -19,13 +22,12 @@ apt-get update -q
 apt-get install -y -q git curl xz-utils ca-certificates gpg \
   debian-keyring debian-archive-keyring apt-transport-https
 
-# Node from nodejs.org, checked against the published SHASUMS256.txt.
+# Node from nodejs.org, checked against the pinned sha256.
 if [ "$(/usr/local/bin/node -v 2>/dev/null)" != "v$NODE_VERSION" ]; then
   TMP=$(mktemp -d)
   FILE="node-v$NODE_VERSION-linux-x64.tar.xz"
   curl -fsSL -o "$TMP/$FILE" "https://nodejs.org/dist/v$NODE_VERSION/$FILE"
-  curl -fsSL -o "$TMP/SHASUMS256.txt" "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt"
-  (cd "$TMP" && grep " $FILE\$" SHASUMS256.txt | sha256sum -c -)
+  (cd "$TMP" && echo "$NODE_SHA256  $FILE" | sha256sum -c -)
   tar -xJf "$TMP/$FILE" -C /opt
   rm -rf "$TMP"
   for bin in node npm npx corepack; do
