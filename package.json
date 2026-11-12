@@ -9,13 +9,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "tsx watch agent/index.ts",
-    "start": "tsx agent/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "cycle": "tsx --env-file=.env agent/cli/cycle.ts",
     "server": "tsx --env-file=.env agent/server/index.ts",
     "new-key": "tsx agent/cli/new-key.ts",
     "web:dev": "pnpm --filter inti-web dev",
@@ -30,13 +27,13 @@
     "jose": "6.2.13",
     "near-api-js": "7.4.0",
     "openai": "7.43.0",
+    "tsx": "4.23.15",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
-    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.1.0"

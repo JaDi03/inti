@@ -1,0 +1,24 @@
+# The web app and its API on one domain, with automatic HTTPS.
+# deploy/install.sh writes {SITE} and the page headers from web/security-headers.json in
+# {HEADERS}, and installs the result as /etc/caddy/inti.caddy.
+{SITE} {
+	encode zstd gzip
+	header -Server
+
+	handle /api/* {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options "nosniff"
+		}
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		root * /opt/inti/current/web/dist
+		try_files {path} /index.html
+		header {
+{HEADERS}
+		}
+		file_server
+	}
+}

@@ -1,0 +1,50 @@
+# The Inti agent API. deploy/install.sh installs it as /etc/systemd/system/inti-agent.service.
+# It runs as the system user inti from the live release in /opt/inti/current (owned by root),
+# reads its settings in /etc/inti/inti.env, and may write only to /var/lib/inti (the grants and
+# Inti's key).
+[Unit]
+Description=Inti agent API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=inti
+Group=inti
+WorkingDirectory=/opt/inti/current
+ExecStart=/usr/local/bin/node --env-file=/etc/inti/inti.env --import tsx agent/server/index.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inti
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# No Linux capabilities: the port is above 1024 and nothing needs root powers.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# A refused call returns an error instead of killing the process (Node tries to raise its file
+# limit at start and carries on when it cannot).
+SystemCallErrorNumber=EPERM
+# Files the agent creates are readable only by inti.
+UMask=0077
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
