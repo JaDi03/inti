@@ -254,10 +254,9 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   if (funded === "pending") return { status: "pending" };
   if (funded !== "funded") return { status: "refused", code: funded };
 
-  const giveBack = async (code: "no_route" | "swap_failed", asset: string, amount: bigint): Promise<ExchangeResult> => {
-    await agent.withdraw(account, asset, amount);
-    return { status: "returned", code, asset };
-  };
+  // Says "returned" only once the money is back; a slow return is left to the sweep.
+  const giveBack = async (code: "no_route" | "swap_failed", asset: string, amount: bigint): Promise<ExchangeResult> =>
+    (await agent.withdraw(account, asset, amount)) === "success" ? { status: "returned", code, asset } : { status: "pending" };
   const failure = (r: "no_route" | "failed") => (r === "no_route" ? "no_route" : "swap_failed");
 
   let received = await swapOnAgent(agent, account, order.from, order.to, order.amount, bound);

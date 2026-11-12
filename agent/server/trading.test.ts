@@ -14,7 +14,7 @@ const TOKENS: PricedToken[] = [
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.55 },
 ];
 
-function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean } = {}) {
+function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean; tokens?: PricedToken[] } = {}) {
   const calls: string[] = [];
   let release: () => void = () => undefined;
   let credited = 0n;
@@ -45,7 +45,7 @@ function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: 
     openLimitOrders: () => Promise.resolve(0),
     signedPriceBound: () => Promise.resolve(opts.bound === undefined ? 300 : opts.bound),
   } as unknown as AgentPort;
-  const t = trading({ agents, grants, chain, agent, tokens: () => Promise.resolve(TOKENS), now: () => NOW });
+  const t = trading({ agents, grants, chain, agent, tokens: () => Promise.resolve(opts.tokens ?? TOKENS), now: () => NOW });
   return { t, calls, release: () => release() };
 }
 
@@ -108,6 +108,9 @@ describe("trading", () => {
     const unpriced = setup({ spent: { "btc.omft.near": 1n } });
     expect(await unpriced.t.exchange("did:privy:alice", GOLD, FUNDING_ASSET, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
     expect(await unpriced.t.roomToday(ACTIVE.ownerAccount)).toBeNull();
+    // A sale of an asset priced at zero cannot be valued, so it does not start.
+    const zero = setup({ tokens: TOKENS.map((t) => (t.asset_id === GOLD ? { ...t, price: 0 } : t)) });
+    expect(await zero.t.exchange("did:privy:alice", GOLD, FUNDING_ASSET, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
     expect([...down.calls, ...unpriced.calls]).toEqual([]);
   });
 

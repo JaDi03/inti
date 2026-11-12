@@ -113,7 +113,12 @@ export function trading(deps: TradingDeps) {
     const token = tokens.find((t) => t.asset_id === assetId && t.price !== null);
     const room = await roomToday(owner, tokens);
     if (!token || room === null) return { status: "refused", code: "limit_unchecked" };
-    return valueMicro(amount, token) > room ? { status: "refused", code: "over_daily_limit" } : null;
+    try {
+      return valueMicro(amount, token) > room ? { status: "refused", code: "over_daily_limit" } : null;
+    } catch {
+      // A price the money math cannot use leaves the order unchecked, so it does not start.
+      return { status: "refused", code: "limit_unchecked" };
+    }
   };
 
   return {

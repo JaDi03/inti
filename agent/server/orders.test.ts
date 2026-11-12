@@ -46,6 +46,7 @@ function world(
     failSwap?: string[];
     /** What a swap gives; by default the purchase rate of the buy tests. */
     out?: (amount: bigint) => bigint;
+    withdraw?: Settled;
   } = {},
 ) {
   const agentHeld = new Map<string, bigint>();
@@ -83,6 +84,7 @@ function world(
     },
     withdraw: (_a, asset, amount) => {
       log.push(`withdraw ${NAME[asset] ?? asset} ${amount}`);
+      if ((opts.withdraw ?? "success") !== "success") return Promise.resolve(opts.withdraw ?? "pending");
       agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) - amount);
       return Promise.resolve("success");
     },
@@ -216,6 +218,11 @@ describe("exchange", () => {
     const second = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC"], failSwap: ["wNEAR>BTC"] });
     expect(await exchange(second.chain, second.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toEqual({ status: "returned", code: "swap_failed", asset: FUNDING_ASSET });
     expect(second.log.at(-1)).toBe("withdraw wNEAR 2000");
+  });
+
+  it("says the asset came back only once it did, and leaves a slow return to the sweep", async () => {
+    const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], withdraw: "pending" });
+    expect(await exchange(slow.chain, slow.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "pending" });
   });
 
   it("never accepts less than the price protection the user signed, on every step", async () => {
