@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Prepares a fresh Ubuntu 24.04 server to host Inti. Runs once, as root:
-#   ssh root@your-server 'bash -s -- https://github.com/you/inti.git' < scripts/setup-server.sh
-# It installs Node (official build, checksum verified), pnpm (through corepack) and Caddy
-# (official apt repository), creates the unprivileged user inti, and clones the repo to
-# /home/inti/app. It never writes secrets: .env and the Inti key file are copied by you
-# afterwards (README, Self-host), then scripts/deploy.sh builds and starts everything.
+# Prepares a fresh Ubuntu 24.04 server to host Inti. scripts/deploy.sh --init sends it over ssh
+# and it runs as root. It installs Node (official build, checksum verified), pnpm (through
+# corepack) and Caddy (official apt repository), creates the unprivileged user inti, clones the
+# repo to /home/inti/app, and creates /home/inti/app/.env with every generated value filled in
+# (scripts/init-env.mjs). Inti's key is created there and never leaves the server.
 set -euo pipefail
 
-REPO_URL=${1:?usage: setup-server.sh <git clone url>}
+REPO_URL=${1:?usage: setup-server.sh <git clone url> [branch]}
+BRANCH=${2:-main}
 NODE_VERSION=24.22.2
 # sha256 of node-v24.22.2-linux-x64.tar.xz from nodejs.org/dist/v24.22.2/SHASUMS256.txt. It lives
 # here, not downloaded with the tarball, so a tampered download server cannot change both.
@@ -60,14 +60,14 @@ install -d -m 700 -o inti -g inti /home/inti/data
 # Caddy serves the built web app from here.
 install -d -m 755 /var/www
 
-if [ ! -d /home/inti/app/.git ]; then
-  runuser -u inti -- env HOME=/home/inti git clone --quiet "$REPO_URL" /home/inti/app
-fi
-echo "== repo in /home/inti/app ($(runuser -u inti -- env HOME=/home/inti git -C /home/inti/app rev-parse --short HEAD))"
+as_inti() {
+  runuser -u inti -- env HOME=/home/inti PATH=/usr/local/bin:/usr/bin:/bin \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 bash -c "$1"
+}
 
-cat <<'NEXT'
-== server ready. Next, from your own computer (README, Self-host):
-   1. copy your production .env to /home/inti/app/.env
-   2. copy the Inti key file to /home/inti/data/ (path in SERVER_INTI_KEY_FILE)
-   3. bash scripts/deploy.sh <ssh host>
-NEXT
+if [ ! -d /home/inti/app/.git ]; then
+  as_inti "git clone --quiet --branch '$BRANCH' '$REPO_URL' /home/inti/app"
+fi
+echo "== repo in /home/inti/app ($(as_inti "git -C /home/inti/app rev-parse --abbrev-ref HEAD") $(as_inti "git -C /home/inti/app rev-parse --short HEAD"))"
+
+as_inti "cd /home/inti/app && pnpm install --frozen-lockfile >/dev/null && node scripts/init-env.mjs --data /home/inti/data --server"

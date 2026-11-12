@@ -16,9 +16,9 @@ WEB=/var/www/inti
 
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
 [ -n "${UNIT_FILE_B64:-}" ] || { echo "run through scripts/deploy.sh, which sends the service unit"; exit 1; }
-[ ! -L "$APP" ] && [ -d "$APP/.git" ] || { echo "$APP is not a clone; run scripts/setup-server.sh first"; exit 1; }
+[ ! -L "$APP" ] && [ -d "$APP/.git" ] || { echo "$APP is not a clone; run bash scripts/deploy.sh <ssh host> --init first"; exit 1; }
 [ ! -L "$APP/.env" ] && [ -f "$APP/.env" ] \
-  || { echo "$APP/.env is missing or a link; copy your production .env there (see README, Self-host)"; exit 1; }
+  || { echo "$APP/.env is missing or a link; run bash scripts/deploy.sh <ssh host> --init first"; exit 1; }
 
 # The service may write only to /home/inti/data, so the grants file must live there.
 grep -qE '^SERVER_GRANT_FILE=/home/inti/data/' "$APP/.env" && ! grep -qE '^SERVER_GRANT_FILE=.*\.\.' "$APP/.env" \
@@ -42,6 +42,8 @@ AFTER=$(as_inti "git rev-parse HEAD")
 echo "== code: ${BEFORE:0:7} -> ${AFTER:0:7}"
 
 as_inti "pnpm install --frozen-lockfile >/dev/null"
+# Fills any generated value a new release added, and stops while an owner value is still empty.
+as_inti "node scripts/init-env.mjs --data /home/inti/data --server --check"
 as_inti "pnpm web:build" | grep -E 'built in|error' || true
 [ -f "$APP/web/dist/index.html" ] || { echo "web build failed"; exit 1; }
 
