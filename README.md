@@ -14,6 +14,7 @@ Inti is a natural-language investment agent built on NEAR Intents.
 
 - [How It Works](#how-it-works)
 - [Quick Start](#quick-start)
+- [Run Your Own Server](#run-your-own-server)
 - [Project Structure](#project-structure)
 - [Tech Stack](#tech-stack)
 - [License](#license)
@@ -92,8 +93,6 @@ pnpm server    # agent API on http://localhost:8787
 pnpm web:dev   # app on http://localhost:5173
 ```
 
-For a public deployment, set `INTI_API_URL` to your API's URL and `SERVER_ALLOWED_ORIGINS` to your site's origin, build the app with `pnpm web:build` and serve `web/dist` with the headers in `web/security-headers.json` (`{INTI_API_ORIGIN}` is the origin of `INTI_API_URL`).
-
 To check the intent schema yourself:
 
 ```ts
@@ -108,6 +107,39 @@ parseIntent({
 // amount: "-1" throws a zod error
 ```
 
+## Run Your Own Server
+
+The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open.
+
+```bash
+git clone https://github.com/JaDi03/inti.git
+cd inti
+cp .env.example .env
+nano .env                       # INTI_SITE and your four keys (see the table above)
+sudo bash deploy/install.sh
+```
+
+The script checks `.env` before it installs anything and says what is missing. It installs Node, pnpm and Caddy, creates Inti's key and the key that encrypts the grants, builds the app, and starts the API behind HTTPS. It ends with `Done. Open https://your-domain.com`. In the Privy dashboard, add that domain to the app's allowed domains.
+
+To update, or to apply a changed setting, run the same command from the same folder:
+
+```bash
+cd inti
+sudo bash deploy/install.sh
+```
+
+`.env` is moved to `/etc/inti/inti.env`, so no copy with your keys stays in the folder you cloned. To change a setting, edit that file, or write a new `.env` in the folder, and run the command again.
+
+| What | Where |
+|---|---|
+| The code, run by the system user `inti` | `/opt/inti` |
+| Settings, readable only by root and `inti` | `/etc/inti/inti.env` |
+| Inti's key and the users' grants, readable only by `inti` | `/var/lib/inti` |
+| The API, restarted if it stops | systemd: `inti-agent` (`journalctl -u inti-agent -f`) |
+| The app with HTTPS, and `/api` to the API | Caddy: `/etc/caddy/inti.caddy` |
+
+Users authorize Inti's key on their own account. To move to a new server without asking them to do it again, copy `/var/lib/inti/inti-key.json` and `/var/lib/inti/grants.json` to the new server's `/var/lib/inti/`, and `SERVER_GRANT_KEY` into its `.env`, before you run the script. It keeps a key and grants that are already there.
+
 ## Project Structure
 
 ```
@@ -121,6 +153,7 @@ agent/                 the investment agent (TypeScript)
 contracts/
   spending-limits/     NEAR contract on the user's own account (Rust)
 web/                   app: login, Spending Limits, chat (React)
+deploy/                install.sh and the server files it sets up
 ```
 
 ## Tech Stack
