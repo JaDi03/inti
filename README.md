@@ -65,16 +65,19 @@ pnpm cycle --propose "Put half of my USDC into NEAR"
 
 ## Quick Start
 
-Prerequisites: Node 24 and pnpm 11.
-
 ```bash
 git clone https://github.com/JaDi03/inti.git
 cd inti
+```
+
+To run it on your computer you need Node 24 and pnpm 11:
+
+```bash
 pnpm install
 pnpm test
 ```
 
-To run the app, copy `.env.example` to `.env` and fill in your own values:
+Then copy `.env.example` to `.env` and fill in your own values:
 
 | Value | Where it comes from |
 |---|---|
@@ -107,11 +110,9 @@ parseIntent({
 
 ## Run Your Own Server
 
-The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open.
+The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open. On the server, clone the repo as in [Quick Start](#quick-start), then from its folder:
 
 ```bash
-git clone https://github.com/JaDi03/inti.git
-cd inti
 cp .env.example .env
 nano .env                       # INTI_SITE and the four keys at the top of the file
 sudo bash deploy/install.sh
