@@ -6,3 +6,4 @@ dist/
 target/
 grants.json
 grants.json.tmp
+inti-key.json
