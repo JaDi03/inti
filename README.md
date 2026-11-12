@@ -14,6 +14,7 @@ Inti is a natural-language investment agent built on NEAR Intents.
 
 - [How It Works](#how-it-works)
 - [Quick Start](#quick-start)
+- [Self-host](#self-host)
 - [Project Structure](#project-structure)
 - [Tech Stack](#tech-stack)
 - [License](#license)
@@ -82,7 +83,7 @@ pnpm install
 pnpm test
 ```
 
-Expected: 32 tests pass. `agent/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
+Expected: every test passes. `agent/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
 
 To check the intent schema yourself:
 
@@ -98,7 +99,57 @@ parseIntent({
 // amount: "-1" throws a zod error
 ```
 
-Configuration lives in `.env` (copy `.env.example`). No variable is read by the code yet.
+Configuration lives in `.env` (copy `.env.example`). Each line there says what it is for and where to get it.
+
+## Self-host
+
+You can run your own Inti on your own domain, with your own accounts. Nothing in the repo points to anyone else's server or keys: every address and credential comes from your `.env`.
+
+### What you need
+
+- A server with Ubuntu 24.04 that you reach with `ssh` as root (or a user with `sudo`).
+- A domain with two DNS `A` records pointing to the server, for example `your-domain.com` (the app) and `api.your-domain.com` (the agent API). Ports 80 and 443 open: Caddy gets the HTTPS certificates by itself.
+- A [NEAR AI Cloud](https://cloud.near.ai) API key (`NEAR_AI_API_KEY`).
+- A NEAR Intents [Agent API](https://docs.agentsonintents.com) partner key (`NEAR_INTENTS_AGENT_API_KEY`).
+- A [Privy](https://dashboard.privy.io) app: its App ID and its verification key (App settings > Basics > Verify with key instead). Add your app domain to the app's allowed origins.
+
+### 1. Prepare the server (once)
+
+From your clone:
+
+```bash
+ssh root@your-server 'bash -s -- https://github.com/you/inti.git' < scripts/setup-server.sh
+```
+
+`scripts/setup-server.sh` installs Node (official build, checksum checked), pnpm and Caddy, creates a user `inti` with no login shell, and clones the repo to `/home/inti/app`. The agent runs as that user and may write only to `/home/inti/data`.
+
+### 2. Create Inti's keys (once)
+
+On your computer, after `pnpm install`:
+
+```bash
+node scripts/new-keys.mjs inti-key.json
+```
+
+It writes Inti's key to `inti-key.json` and prints `INTI_KEY_PUBLIC` and `SERVER_GRANT_KEY` for your `.env`. Each user adds that public key to their own NEAR account with permission to call only `fund_agent`. Keep the file: a new key means every user has to sign again.
+
+### 3. Write the production `.env` and copy it up
+
+Start from `.env.example`. The lines under "Production server" there say which values change on a server. Then:
+
+```bash
+scp .env.production root@your-server:/home/inti/app/.env
+scp inti-key.json root@your-server:/home/inti/data/inti-key.json
+ssh root@your-server 'chown inti:inti /home/inti/data/inti-key.json && chmod 600 /home/inti/data/inti-key.json'
+```
+
+### 4. Deploy
+
+```bash
+bash scripts/deploy.sh root@your-server
+```
+
+The server pulls `main`, installs, builds the web app, publishes it, writes its Caddyfile from your `.env` (`scripts/caddyfile.mjs`, with the headers in `web/security-headers.json`), installs the service (`deploy/inti-agent.service`) and restarts the agent when its code changed. Then the script checks your app and API from your computer. Run the same command after every merge to `main`.
 
 ## Project Structure
 
@@ -113,6 +164,8 @@ agent/                 the investment agent (TypeScript)
 contracts/
   spending-limits/     NEAR contract on the user's own account (Rust)
 web/                   app: login, Spending Limits, chat (React)
+deploy/                systemd service for the agent API
+scripts/               server setup, deploy, Caddyfile and key generation
 ```
 
 ## Tech Stack
