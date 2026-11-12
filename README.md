@@ -44,10 +44,10 @@ The NEAR Intents [Agent API](https://docs.agentsonintents.com/integration/agent-
 The LLM decides; the code enforces the limits. Each cycle the model gets the owner goal and four tools: `get_portfolio`, `get_quote`, `swap` and `ask_user`. There is no hard-coded "when to buy" rule. Before any swap runs, `checkSwap` checks it against the signed policy (allowed actions and assets, per-transaction and daily limits, daily USD budget, actions per hour) and returns the Agent API error code on a denial, so the model can adapt.
 
 - `agent/core/loop.ts`: provider-neutral loop. A brain is any object with a `step()` method.
-- `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
-- Today the portfolio is simulated (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move.
+- `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
+- `propose` mode records swaps for the owner to confirm; `execute` mode runs them inside the policy.
 
-Run one cycle (needs `NEAR_AI_API_KEY` in `.env`):
+`pnpm cycle` runs one cycle from the terminal on a simulated portfolio (`SimulatedPortfolio`): live prices from `GET /v1/tokens`, mid-price fills, no fees. No funds move. It needs only `NEAR_AI_API_KEY` in `.env`:
 
 ```bash
 pnpm cycle "I want some NEAR exposure without much risk"
@@ -56,20 +56,11 @@ pnpm cycle --propose "Put half of my USDC into NEAR"
 
 ### Agent server
 
-`agent/server/` exposes the agent to the web chat: `POST /api/chat` runs one cycle for the signed-in user. The server checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret. Each user gets their own simulated portfolio. No funds move.
+`agent/server/` exposes the agent to the web app: `POST /api/chat` runs one cycle for the signed-in user, and the `/api/agent/*` routes create the user's agent on the Agent API and the trading grant the user signs. The server checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret. Orders are real: they spend the user's funds within the limits the user signed.
 
-```bash
-pnpm server   # needs NEAR_AI_API_KEY, PRIVY_APP_ID and PRIVY_VERIFICATION_KEY in .env
-pnpm web:dev  # set INTI_API_URL=http://localhost:8787 in .env, then chat at http://localhost:5173
-```
+### Web app
 
-### Web login (test page)
-
-`web/` is a minimal page that proves an email or Google login can own an agent. The user signs in with [Privy](https://docs.privy.io), which creates an embedded NEAR wallet (an implicit account). `PrivyNearSigner` plugs that wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash. The page verifies both signatures locally. Nothing is sent to NEAR or the Agent API.
-
-```bash
-pnpm web:dev   # needs PRIVY_APP_ID in .env, then open http://localhost:5173
-```
+`web/` is the app. The user signs in with email or Google through [Privy](https://docs.privy.io), which creates an embedded NEAR wallet (an implicit account). `PrivyNearSigner` plugs that wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
 
 ## Quick Start
 
@@ -82,7 +73,25 @@ pnpm install
 pnpm test
 ```
 
-Expected: 32 tests pass. `agent/policy/policy.test.ts` checks that `buildPolicy` reproduces the official quickstart policy byte for byte, using real tokens from `GET /v1/tokens`.
+To run the app, copy `.env.example` to `.env` and fill in your own values:
+
+| Value | Where it comes from |
+|---|---|
+| `NEAR_INTENTS_AGENT_API_KEY` | your partner key for the [Agent API](https://docs.agentsonintents.com) |
+| `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
+| `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
+| `SERVER_GRANT_KEY` | the command in `.env.example` |
+| `SERVER_INTI_KEY_FILE`, `INTI_KEY_PUBLIC` | `pnpm new-key` creates the key file and prints both |
+
+Then start the server and the web app:
+
+```bash
+pnpm new-key
+pnpm server    # agent API on http://localhost:8787
+pnpm web:dev   # app on http://localhost:5173
+```
+
+For a public deployment, set `INTI_API_URL` to your API's URL and `SERVER_ALLOWED_ORIGINS` to your site's origin, build the app with `pnpm web:build` and serve `web/dist` with the headers in `web/security-headers.json` (`{INTI_API_ORIGIN}` is the origin of `INTI_API_URL`).
 
 To check the intent schema yourself:
 
@@ -97,8 +106,6 @@ parseIntent({
 }); // returns the Intent
 // amount: "-1" throws a zod error
 ```
-
-Configuration lives in `.env` (copy `.env.example`). No variable is read by the code yet.
 
 ## Project Structure
 
@@ -119,7 +126,8 @@ web/                   app: login, Spending Limits, chat (React)
 
 - **[NEAR Intents](https://docs.near-intents.org)**: cross-chain swaps and transfers (not wired in yet)
 - **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
-- **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)- **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
+- **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)
+- **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
 - **[near-api-js](https://github.com/near/near-api-js)**: NEP-413 and NEP-366 encoding
 - **[zod](https://zod.dev)**: intent schema validation
 - **[vitest](https://vitest.dev)**: tests
