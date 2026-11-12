@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { createAgent } from "../agent/createAgent";
+import { fetchPrices } from "../dashboard/dashboardClient";
 import { LimitsClient, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
 import { PasskeyProtection, useHasSecondFactor } from "./PasskeyProtection";
@@ -110,7 +111,7 @@ function ActivationSteps({ address, client, status, refresh, getAccessToken, onA
     setError(null);
     onWorking?.(true);
     try {
-      const hashes = await client.activate(address, signer, wasm, limit, fund);
+      const hashes = await client.activate(address, signer, wasm, limit, fund, await fetchPrices(getAccessToken));
       setLastTx(hashes.at(-1) ?? null);
       await refresh();
     } catch (e) {

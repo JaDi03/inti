@@ -1,6 +1,7 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
-import type { Signer } from "near-api-js";
-import { ASSET_KEYS, type AssetKey } from "../../../agent/policy/assets";
+import type { Action, Signer } from "near-api-js";
+import { priceToMicro } from "../../../agent/core/money";
+import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import type { LimitsConfig } from "./config";
 import { assetContract, EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
 
@@ -21,6 +22,29 @@ export interface SpendLimit {
   perDay: bigint;
 }
 
+/** USD prices of NEAR and each asset, as the dashboard reads them; null when there is no fresh price. */
+export type LimitPrices = Record<"near" | AssetKey, number | null>;
+
+const NEAR_DECIMALS = 24;
+
+/**
+ * The one limit the user sets, in NEAR, as the same value of each asset Inti may sell, at today's
+ * prices. Each asset needs its own limit on chain; Inti's server also counts all of them against
+ * the one daily limit. Refuses without a fresh price, so no asset is left without its limit.
+ */
+export function sellLimits(limit: SpendLimit, prices: LimitPrices): { token: string; limit: SpendLimit }[] {
+  if (prices.near === null || ASSET_KEYS.some((k) => prices[k] === null)) throw new Error("Prices are not available right now. Try again in a minute.");
+  const nearMicro = priceToMicro(prices.near);
+  const scale = (atomicNear: bigint, key: AssetKey) =>
+    (atomicNear * nearMicro * 10n ** BigInt(ASSETS[key].decimals)) / (priceToMicro(prices[key] ?? 0) * 10n ** BigInt(NEAR_DECIMALS));
+  return ASSET_KEYS.map((key) => {
+    // The contract needs a positive per-order limit, at most the daily one.
+    const perDay = scale(limit.perDay, key) > 0n ? scale(limit.perDay, key) : 1n;
+    const perOrder = scale(limit.perOrder, key);
+    return { token: assetContract(key), limit: { perOrder: perOrder > 0n ? (perOrder < perDay ? perOrder : perDay) : 1n, perDay } };
+  });
+}
+
 export type LimitsStatus =
   | { kind: "unfunded"; available: bigint }
   | { kind: "not-installed"; available: bigint }
@@ -32,6 +56,8 @@ export type LimitsStatus =
       intiFeesLeft: bigint | null;
       agent: string;
       limit: SpendLimit | null;
+      /** Whether the saved limits also cover selling; accounts set up before selling existed lack them. */
+      sellsAllowed: boolean;
       spentToday: bigint;
       /** Token balance the agent can be funded from. */
       spendable: bigint;
@@ -82,9 +108,11 @@ export class LimitsClient {
     if (state.codeHash === NO_CODE) return { kind: "not-installed", available };
 
     const token = this.config.token.id;
-    const [onChainConfig, limit, spent, balance, intiKey] = await Promise.all([
+    const [onChainConfig, limit, sellLimit, spent, balance, intiKey] = await Promise.all([
       this.view<{ agent: string }>(accountId, "get_config"),
       this.view<{ per_order: string; per_day: string } | null>(accountId, "get_limit", { token }),
+      // Every save writes all the limits together, so one asset tells whether selling is covered.
+      this.view<unknown>(accountId, "get_limit", { token: assetContract(ASSET_KEYS[0]) }),
       this.view<string>(accountId, "get_spent_last_24h", { token }),
       this.view<string>(token, "ft_balance_of", { account_id: accountId }),
       this.intiKey(accountId),
@@ -96,6 +124,7 @@ export class LimitsClient {
       intiFeesLeft: intiKey.feesLeft,
       agent: onChainConfig.agent,
       limit: limit ? { perOrder: BigInt(limit.per_order), perDay: BigInt(limit.per_day) } : null,
+      sellsAllowed: sellLimit != null,
       spentToday: BigInt(spent),
       spendable: BigInt(balance),
       setAside: state.balance.usedOnStorage,
@@ -163,7 +192,7 @@ export class LimitsClient {
    * 2. on the token: register the user and wrap `fundAmount` NEAR so orders can be funded.
    * Returns the transaction hashes.
    */
-  async activate(accountId: string, signer: Signer, wasm: Uint8Array, limit: SpendLimit, fundAmount: bigint): Promise<string[]> {
+  async activate(accountId: string, signer: Signer, wasm: Uint8Array, limit: SpendLimit, fundAmount: bigint, prices: LimitPrices): Promise<string[]> {
     const account = this.account(accountId, signer);
     const { token, agentAccount } = this.config;
     if (agentAccount === null) throw new Error("Create your agent first.");
@@ -172,7 +201,7 @@ export class LimitsClient {
       actions: [
         actions.deployContract(wasm),
         actions.functionCall("new", { intents: this.config.intentsAccount, agent: agentAccount }, 30n * TGAS, 0n),
-        actions.functionCall("set_limit", limitArgs(token.id, limit), 30n * TGAS, 1n),
+        ...this.limitActions(limit, prices),
         this.intiKeyAction(accountId),
       ],
     });
@@ -234,12 +263,16 @@ export class LimitsClient {
     return hashes;
   }
 
-  async setLimit(accountId: string, signer: Signer, limit: SpendLimit): Promise<string> {
-    const res = await this.account(accountId, signer).signAndSendTransaction({
-      receiverId: accountId,
-      actions: [actions.functionCall("set_limit", limitArgs(this.config.token.id, limit), 30n * TGAS, 1n)],
-    });
+  /** Saves the one limit: for buying with NEAR and, in the same transaction, for selling each asset. */
+  async setLimit(accountId: string, signer: Signer, limit: SpendLimit, prices: LimitPrices): Promise<string> {
+    const res = await this.account(accountId, signer).signAndSendTransaction({ receiverId: accountId, actions: this.limitActions(limit, prices) });
     return res.transaction.hash;
+  }
+
+  private limitActions(limit: SpendLimit, prices: LimitPrices): Action[] {
+    // Six calls of 30 TGas stay well under the 300 TGas a transaction may use; unused gas is refunded.
+    const call = (token: string, l: SpendLimit) => actions.functionCall("set_limit", limitArgs(token, l), 30n * TGAS, 1n);
+    return [call(this.config.token.id, limit), ...sellLimits(limit, prices).map((s) => call(s.token, s.limit))];
   }
 
   async disconnectInti(accountId: string, signer: Signer): Promise<string> {

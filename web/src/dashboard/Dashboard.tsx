@@ -21,12 +21,11 @@ type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
 /**
  * One color per asset that matches its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
- * blue for both currencies), in the same light shade with dark text so it reads in both themes.
+ * blue for the euro), in the same light shade with dark text so it reads in both themes.
  */
 const TILE: Record<AssetKey, string> = {
   gold: "bg-yellow-300",
   euro: "bg-sky-300",
-  pound: "bg-blue-300",
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
   solana: "bg-purple-300",

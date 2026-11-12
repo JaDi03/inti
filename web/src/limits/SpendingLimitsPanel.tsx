@@ -1,5 +1,7 @@
+import { usePrivy } from "@privy-io/react-auth";
 import { Copy, ExternalLink, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchPrices } from "../dashboard/dashboardClient";
 import { fromAtomic, toAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -68,6 +70,7 @@ export function SpendingLimitsPanel({ address, onClose }: Props) {
 
 function LimitsBody({ address, config, client }: { address: string; config: LimitsConfig; client: LimitsClient }) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
+  const { getAccessToken } = usePrivy();
   const [status, setStatus] = useState<LimitsStatus | null>(null);
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -127,7 +130,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             withFunding
             submitLabel="Activate Inti"
             busy={busy}
-            onSubmit={(limit, fund) => void run("Activating...", () => client.activate(address, signer, wasm, limit, fund))}
+            onSubmit={(limit, fund) => void run("Activating...", async () => client.activate(address, signer, wasm, limit, fund, await fetchPrices(getAccessToken)))}
           />
           <p className="mt-3 text-xs text-muted-foreground">
             About {amount(LimitsClient.storageCost(wasm.length))} is set aside in your account while Inti is on. It comes back when you turn Inti off. You
@@ -171,6 +174,20 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
           </dd>
         </dl>
 
+        {limit && !status.sellsAllowed && !editing && (
+          <div className="mt-4 rounded-2xl bg-muted px-3 py-2 text-sm">
+            <p>Inti can now sell for you too, within this same limit. One signature updates your limits; what it sells always comes back to your wallet.</p>
+            <Button
+              className="mt-2 rounded-full"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void run("Updating limits...", async () => client.setLimit(address, signer, limit, await fetchPrices(getAccessToken)))}
+            >
+              Update limits
+            </Button>
+          </div>
+        )}
+
         {editing ? (
           <LimitForm
             decimals={decimals}
@@ -178,7 +195,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             initial={limit ?? undefined}
             submitLabel="Save limits"
             busy={busy}
-            onSubmit={(next) => void run("Saving...", () => client.setLimit(address, signer, next))}
+            onSubmit={(next) => void run("Saving...", async () => client.setLimit(address, signer, next, await fetchPrices(getAccessToken)))}
             onCancel={() => setEditing(false)}
           />
         ) : adding ? (

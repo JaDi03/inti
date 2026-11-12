@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+﻿import { readFileSync } from "node:fs";
 import { Account, actions, buildDelegateAction, createTransaction, KeyPair } from "near-api-js";
 import type { Action, KeyPairEd25519 } from "near-api-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,11 @@ function userWallet(answer = true, hasPasskey = true) {
 
 type Wallet = ReturnType<typeof userWallet>;
 
+/** Prices of 2026-11-11, from the Agent API token list. */
+const PRICES = { near: 3.55, gold: 4016.03, euro: 1.11, bitcoin: 73948, ethereum: 2056.35, solana: 83.43 };
+const GOLD_SELL_LINE = (perOrder: string, perDay: string) =>
+  `The same limit for selling Gold: at most ${perOrder} XAUT per order and ${perDay} XAUT per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
+
 function sign(wallet: Wallet, receiverId: string, txActions: Action[]) {
   return wallet.signer.signTransaction(createTransaction(wallet.accountId, wallet.publicKey, receiverId, 1n, txActions, new Uint8Array(32)));
 }
@@ -72,14 +77,19 @@ describe("signing with the user's account key", () => {
   it("activation shows both transactions in plain words and signs them after the user confirms", async () => {
     const wallet = userWallet();
     const client = clientSigningThrough(wallet);
-    await client.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 10n ** 24n, perDay: 3n * 10n ** 24n }, 10n ** 23n);
+    await client.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 10n ** 24n, perDay: 3n * 10n ** 24n }, 10n ** 23n, PRICES);
 
     expect(wallet.signed).toHaveLength(2);
     expect(wallet.shown).toHaveLength(2);
-    expect(wallet.shown[0]).toEqual([
+    // One NEAR (3.55 dollars) is 0.000883 XAUT at 4016.03 dollars, rounded down.
+    expect(wallet.shown[0]?.slice(0, 4)).toEqual([
       `Install the Spending Limits contract on your account (expected build ${SPENDING_LIMITS_WASM_SHA256.slice(0, 12)}).`,
       "Set up Spending Limits so orders can only go to your agent (agent.testnet).",
       "Set your limit: at most 1 NEAR per order and 3 NEAR per day.",
+      GOLD_SELL_LINE("0.000883", "0.002651"),
+    ]);
+    expect(wallet.shown[0]).toHaveLength(10);
+    expect(wallet.shown[0]?.slice(-2)).toEqual([
       "Give Inti a key that can only call fund_agent: it can send to your agent only within the spending limits you set.",
       "That key can also use up to 0.1 NEAR of your balance to pay network fees. This is not a spending limit.",
     ]);
@@ -92,13 +102,14 @@ describe("signing with the user's account key", () => {
   it("changing the limit, disconnecting and reconnecting Inti are signed after confirming", async () => {
     const wallet = userWallet();
     const client = clientSigningThrough(wallet);
-    await client.setLimit(wallet.accountId, wallet.signer, { perOrder: 5n * 10n ** 23n, perDay: 10n ** 24n });
+    await client.setLimit(wallet.accountId, wallet.signer, { perOrder: 5n * 10n ** 23n, perDay: 10n ** 24n }, PRICES);
     await client.disconnectInti(wallet.accountId, wallet.signer);
     await client.reconnectInti(wallet.accountId, wallet.signer);
 
     expect(wallet.signed).toHaveLength(3);
-    expect(wallet.shown).toEqual([
-      ["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day."],
+    expect(wallet.shown[0]?.slice(0, 2)).toEqual(["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day.", GOLD_SELL_LINE("0.000441", "0.000883")]);
+    expect(wallet.shown[0]).toHaveLength(6);
+    expect(wallet.shown.slice(1)).toEqual([
       ["Turn off Inti's access to your account."],
       [
         "Give Inti a key that can only call fund_agent: it can send to your agent only within the spending limits you set.",
@@ -107,10 +118,18 @@ describe("signing with the user's account key", () => {
     ]);
   });
 
+  it("saves no limit at all without a fresh price for every asset", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, { ...PRICES, solana: null })).rejects.toThrow("Prices are not available");
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
   it("nothing is signed when the user cancels", async () => {
     const wallet = userWallet(false);
     const client = clientSigningThrough(wallet);
-    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow(SigningCancelledError);
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, PRICES)).rejects.toThrow(SigningCancelledError);
     expect(wallet.shown).toHaveLength(1);
     expect(wallet.signed).toHaveLength(0);
   });
@@ -118,7 +137,7 @@ describe("signing with the user's account key", () => {
   it("signs nothing and shows no dialog while the account has no second factor", async () => {
     const wallet = userWallet(true, false);
     const client = clientSigningThrough(wallet);
-    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n })).rejects.toThrow("protect your account");
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, PRICES)).rejects.toThrow("protect your account");
     expect(wallet.shown).toHaveLength(0);
     expect(wallet.signed).toHaveLength(0);
   });
@@ -136,6 +155,9 @@ describe("signing with the user's account key", () => {
     ["setup with another agent", (w) => [w.accountId, [actions.functionCall("new", { intents: config.intentsAccount, agent: "stranger.testnet" }, 1n, 0n)]]],
     ["a limit with an extra argument", (w) => [w.accountId, [actions.functionCall("set_limit", { token: "wrap.testnet", per_order: "1", per_day: "2", agent: "x" }, 1n, 1n)]]],
     ["a limit on another token", (w) => [w.accountId, [actions.functionCall("set_limit", { token: "usdc.testnet", per_order: "1", per_day: "2" }, 1n, 1n)]]],
+    ["a selling limit with no yoctoNEAR attached", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1", per_day: "2" }, 1n, 0n)]]],
+    ["a selling limit with an extra argument", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1", per_day: "2", to: "x" }, 1n, 1n)]]],
+    ["a selling limit that is not a whole number", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1.5", per_day: "2" }, 1n, 1n)]]],
     ["a method Inti does not use", (w) => [w.accountId, [actions.functionCall("set_agent", { agent: "stranger.testnet" }, 1n, 1n)]]],
     ["a token transfer out", () => [config.token.id, [actions.functionCall("ft_transfer", { receiver_id: "stranger.testnet", amount: "1" }, 1n, 1n)]]],
     ["registering another account on the token", () => [config.token.id, [actions.functionCall("storage_deposit", { account_id: "stranger.testnet", registration_only: true }, 1n, 1n)]]],
@@ -442,7 +464,7 @@ describe("creating the user's own agent", () => {
   it("installs Spending Limits only for the user's own agent", async () => {
     const wallet = userWallet();
     const withoutAgent = new LimitsClient({ ...config, agentAccount: null });
-    await expect(withoutAgent.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 1n, perDay: 2n }, 1n)).rejects.toThrow("Create your agent first");
+    await expect(withoutAgent.activate(wallet.accountId, wallet.signer, expectedWasm, { perOrder: 1n, perDay: 2n }, 1n, PRICES)).rejects.toThrow("Create your agent first");
     expect(wallet.signed).toHaveLength(0);
   });
 });
@@ -478,9 +500,9 @@ describe("turning Inti off", () => {
     const wallet = userWallet();
     const client = clientSigningThrough(wallet);
     await wallet.signer.approveAll(client.releasePlan(wallet.accountId, WRAPPED, true));
-    await client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n });
+    await client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, PRICES);
     expect(wallet.shown).toHaveLength(2);
-    expect(wallet.shown[1]).toEqual(["Set your limit: at most 0.000000000000000000000001 NEAR per order and 0.000000000000000000000002 NEAR per day."]);
+    expect(wallet.shown[1]?.[0]).toBe("Set your limit: at most 0.000000000000000000000001 NEAR per order and 0.000000000000000000000002 NEAR per day.");
   });
 
   it("signs nothing when the user cancels the confirmation", async () => {

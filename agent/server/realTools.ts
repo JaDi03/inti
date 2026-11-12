@@ -17,11 +17,16 @@ const usd = z
   .regex(/^\d{1,4}(\.\d{1,2})?$/)
   .describe('Amount in US dollars, e.g. "5" or "2.50"');
 const asset = z.enum(ASSET_KEYS).describe("Which asset to buy, by its key from get_portfolio");
+const sold = z.enum(ASSET_KEYS).describe("Which asset of the owner's wallet to sell, by its key from get_portfolio");
+const receive = z.enum(["near", ...ASSET_KEYS]).describe('What the owner receives: "near", or another asset by its key from get_portfolio');
+const reason = z.string().min(1).max(300).describe("One sentence: why this order serves the request");
 
 const inputs = {
   get_portfolio: z.strictObject({}),
   get_quote: z.strictObject({ asset, usd }),
-  buy_now: z.strictObject({ asset, usd, reason: z.string().min(1).max(300).describe("One sentence: why this purchase serves the request") }),
+  get_sell_quote: z.strictObject({ asset: sold, receive, usd }),
+  buy_now: z.strictObject({ asset, usd, reason }),
+  sell_now: z.strictObject({ asset: sold, receive, usd, reason }),
   buy_at_price: z.strictObject({
     asset,
     usd,
@@ -37,10 +42,14 @@ type ToolName = keyof typeof inputs;
 
 const descriptions: Record<ToolName, string> = {
   get_portfolio:
-    "The owner's wallet, the assets you can buy with their prices and whether each is enabled, the owner's NEAR set aside for orders, and what the owner's limits still allow today.",
+    "The owner's wallet: each asset with its price, whether it is enabled, how much the owner holds and its value; the owner's NEAR set aside for orders; and what the owner's one daily limit still allows today across buying and selling.",
   get_quote:
     "What buying an asset now for an amount in US dollars would cost, without buying: the NEAR it takes, what the owner would receive and its value, and the cost (what the route keeps of the value at current prices). Use it for any question about price, cost or fees of buying now.",
+  get_sell_quote:
+    "What selling an amount in US dollars of an asset the owner holds would give now, without selling: what the owner would receive (NEAR or another asset) and the cost. Use it for any question about selling or swapping one asset for another.",
   buy_now: "Buy an asset now for an amount in US dollars, paid with the owner's NEAR. The result goes to the owner's wallet. The code checks the owner's limits first.",
+  sell_now:
+    'Sell an amount in US dollars of an asset the owner holds, now. receive "near" sells it for NEAR, which arrives in the wallet as plain NEAR; to buy with it later the owner adds it as NEAR for orders in Spending limits. Another asset key swaps one asset for the other. The result goes to the owner\'s wallet. The code checks the owner\'s limits and holdings first.',
   buy_at_price: "Place an order that buys the asset only if its price falls to price_usd within the given days. The money waits with the agent until it fills or expires.",
   ask_user: "Ask the owner a question when the request is unclear. Ends the cycle.",
 };
@@ -54,7 +63,10 @@ export const realToolSpecs = (Object.keys(inputs) as ToolName[]).map((name) => {
 /** Plain-language reasons the model can pass on to the owner. */
 const REASONS: Record<string, string> = {
   asset_not_enabled: "this asset is not enabled in the owner's wallet yet; the owner can tap Enable on its card in the portfolio",
-  token_not_allowed: "the owner's limits do not allow orders yet",
+  token_not_allowed: "the owner's limits do not allow orders in this asset yet; the owner can save their limits again in Spending limits to include it",
+  not_enough: "the owner does not hold that much of this asset",
+  limit_unchecked: "the owner's daily limit could not be checked right now, so nothing was done; try again in a minute",
+  same_asset: "the asset sold and the asset received are the same",
   over_order_limit: "the amount is above the owner's limit per order",
   over_daily_limit: "the amount is above what the owner's daily limit still allows",
   funding_failed: "the owner's account could not send the money for this order",
@@ -66,8 +78,8 @@ const REASONS: Record<string, string> = {
   no_price: "there is no fresh price for this asset right now",
   too_small: "the amount is too small for an order",
   order_refused: "the order was refused by the trading service",
-  no_route: "there was no way to buy this asset right now; the money went back to the wallet",
-  swap_failed: "the purchase failed; the money went back to the wallet",
+  no_route: "there was no way to trade this asset right now; what was sent went back to the wallet",
+  swap_failed: "the trade failed; what was sent went back to the wallet",
   placement_failed: "the order could not be placed; the money went back to the wallet",
 };
 
@@ -124,6 +136,27 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
     return { byId, nearMicro, wnear: usdToWnear(amountUsd, nearMicro) };
   };
 
+  /**
+   * What a sale of `amountUsd` of an asset sends, in its atomic units. A request for all of it,
+   * rounded to cents, may land a little above what the wallet holds: up to 1% above, it sells
+   * what is there.
+   */
+  const toSell = async (key: AssetKey, amountUsd: string, receiveKey: "near" | AssetKey) => {
+    if (receiveKey === key) throw new ToolInputError(REASONS.same_asset ?? "same asset");
+    if (usdStringToMicro(amountUsd) < usdStringToMicro(MIN_ORDER_USD) || usdStringToMicro(amountUsd) > usdStringToMicro(MAX_ORDER_USD)) {
+      throw new ToolInputError(`amount must be between ${MIN_ORDER_USD} and ${MAX_ORDER_USD} USD`);
+    }
+    const { byId } = await pricesOf(deps.tokens);
+    const a = ASSETS[key];
+    const token = byId.get(a.assetId);
+    if (!token?.price) return null;
+    const wanted = (usdStringToMicro(amountUsd) * 10n ** BigInt(token.decimals)) / priceToMicro(token.price);
+    const held = await deps.chain.tokenBalance(tokenContract(a.assetId) ?? "", deps.owner);
+    const amount = wanted > held && wanted * 99n <= held * 100n ? held : wanted;
+    const to = receiveKey === "near" ? FUNDING_ASSET : ASSETS[receiveKey].assetId;
+    return { from: a.assetId, to, amount, token, toToken: byId.get(to) };
+  };
+
   return {
     specs: realToolSpecs,
     async run(name, rawInput, events: AgentEvent[]) {
@@ -136,7 +169,6 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
           const { byId, near } = await pricesOf(deps.tokens);
           const wnear = await deps.chain.tokenBalance(FUNDING_TOKEN, deps.owner);
           const limit = await deps.chain.limit(deps.owner, FUNDING_TOKEN);
-          const spent = await deps.chain.spentLast24h(deps.owner, FUNDING_TOKEN);
           const nearMicro = priceToMicro(near.price ?? 0);
           const toUsd = (atomic: bigint) => microToUsd((atomic * nearMicro) / 10n ** 24n);
           const assets = await Promise.all(
@@ -145,14 +177,19 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
               const t = byId.get(a.assetId);
               const contract = tokenContract(a.assetId) ?? "";
               const [enabled, held] = await Promise.all([deps.chain.registered(contract, deps.owner), deps.chain.tokenBalance(contract, deps.owner)]);
-              return { key, name: a.name, symbol: a.symbol, kind: a.kind, price_usd: t?.price ?? null, enabled, in_wallet: t ? fromAtomic(held.toString(), t.decimals) : "0" };
+              const value = t?.price ? microToUsd((held * priceToMicro(t.price)) / 10n ** BigInt(t.decimals)) : null;
+              return { key, name: a.name, symbol: a.symbol, kind: a.kind, price_usd: t?.price ?? null, enabled, in_wallet: t ? fromAtomic(held.toString(), t.decimals) : "0", in_wallet_usd: value };
             }),
           );
+          // One daily limit across buying and selling; null when it cannot be read right now.
+          const room = await deps.trading.roomToday(deps.owner);
           return JSON.stringify({
             paid_with: "NEAR",
             near_for_orders: fromAtomic(wnear.toString(), 24),
             money_for_orders_usd: toUsd(wnear),
-            limits: limit ? { per_order_usd: toUsd(limit.perOrder), left_today_usd: toUsd(limit.perDay > spent ? limit.perDay - spent : 0n) } : null,
+            limits: limit
+              ? { per_order_usd: toUsd(limit.perOrder), per_day_usd: toUsd(limit.perDay), left_today_usd: room === null ? null : microToUsd(room) }
+              : null,
             assets,
           });
         }
@@ -199,6 +236,42 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
           }
           if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The order is still being placed." });
           events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: result.code, reason: REASONS[result.code] ?? result.code });
+          return JSON.stringify({ status: result.status, reason: REASONS[result.code] ?? result.code });
+        }
+        case "get_sell_quote": {
+          const input = parsed.data as z.infer<typeof inputs.get_sell_quote>;
+          const sale = await toSell(input.asset as AssetKey, input.usd, input.receive as "near" | AssetKey);
+          if (!sale?.toToken?.price) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
+          const result = await deps.trading.quoteExchange(deps.userId, sale.from, sale.to, sale.amount);
+          if (result.status !== "quoted") return JSON.stringify({ status: "refused", reason: REASONS[result.code] ?? result.code });
+          const receivedMicro = (result.amountOut * priceToMicro(sale.toToken.price)) / 10n ** BigInt(sale.toToken.decimals);
+          return JSON.stringify({
+            status: "quoted",
+            sell: fromAtomic(sale.amount.toString(), sale.token.decimals),
+            sell_usd: input.usd,
+            receive: fromAtomic(result.amountOut.toString(), sale.toToken.decimals),
+            receive_usd: microToUsd(receivedMicro),
+            receive_at_least: fromAtomic(result.minAmountOut.toString(), sale.toToken.decimals),
+            cost_usd: result.costUsd,
+            cost_percent: result.costPercent,
+            seconds: result.seconds,
+            note: "An estimate for right now; nothing was sold.",
+          });
+        }
+        case "sell_now": {
+          const input = parsed.data as z.infer<typeof inputs.sell_now>;
+          const sale = await toSell(input.asset as AssetKey, input.usd, input.receive as "near" | AssetKey);
+          if (!sale) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
+          const result = await deps.trading.exchange(deps.userId, sale.from, sale.to, sale.amount);
+          const sold = ASSETS[input.asset as AssetKey].symbol;
+          const got = input.receive === "near" ? "NEAR" : ASSETS[input.receive as AssetKey].symbol;
+          if (result.status === "done") {
+            events.push({ type: "swap_executed", from: sold, to: got, amountIn: input.usd, amountOut: "", usd: input.usd, reason: input.reason });
+            const note = input.receive === "near" ? "The NEAR is in the owner's wallet as plain NEAR; to buy with it, the owner adds it as NEAR for orders in Spending limits." : "It is in the owner's wallet now.";
+            return JSON.stringify({ status: "sold", sold, received: got, sold_usd: input.usd, note });
+          }
+          if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The sale is still settling; the result will reach the wallet on its own." });
+          events.push({ type: "swap_denied", from: sold, amountIn: input.usd, code: result.code, reason: REASONS[result.code] ?? result.code });
           return JSON.stringify({ status: result.status, reason: REASONS[result.code] ?? result.code });
         }
         case "ask_user": {
