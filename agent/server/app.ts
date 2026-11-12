@@ -10,7 +10,6 @@ import type { PricedToken, SimulatedPortfolio } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
 import { PRICE_PROTECTION_BPS } from "../policy/agentPolicy.js";
-import { grantLabel } from "../policy/grantLabel.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import type { Dashboard } from "./dashboard.js";
@@ -96,10 +95,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Agent creations waiting for a signature, and the user each one belongs to.
   const pendingAgents = new Map<string, string>();
   const now = deps.now ?? Date.now;
-  // Grants are named after the site this server serves (its first allowed origin), so renewing
-  // on one site never closes the grant another site holds.
-  const siteGrantLabel = grantLabel(new URL(deps.allowedOrigins[0] ?? "http://localhost").host);
-  const grantQuota =new DailyQuota(LIMITS.grantsPerUserPerDay, LIMITS.grantsPerDayTotal);
+  const grantQuota = new DailyQuota(LIMITS.grantsPerUserPerDay, LIMITS.grantsPerDayTotal);
   // Grants waiting for a signature: the user, and the token that only the server ever holds.
   const pendingGrants = new Map<string, { userId: string; record: GrantRecord }>();
   // Closings of earlier grants, each tied to the new grant that must be live before it is sent.
@@ -201,9 +197,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         return reply.code(429).send({ error: "rate_limited" });
       }
       taken = true;
-      const { token, expiresAt, body } = newGrantRequest(agent.agentId, now(), siteGrantLabel, choice.data.days);
+      const { token, expiresAt, body } = newGrantRequest(agent.agentId, now(), choice.data.days);
       // Read before the new grant exists, so only the earlier ones are ever closed.
-      const revokes = await deps.agents.prepareRevokes(agent.agentId, siteGrantLabel);
+      const revokes = await deps.agents.prepareRevokes(agent.agentId);
       const prepared = await deps.agents.prepareGrant(body);
       remember(pendingGrants, prepared.correlationId, { userId, record: { agentId: agent.agentId, token, expiresAt } });
       for (const r of revokes) remember(pendingRevokes, r.correlationId, { userId, grant: prepared.correlationId });

@@ -55,12 +55,11 @@ describe("grants", () => {
 
   it("makes a new token for every request and signs only its hash", () => {
     const now = Date.parse("2026-11-10T12:00:00Z");
-    const a = newGrantRequest("agent_1", now, "Inti trading (getinti.xyz)");
-    const b = newGrantRequest("agent_1", now, "Inti trading (getinti.xyz)");
+    const a = newGrantRequest("agent_1", now);
+    const b = newGrantRequest("agent_1", now);
     expect(a.token).not.toBe(b.token);
     expect(JSON.stringify(a.body)).not.toContain(a.token);
     expect(a.expiresAt).toBe("2027-02-08T12:00:00.000Z");
-    expect(a.body.label).toBe("Inti trading (getinti.xyz)");
   });
 
   it("treats a grant with less than a day left as gone", () => {
