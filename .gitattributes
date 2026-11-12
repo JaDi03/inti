@@ -1,3 +1,4 @@
 # Shell scripts and server files run on Linux, also when sent from a Windows checkout.
 *.sh text eol=lf
 deploy/* text eol=lf
+.env.example text eol=lf
