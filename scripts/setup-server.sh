@@ -55,6 +55,8 @@ if ! id inti >/dev/null 2>&1; then
 fi
 chmod 750 /home/inti
 install -d -m 700 -o inti -g inti /home/inti/data
+# Caddy serves the built web app from here.
+install -d -m 755 /var/www
 
 if [ ! -d /home/inti/app/.git ]; then
   runuser -u inti -- env HOME=/home/inti git clone --quiet "$REPO_URL" /home/inti/app

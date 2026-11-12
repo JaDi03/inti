@@ -32,7 +32,10 @@ as_inti "pnpm install --frozen-lockfile >/dev/null"
 as_inti "pnpm web:build" | grep -E 'built in|error' || true
 [ -f "$APP/web/dist/index.html" ] || { echo "web build failed"; exit 1; }
 
-rm -rf "$WEB.new" && cp -r "$APP/web/dist" "$WEB.new" && chmod -R a+rX "$WEB.new"
+install -d -m 755 "$(dirname "$WEB")"
+rm -rf "$WEB.new"
+cp -r "$APP/web/dist" "$WEB.new"
+chmod -R a+rX "$WEB.new"
 rm -rf "$WEB.old"
 [ -d "$WEB" ] && mv "$WEB" "$WEB.old"
 mv "$WEB.new" "$WEB"
