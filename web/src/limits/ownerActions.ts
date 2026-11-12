@@ -3,7 +3,6 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import type { Action } from "near-api-js";
 import { agentPolicy, PRICE_PROTECTION_BPS } from "../../../agent/policy/agentPolicy";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
-import { grantLabel } from "../../../agent/policy/grantLabel";
 import { policyDifferences } from "../../../agent/policy/verify";
 import { fromAtomic } from "../../../agent/policy/units";
 import type { LimitsConfig } from "./config";
@@ -223,6 +222,7 @@ function exactJson(message: string): Record<string, unknown> {
 }
 
 const GRANT_DOMAIN = "near-intents-agent-api.agent-grant.v6";
+export const GRANT_LABEL = "Inti trading";
 /** Longest grant the app signs; Inti asks for 90 days. */
 const MAX_GRANT_MS = 91 * 86_400_000;
 const GRANT_KEYS = ["agent_id", "credential", "domain", "expires_at_ms", "issued_at_ms", "label", "network", "nonce", "owner", "owner_epoch", "recipient", "tenant_id", "wallet_id"];
@@ -243,7 +243,7 @@ export function describeGrant(grant: GrantMessage, accountId: string, publicKey:
   if (grant.recipient !== config.agentApiHost || m.recipient !== config.agentApiHost) refuse(`the grant is for ${String(m.recipient)}.`);
   const owner = m.owner as Record<string, unknown> | null;
   if (owner?.type !== "near" || owner.account_id !== accountId || owner.public_key !== publicKey) refuse("the grant names another owner.");
-  if (m.label !== grantLabel(config.siteHost)) refuse("the grant is not Inti's for this site.");
+  if (m.label !== GRANT_LABEL) refuse("the grant is not Inti's.");
   if (typeof m.agent_id !== "string" || !/^[0-9a-f]{64}$/.test(m.agent_id)) refuse("the grant names no agent.");
   if (typeof m.credential !== "string" || !/^[0-9a-f]{64}$/.test(m.credential)) refuse("the grant has no valid credential.");
   const expires = m.expires_at_ms;
