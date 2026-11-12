@@ -1,0 +1,43 @@
+# The Inti agent API. deploy/install.sh installs it as /etc/systemd/system/inti-agent.service.
+# It runs as the system user inti, reads its settings from /etc/inti/inti.env and may write
+# only to /var/lib/inti (the users' grants and Inti's key).
+[Unit]
+Description=Inti agent API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=inti
+Group=inti
+WorkingDirectory=/opt/inti
+ExecStart=/usr/local/bin/node --env-file=/etc/inti/inti.env --import tsx agent/server/index.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inti
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# No Linux capabilities: the port is above 1024 and nothing needs root powers.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Files the agent creates are readable only by inti.
+UMask=0077
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
