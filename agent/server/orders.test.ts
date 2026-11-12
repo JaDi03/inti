@@ -4,6 +4,7 @@ import {
   bandFromPolicy,
   buy,
   buyQuantity,
+  exchange,
   FUNDING_ASSET,
   placeLimitBuy,
   priceInBand,
@@ -17,6 +18,8 @@ import {
 } from "./orders.js";
 
 const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
+const BTC = "nep141:btc.omft.near";
+const NAME: Record<string, string> = { [GOLD]: "GOLD", [BTC]: "BTC", [FUNDING_ASSET]: "wNEAR" };
 const ACCOUNT: OrderAccount = { owner: "91".repeat(32), agentId: "agent_1", grantToken: "ngt_x" };
 const NEAR = 10n ** 24n;
 
@@ -36,6 +39,13 @@ function world(
     preview?: { spend: bigint } | { refused: string };
     place?: Settled;
     openOrders?: number;
+    /** What the owner's wallet holds of any token. */
+    held?: bigint;
+    /** Pairs "from>to" with no route, and pairs whose swap fails. */
+    noRoute?: string[];
+    failSwap?: string[];
+    /** What a swap gives; by default the purchase rate of the buy tests. */
+    out?: (amount: bigint) => bigint;
   } = {},
 ) {
   const agentHeld = new Map<string, bigint>();
@@ -45,32 +55,34 @@ function world(
     registered: (contract) => Promise.resolve((opts.registered ?? [tokenContract(GOLD)]).includes(contract)),
     limit: () => Promise.resolve({ perOrder: opts.perOrder ?? NEAR / 2n, perDay: opts.perDay ?? NEAR }),
     spentLast24h: () => Promise.resolve(opts.spent ?? 0n),
-    tokenBalance: () => Promise.resolve(0n),
-    fundAgent: (_owner, _token, amount) => {
+    tokenBalance: () => Promise.resolve(opts.held ?? 0n),
+    fundAgent: (_owner, token, amount) => {
       if (opts.fundFails) return Promise.reject(new Error("over the daily limit"));
-      log.push(`fund ${amount}`);
-      if (opts.credit !== false) agentHeld.set(FUNDING_ASSET, (agentHeld.get(FUNDING_ASSET) ?? 0n) + amount);
+      log.push(`fund ${token === "wrap.near" ? "" : `${NAME[`nep141:${token}`]} `}${amount}`);
+      const asset = `nep141:${token}`;
+      if (opts.credit !== false) agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) + amount);
       return Promise.resolve();
     },
   };
   const agent: AgentPort = {
     available: () => Promise.resolve(new Map(agentHeld)),
-    quote: () => {
+    quote: (_id, from, to) => {
+      if (opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
       const q = opts.quote === undefined ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
       return Promise.resolve(q && { ...q, costUsd: null, costPercent: null, seconds: null });
     },
     swap: (_a, from, to, amount, minOut) => {
-      log.push(`swap ${amount}`);
+      log.push(opts.out ? `swap ${NAME[from]}>${NAME[to]} ${amount}` : `swap ${amount}`);
       minOuts.push(minOut);
-      const outcome = opts.swap ?? "success";
+      const outcome = opts.failSwap?.includes(`${NAME[from]}>${NAME[to]}`) ? "failed" : (opts.swap ?? "success");
       if (outcome === "success") {
         agentHeld.set(from, (agentHeld.get(from) ?? 0n) - amount);
-        agentHeld.set(to, (agentHeld.get(to) ?? 0n) + amount / (opts.rate ?? 10n ** 21n));
+        agentHeld.set(to, (agentHeld.get(to) ?? 0n) + (opts.out ? opts.out(amount) : amount / (opts.rate ?? 10n ** 21n)));
       }
       return Promise.resolve(outcome);
     },
     withdraw: (_a, asset, amount) => {
-      log.push(`withdraw ${asset === FUNDING_ASSET ? "wNEAR" : "GOLD"} ${amount}`);
+      log.push(`withdraw ${NAME[asset] ?? asset} ${amount}`);
       agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) - amount);
       return Promise.resolve("success");
     },
@@ -149,6 +161,67 @@ describe("buy", () => {
     const slowSwap = world({ swap: "pending" });
     expect(await buy(slowSwap.chain, slowSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
     expect(slowSwap.log.some((l) => l.startsWith("withdraw"))).toBe(false);
+  });
+});
+
+describe("exchange", () => {
+  // Selling 1000 atomic gold; each swap doubles the amount, enough to tell the steps apart.
+  const SALE = { from: GOLD, to: FUNDING_ASSET, amount: 1000n };
+  const double = (amount: bigint) => amount * 2n;
+
+  it("funds the agent with exactly the gold sold, swaps it for NEAR and sends the NEAR home", async () => {
+    const w = world({ held: 1000n, out: double });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "done", spent: 1000n, received: 2000n, asset: FUNDING_ASSET });
+    expect(w.log).toEqual(["fund GOLD 1000", "swap GOLD>wNEAR 1000", "withdraw wNEAR 2000"]);
+    expect([...w.agentHeld.values()].every((v) => v === 0n)).toBe(true);
+  });
+
+  it("swaps one asset for another directly, or through NEAR on the agent when there is no direct route", async () => {
+    const direct = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""] });
+    expect(await exchange(direct.chain, direct.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toMatchObject({ status: "done", received: 2000n, asset: BTC });
+    expect(direct.log).toEqual(["fund GOLD 1000", "swap GOLD>BTC 1000", "withdraw BTC 2000"]);
+
+    const through = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC"] });
+    expect(await exchange(through.chain, through.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toMatchObject({ status: "done", received: 4000n, asset: BTC });
+    expect(through.log).toEqual(["fund GOLD 1000", "swap GOLD>wNEAR 1000", "swap wNEAR>BTC 2000", "withdraw BTC 4000"]);
+  });
+
+  it("refuses before moving anything: more than the wallet holds, a result the wallet cannot hold, NEAR itself or the same asset", async () => {
+    const w = world({ held: 999n, out: double });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "refused", code: "not_enough" });
+    const unregistered = world({ held: 1000n, registered: [] });
+    expect(await exchange(unregistered.chain, unregistered.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toEqual({ status: "refused", code: "asset_not_enabled" });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, { ...SALE, from: FUNDING_ASSET, to: GOLD }, noWait)).toEqual({ status: "refused", code: "asset_not_enabled" });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, { ...SALE, to: GOLD }, noWait)).toEqual({ status: "refused", code: "asset_not_enabled" });
+    expect([...w.log, ...unregistered.log]).toEqual([]);
+  });
+
+  it("applies the limits the user signed for the asset sold", async () => {
+    const big = world({ held: 1000n, perOrder: 999n });
+    expect(await exchange(big.chain, big.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "refused", code: "over_order_limit" });
+    const late = world({ held: 1000n, perOrder: 1000n, perDay: 1500n, spent: 501n });
+    expect(await exchange(late.chain, late.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "refused", code: "over_daily_limit" });
+    expect([...big.log, ...late.log]).toEqual([]);
+  });
+
+  it("sends back the asset sold when there is no route or the swap fails, and the NEAR when only the second step fails", async () => {
+    const noRoute = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"] });
+    expect(await exchange(noRoute.chain, noRoute.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "returned", code: "no_route", asset: GOLD });
+    expect(noRoute.log.at(-1)).toBe("withdraw GOLD 1000");
+
+    const failed = world({ held: 1000n, out: double, failSwap: ["GOLD>wNEAR"] });
+    expect(await exchange(failed.chain, failed.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "returned", code: "swap_failed", asset: GOLD });
+    expect(failed.log.at(-1)).toBe("withdraw GOLD 1000");
+
+    const second = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC"], failSwap: ["wNEAR>BTC"] });
+    expect(await exchange(second.chain, second.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toEqual({ status: "returned", code: "swap_failed", asset: FUNDING_ASSET });
+    expect(second.log.at(-1)).toBe("withdraw wNEAR 2000");
+  });
+
+  it("never accepts less than the price protection the user signed, on every step", async () => {
+    const w = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC"], quote: { amountOut: 10_000n, minAmountOut: 9_800n }, bound: 100 });
+    await exchange(w.chain, w.agent, ACCOUNT, { ...SALE, to: BTC }, noWait);
+    expect(w.minOuts).toEqual([9_900n, 9_900n]);
   });
 });
 

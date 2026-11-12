@@ -14,7 +14,7 @@ const TOKENS: PricedToken[] = [
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.55 },
 ];
 
-function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null } = {}) {
+function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean } = {}) {
   const calls: string[] = [];
   let release: () => void = () => undefined;
   let credited = 0n;
@@ -23,8 +23,8 @@ function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: 
   const chain: ChainPort = {
     registered: () => Promise.resolve(true),
     limit: () => Promise.resolve({ perOrder: 10n ** 24n, perDay: 10n ** 25n }),
-    spentLast24h: () => Promise.resolve(0n),
-    tokenBalance: () => Promise.resolve(0n),
+    spentLast24h: (_owner, token) => (opts.spentFails ? Promise.reject(new Error("rpc down")) : Promise.resolve(opts.spent?.[token] ?? 0n)),
+    tokenBalance: () => Promise.resolve(10n ** 12n),
     fundAgent: () => {
       calls.push("fund");
       // Holds the order open until the test lets it go; then the agent holds the funds.
@@ -82,6 +82,33 @@ describe("trading", () => {
     expect(await s.t.buyAtPrice("did:privy:alice", GOLD, 3n * 10n ** 23n, "2000", 7)).toEqual({ status: "refused", code: "price_out_of_band" });
     expect(await s.t.buyAtPrice("did:privy:alice", "nep141:unknown.near", 3n * 10n ** 23n, "1", 7)).toEqual({ status: "refused", code: "unknown_asset" });
     expect(s.calls).toEqual([]);
+  });
+
+  it("counts buying and selling against one daily limit in dollars, before anything moves", async () => {
+    // The daily limit is 10 NEAR (35.50 dollars); 0.008 XAUT (32.12 dollars) of gold was sold today.
+    const s = setup({ spent: { [GOLD.slice("nep141:".length)]: 8000n } });
+    expect(await s.t.roomToday(ACTIVE.ownerAccount)).toBe(3_371_760n);
+    expect(await s.t.buyNow("did:privy:alice", GOLD, 10n ** 24n)).toEqual({ status: "refused", code: "over_daily_limit" });
+    expect(await s.t.buyAtPrice("did:privy:alice", GOLD, 10n ** 24n, "1131", 7)).toEqual({ status: "refused", code: "over_daily_limit" });
+    // 0.001 XAUT is 4.01 dollars: more than the 3.37 left.
+    expect(await s.t.exchange("did:privy:alice", GOLD, FUNDING_ASSET, 1000n)).toEqual({ status: "refused", code: "over_daily_limit" });
+    expect(s.calls).toEqual([]);
+    // 0.9 NEAR (3.19 dollars) still fits.
+    const fits = s.t.buyNow("did:privy:alice", GOLD, 9n * 10n ** 23n);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.calls).toEqual(["fund"]);
+    s.release();
+    await fits;
+  });
+
+  it("starts no order when the daily limit cannot be checked", async () => {
+    const down = setup({ spentFails: true });
+    expect(await down.t.buyNow("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
+    // Bitcoin was sold today but has no fresh price, so today's total is unknown.
+    const unpriced = setup({ spent: { "btc.omft.near": 1n } });
+    expect(await unpriced.t.exchange("did:privy:alice", GOLD, FUNDING_ASSET, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
+    expect(await unpriced.t.roomToday(ACTIVE.ownerAccount)).toBeNull();
+    expect([...down.calls, ...unpriced.calls]).toEqual([]);
   });
 
   it("uses the price bound the user signed, and refuses limit orders when the policy has none", async () => {

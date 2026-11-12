@@ -24,7 +24,21 @@ export type BuyResult =
   | { status: "returned"; code: "no_route" | "swap_failed" }
   | { status: "pending" };
 
-export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed";
+export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed" | "not_enough";
+
+/** A sale: send `amount` (atomic) of `from` from the user's wallet and receive `to`, NEAR or another asset. */
+export interface ExchangeOrder {
+  from: string;
+  to: string;
+  amount: bigint;
+}
+
+export type ExchangeResult =
+  | { status: "done"; spent: bigint; received: bigint; asset: string }
+  | { status: "refused"; code: OrderRefusal }
+  /** `asset` is what went back to the wallet: the asset sold, or NEAR when only the second step failed. */
+  | { status: "returned"; code: "no_route" | "swap_failed"; asset: string }
+  | { status: "pending" };
 
 /** Reads and the one write Inti may do on the user's account, through its function-call key. */
 export interface ChainPort {
@@ -155,7 +169,7 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   if (!contract || !(await chain.registered(contract, account.owner))) return { status: "refused", code: "asset_not_enabled" };
   // Read before any money moves: the user's own price protection decides the least they accept.
   const bound = await agent.signedPriceBound(account.agentId);
-  const funded = await fund(chain, agent, account, order.amount, wait);
+  const funded = await fund(chain, agent, account, FUNDING_TOKEN, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
   if (funded !== "funded") return { status: "refused", code: funded };
 
@@ -178,23 +192,88 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.buyAsset } : { status: "pending" };
 }
 
-/** Checks the user's limits on `amount`, funds the agent with it and waits until the agent holds it. */
-async function fund(chain: ChainPort, agent: AgentPort, account: OrderAccount, amount: bigint, wait: (ms: number) => Promise<void>): Promise<OrderRefusal | "pending" | "funded"> {
-  const limit = await chain.limit(account.owner, FUNDING_TOKEN);
+/**
+ * Checks the user's limits for `token` on `amount`, funds the agent with it and waits until the
+ * agent holds it.
+ */
+async function fund(
+  chain: ChainPort,
+  agent: AgentPort,
+  account: OrderAccount,
+  token: string,
+  amount: bigint,
+  wait: (ms: number) => Promise<void>,
+): Promise<OrderRefusal | "pending" | "funded"> {
+  const asset = `nep141:${token}`;
+  const limit = await chain.limit(account.owner, token);
   if (!limit) return "token_not_allowed";
   if (amount > limit.perOrder) return "over_order_limit";
-  if ((await chain.spentLast24h(account.owner, FUNDING_TOKEN)) + amount > limit.perDay) return "over_daily_limit";
-  const before = (await agent.available(account.agentId)).get(FUNDING_ASSET) ?? 0n;
+  if ((await chain.spentLast24h(account.owner, token)) + amount > limit.perDay) return "over_daily_limit";
+  const before = (await agent.available(account.agentId)).get(asset) ?? 0n;
   try {
-    await chain.fundAgent(account.owner, FUNDING_TOKEN, amount);
+    await chain.fundAgent(account.owner, token, amount);
   } catch {
     return "funding_failed";
   }
   for (let waited = 0; waited <= CREDIT_WAIT_MS; waited += CREDIT_POLL_MS) {
-    if (((await agent.available(account.agentId)).get(FUNDING_ASSET) ?? 0n) - before >= amount) return "funded";
+    if (((await agent.available(account.agentId)).get(asset) ?? 0n) - before >= amount) return "funded";
     await wait(CREDIT_POLL_MS);
   }
   return "pending";
+}
+
+/**
+ * Swaps `amount` of `from` into `to` on the agent, never below the user's signed price protection.
+ * Returns what arrived, measured as the change in the agent's balance of `to`.
+ */
+async function swapOnAgent(agent: AgentPort, account: OrderAccount, from: string, to: string, amount: bigint, bound: number | null): Promise<bigint | "no_route" | "failed" | "pending"> {
+  const quote = await agent.quote(account.agentId, from, to, amount);
+  if (quote === null) return "no_route";
+  const held = (await agent.available(account.agentId)).get(to) ?? 0n;
+  const swapped = await agent.swap(account, from, to, amount, protectedMinOut(quote, bound));
+  if (swapped !== "success") return swapped;
+  const received = ((await agent.available(account.agentId)).get(to) ?? 0n) - held;
+  return received > 0n ? received : "pending";
+}
+
+/**
+ * Sells `amount` of `from` from the user's wallet for `to` (NEAR or another asset): funds the agent
+ * with exactly that amount within the user's limits for `from`, swaps, and sends the result home.
+ * With no direct route it swaps through NEAR on the agent, so nothing passes through the wallet in
+ * between. On a failure what the agent holds goes back to the wallet; a slow step is left to `sweep`.
+ */
+export async function exchange(chain: ChainPort, agent: AgentPort, account: OrderAccount, order: ExchangeOrder, wait = sleep): Promise<ExchangeResult> {
+  const fromToken = tokenContract(order.from);
+  const toToken = tokenContract(order.to);
+  if (!fromToken || !toToken || order.from === order.to || order.from === FUNDING_ASSET) return { status: "refused", code: "asset_not_enabled" };
+  // The result can only reach the wallet if the wallet can hold it; NEAR arrives as plain NEAR.
+  if (order.to !== FUNDING_ASSET && !(await chain.registered(toToken, account.owner))) return { status: "refused", code: "asset_not_enabled" };
+  if ((await chain.tokenBalance(fromToken, account.owner)) < order.amount) return { status: "refused", code: "not_enough" };
+  const bound = await agent.signedPriceBound(account.agentId);
+  const funded = await fund(chain, agent, account, fromToken, order.amount, wait);
+  if (funded === "pending") return { status: "pending" };
+  if (funded !== "funded") return { status: "refused", code: funded };
+
+  const giveBack = async (code: "no_route" | "swap_failed", asset: string, amount: bigint): Promise<ExchangeResult> => {
+    await agent.withdraw(account, asset, amount);
+    return { status: "returned", code, asset };
+  };
+  const failure = (r: "no_route" | "failed") => (r === "no_route" ? "no_route" : "swap_failed");
+
+  let received = await swapOnAgent(agent, account, order.from, order.to, order.amount, bound);
+  if (received === "no_route" && order.to !== FUNDING_ASSET) {
+    // No direct route: through NEAR, both steps on the agent.
+    const near = await swapOnAgent(agent, account, order.from, FUNDING_ASSET, order.amount, bound);
+    if (near === "pending") return { status: "pending" };
+    if (typeof near !== "bigint") return giveBack(failure(near), order.from, order.amount);
+    received = await swapOnAgent(agent, account, FUNDING_ASSET, order.to, near, bound);
+    if (received === "pending") return { status: "pending" };
+    if (typeof received !== "bigint") return giveBack(failure(received), FUNDING_ASSET, near);
+  }
+  if (received === "pending") return { status: "pending" };
+  if (typeof received !== "bigint") return giveBack(failure(received), order.from, order.amount);
+  const sent = await agent.withdraw(account, order.to, received);
+  return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.to } : { status: "pending" };
 }
 
 /**
@@ -207,7 +286,7 @@ export async function placeLimitBuy(chain: ChainPort, agent: AgentPort, account:
   // The preview applies the Agent API's own checks (price bound, minimum) before any money moves.
   const preview = await agent.previewLimit(account.agentId, order);
   if ("refused" in preview) return { status: "refused", code: "order_refused", detail: preview.refused };
-  const funded = await fund(chain, agent, account, preview.spend, wait);
+  const funded = await fund(chain, agent, account, FUNDING_TOKEN, preview.spend, wait);
   if (funded === "pending") return { status: "pending" };
   if (funded !== "funded") return { status: "refused", code: funded };
   const placed = await agent.placeLimit(account, order);
