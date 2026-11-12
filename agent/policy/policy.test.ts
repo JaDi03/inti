@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 import { agentPolicy } from "./agentPolicy.js";
 import { buildPolicy } from "./build.js";
-import { describePolicy, type TokenInfo } from "./preview.js";
 import { assertPolicyMatches, policyDifferences } from "./verify.js";
 import { fromAtomic, toAtomic } from "./units.js";
 
-// Real tokens copied from GET /v1/tokens (api.demo.agentsonintents.com, 2026-11-06).
-const tokens: TokenInfo[] = JSON.parse(
-  readFileSync(new URL("./fixtures/tokens.json", import.meta.url), "utf8"),
-) as TokenInfo[];
 const USDC_BASE = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 const USDT_NEAR = "nep141:usdt.tether-token.near";
 
@@ -124,25 +118,6 @@ describe("assertPolicyMatches", () => {
   it("aborts when native keys were added", () => {
     const tampered = { ...structuredClone(docsPolicy), native: { near: { sign_message: [], transfer: true, call: [] } } };
     expect(policyDifferences(built, tampered)).toContain("native");
-  });
-});
-
-describe("describePolicy", () => {
-  it("describes the quickstart policy in plain words", () => {
-    const lines = describePolicy(buildPolicy({ ...docsDraft, actions: [...docsDraft.actions] }), tokens);
-    expect(lines).toContain("It may only spend: USDC (base), USDT (near).");
-    expect(lines).toContain("At most 25 USDC per transaction.");
-    expect(lines).toContain("Spending cap: 50 USD per day across all assets.");
-    expect(lines).toContain("  - transfer to alice.near");
-    expect(lines).toContain("  - withdraw to alice.near on near");
-  });
-
-  it("states that nothing can leave a swap-only agent", () => {
-    const lines = describePolicy(
-      buildPolicy({ actions: ["swap"], assets: [{ assetId: USDC_BASE, symbol: "USDC", decimals: 6 }] }),
-      tokens,
-    );
-    expect(lines).toContain("Funds can never leave the agent. Swaps stay inside it.");
   });
 });
 

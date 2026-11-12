@@ -9,8 +9,6 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "tsx watch agent/index.ts",
-    "start": "tsx agent/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
