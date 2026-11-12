@@ -35,6 +35,7 @@ Two independent checks stand between the model and the funds:
 Node 24, pnpm 11. You need your own NEAR AI Cloud key, Agent API partner key and Privy app (App ID and verification key, with `http://localhost:5173` in its allowed origins).
 
 ```bash
+git clone https://github.com/JaDi03/inti.git && cd inti
 pnpm install
 node scripts/init-env.mjs --data ../inti-data   # creates .env and Inti's key; fill in the block it lists
 pnpm server                                      # API on :8787
@@ -43,10 +44,10 @@ pnpm web:dev                                     # app on :5173
 
 ## Deploy
 
-Ubuntu 24.04 server with root over ssh, ports 80 and 443 open, and DNS for the app and API hosts.
+Ubuntu 24.04 server with root over ssh, ports 80 and 443 open, and DNS for the app and API hosts. Run these from your clone of the repo; your computer needs only bash, ssh and git.
 
 ```bash
-bash scripts/deploy.sh root@HOST --init               # once: installs, clones, creates .env and Inti's key
+bash scripts/deploy.sh root@HOST --init               # once: installs, clones to /home/inti/app, creates .env and Inti's key
 ssh -t root@HOST sudo -u inti nano /home/inti/app/.env  # fill in the "Fill in" block
 bash scripts/deploy.sh root@HOST                      # deploy, and again for every release
 ```
