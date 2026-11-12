@@ -13,10 +13,10 @@ Inti is a natural-language investment agent built on NEAR Intents.
 ## Table of Contents
 
 - [How It Works](#how-it-works)
-- [Quick Start](#quick-start)
 - [Run Your Own Server](#run-your-own-server)
 - [Project Structure](#project-structure)
 - [Tech Stack](#tech-stack)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## How It Works
@@ -31,6 +31,18 @@ flowchart LR
 ```
 
 Today the engine validates two intent kinds, `swap` and `transfer`. Amounts are decimal strings, never floats.
+
+```ts
+import { parseIntent } from "./agent/index.js";
+
+parseIntent({
+  kind: "swap",
+  from: { symbol: "USDC", chain: "base" },
+  to: { symbol: "NEAR", chain: "near" },
+  amount: "10",
+}); // returns the Intent
+// amount: "-1" throws a zod error
+```
 
 ### Agent policy
 
@@ -63,60 +75,23 @@ pnpm cycle --propose "Put half of my USDC into NEAR"
 
 `web/` is the app. The user signs in with email or Google through [Privy](https://docs.privy.io), which creates an embedded NEAR wallet (an implicit account). `PrivyNearSigner` plugs that wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
 
-## Quick Start
+## Run Your Own Server
+
+The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open.
 
 ```bash
 git clone https://github.com/JaDi03/inti.git
 cd inti
-```
-
-To run it on your computer you need Node 24 and pnpm 11:
-
-```bash
-pnpm install
-pnpm test
-```
-
-Then copy `.env.example` to `.env` and fill in your own values:
-
-| Value | Where it comes from |
-|---|---|
-| `NEAR_INTENTS_AGENT_API_KEY` | your partner key for the [Agent API](https://docs.agentsonintents.com) |
-| `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
-| `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
-| `SERVER_GRANT_KEY` | the command in `.env.example` |
-| `SERVER_INTI_KEY_FILE`, `INTI_KEY_PUBLIC` | `pnpm new-key` creates the key file and prints both lines; copy them into `.env` |
-
-Then start the server and the web app:
-
-```bash
-pnpm server    # agent API on http://localhost:8787
-pnpm web:dev   # app on http://localhost:5173
-```
-
-To check the intent schema yourself:
-
-```ts
-import { parseIntent } from "./agent/index.js";
-
-parseIntent({
-  kind: "swap",
-  from: { symbol: "USDC", chain: "base" },
-  to: { symbol: "NEAR", chain: "near" },
-  amount: "10",
-}); // returns the Intent
-// amount: "-1" throws a zod error
-```
-
-## Run Your Own Server
-
-The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open. On the server, clone the repo as in [Quick Start](#quick-start), then from its folder:
-
-```bash
 cp .env.example .env
 nano .env                       # INTI_SITE and the four keys at the top of the file
 sudo bash deploy/install.sh
 ```
+
+| Key | Where it comes from |
+|---|---|
+| `NEAR_INTENTS_AGENT_API_KEY` | your partner key for the [Agent API](https://docs.agentsonintents.com) |
+| `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
+| `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
 
 The script checks `.env` before it installs anything and says what is missing. It installs Node, pnpm and Caddy, creates Inti's key and the key that encrypts the grants, builds the app, and starts the API behind HTTPS. It ends with `Done. Open https://your-domain.com`. In the Privy dashboard, add that domain to the app's allowed domains.
 
@@ -165,6 +140,10 @@ deploy/                install.sh and the server files it sets up
 - **[zod](https://zod.dev)**: intent schema validation
 - **[vitest](https://vitest.dev)**: tests
 - **[TypeScript](https://www.typescriptlang.org)**: language
+
+## Contributing
+
+To run it on your computer or change the code, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
