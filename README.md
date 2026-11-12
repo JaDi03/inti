@@ -60,7 +60,7 @@ The app and its API on your own server, at `https://your-domain.com`. You need U
 ```bash
 git clone https://github.com/JaDi03/inti.git
 cd inti
-cp .env.example .env
+cp .env.example .env && chmod 600 .env
 nano .env                       # INTI_SITE and the four keys at the top of the file
 sudo bash deploy/install.sh
 ```
@@ -84,10 +84,10 @@ sudo bash deploy/install.sh
 
 | What | Where |
 |---|---|
-| The code, run by the system user `inti` | `/opt/inti` |
+| The code, owned by the system user `inti-build`, which installs packages and builds the app and cannot read any key | `/opt/inti` |
 | Settings, readable only by root and `inti` | `/etc/inti/inti.env` |
 | Inti's key and the users' grants, readable only by `inti` | `/var/lib/inti` |
-| The API, restarted if it stops | systemd: `inti-agent` (`journalctl -u inti-agent -f`) |
+| The API, run by the system user `inti`, which reads the code but cannot change it, and restarted if it stops | systemd: `inti-agent` (`journalctl -u inti-agent -f`) |
 | The app with HTTPS, and `/api` to the API | Caddy: `/etc/caddy/inti.caddy` |
 
 Users authorize Inti's key on their own account. To move to a new server without asking them to do it again, copy `/var/lib/inti/inti-key.json` and `/var/lib/inti/grants.json` to the new server's `/var/lib/inti/`, and `SERVER_GRANT_KEY` into its `.env`, before you run the script. It keeps a key and grants that are already there.
