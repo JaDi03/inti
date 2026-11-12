@@ -48,6 +48,8 @@ function world(
     out?: (amount: bigint) => bigint;
     withdraw?: Settled;
     shield?: Settled;
+    /** Assets (by name) the Agent API cannot send from the confidential balance to the wallet. */
+    undeliverable?: string[];
   } = {},
 ) {
   // The confidential balance trades; the public one only receives funding.
@@ -97,6 +99,7 @@ function world(
     },
     withdraw: (_a, asset, amount, from = "confidential") => {
       log.push(`withdraw ${from === "public" ? "public " : ""}${NAME[asset] ?? asset} ${amount}`);
+      if (from === "confidential" && opts.undeliverable?.includes(NAME[asset] ?? asset)) return Promise.resolve("undeliverable");
       if ((opts.withdraw ?? "success") !== "success") return Promise.resolve(opts.withdraw ?? "pending");
       const balance = from === "public" ? agentPublic : agentHeld;
       balance.set(asset, (balance.get(asset) ?? 0n) - amount);
@@ -168,6 +171,14 @@ describe("buy", () => {
     const failed = world({ swap: "failed" });
     expect(await buy(failed.chain, failed.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "swap_failed" });
     expect(failed.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
+  });
+
+  it("sends NEAR home instead when the bought asset cannot leave the agent, and says nothing was bought", async () => {
+    const w = world({ out: (amount) => amount * 2n, undeliverable: ["GOLD"] });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "not_deliverable" });
+    const bought = ORDER.amount * 2n;
+    expect(w.log.slice(-3)).toEqual([`withdraw GOLD ${bought}`, `swap GOLD>wNEAR ${bought}`, `withdraw wNEAR ${bought * 2n}`]);
+    expect([...w.agentHeld.values()].every((v) => v === 0n)).toBe(true);
   });
 
   it("says the money came back only once it did, when the return itself is refused or slow", async () => {
@@ -289,6 +300,13 @@ describe("sweep", () => {
     w.agentPublic.set(FUNDING_ASSET, 4n);
     expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (public)`, `${FUNDING_ASSET} (public)`], stuck: [] });
     expect(w.log).toEqual(["withdraw public GOLD 2826247", "withdraw public wNEAR 4"]);
+  });
+
+  it("sells an asset that cannot leave the agent for NEAR and sends the NEAR home", async () => {
+    const w = world({ out: (amount) => amount * 3n, undeliverable: ["GOLD"] });
+    w.agentHeld.set(GOLD, 255n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (as NEAR)`], stuck: [] });
+    expect(w.log).toEqual(["withdraw GOLD 255", "swap GOLD>wNEAR 255", "withdraw wNEAR 765"]);
   });
 
   it("reports what it could not send instead of staying silent", async () => {
@@ -424,6 +442,15 @@ describe("agentApiPort executions", () => {
     expect(await refused.port.withdraw(ACCOUNT, GOLD, 5n)).toBe("failed");
     expect(await refused.port.shield(ACCOUNT, GOLD, 5n)).toBe("failed");
     expect(await refused.port.placeLimit(ACCOUNT, { buyAsset: GOLD, quantity: 1n, price: "1", deadline: "2026-11-17T12:00:00Z" })).toEqual({ settled: "failed", orderId: null });
+  });
+
+  it("tells an asset that cannot be withdrawn at all from a passing failure", async () => {
+    const unsupported = answering(200, { correlation_id: "op_1", status: "FAILED", failure_code: "unsupported_token" });
+    expect(await unsupported.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("undeliverable");
+    const busy = answering(200, { correlation_id: "op_1", status: "FAILED", failure_code: "wallet_busy" });
+    expect(await busy.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("failed");
+    const refused = answering(400, { errors: [{ code: "unsupported_token" }] });
+    expect(await refused.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("undeliverable");
   });
 
   it("leaves a server error or a dropped connection to the sweep, since it may still settle", async () => {

@@ -21,7 +21,7 @@ export interface BuyOrder {
 export type BuyResult =
   | { status: "done"; spent: bigint; received: bigint; asset: string }
   | { status: "refused"; code: OrderRefusal }
-  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" }
+  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" | "not_deliverable" }
   | { status: "pending" };
 
 export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed" | "not_enough";
@@ -37,7 +37,7 @@ export type ExchangeResult =
   | { status: "done"; spent: bigint; received: bigint; asset: string }
   | { status: "refused"; code: OrderRefusal }
   /** `asset` is what went back to the wallet: the asset sold, or NEAR when only the second step failed. */
-  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed"; asset: string }
+  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" | "not_deliverable"; asset: string }
   | { status: "pending" };
 
 /** Reads and the one write Inti may do on the user's account, through its function-call key. */
@@ -54,6 +54,12 @@ export interface ChainPort {
 }
 
 export type Settled = "success" | "failed" | "pending";
+
+/**
+ * A withdrawal's outcome. "undeliverable" means the Agent API cannot send this asset from the
+ * agent to the wallet at all (not a passing failure), so it has to reach the owner as NEAR.
+ */
+export type Withdrawn = Settled | "undeliverable";
 
 /**
  * The agent's two balances. Every trade runs on the confidential one, which stays off the public
@@ -73,7 +79,7 @@ export interface AgentPort {
   quote(agentId: string, from: string, to: string, amount: bigint): Promise<SwapQuote | null>;
   swap(account: OrderAccount, from: string, to: string, amount: bigint, minOut: bigint): Promise<Settled>;
   /** Sends `amount` of `asset` from one of the agent's balances (confidential by default) to the owner's NEAR wallet. */
-  withdraw(account: OrderAccount, asset: string, amount: bigint, from?: BalanceSource): Promise<Settled>;
+  withdraw(account: OrderAccount, asset: string, amount: bigint, from?: BalanceSource): Promise<Withdrawn>;
   /** What a limit order would spend, or why the Agent API would refuse it. Moves nothing. */
   previewLimit(agentId: string, order: LimitBuy): Promise<{ spend: bigint } | { refused: string }>;
   /** Places the order; on success it rests on the agent's balance until it fills, is cancelled or expires. */
@@ -198,7 +204,17 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const received = ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held;
   if (received <= 0n) return { status: "pending" };
   const sent = await agent.withdraw(account, order.buyAsset, received);
+  if (sent === "undeliverable") return (await homeAsNear(agent, account, order.buyAsset, received, bound)) ? { status: "returned", code: "not_deliverable" } : { status: "pending" };
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.buyAsset } : { status: "pending" };
+}
+
+/**
+ * For an asset the Agent API cannot send to the wallet: sells it for NEAR on the agent, within
+ * the user's price protection, and sends the NEAR home, which always can be. True once it arrived.
+ */
+async function homeAsNear(agent: AgentPort, account: OrderAccount, asset: string, amount: bigint, bound: number | null): Promise<boolean> {
+  const near = await swapOnAgent(agent, account, asset, FUNDING_ASSET, amount, bound);
+  return typeof near === "bigint" && (await agent.withdraw(account, FUNDING_ASSET, near)) === "success";
 }
 
 /**
@@ -294,6 +310,9 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   if (received === "pending") return { status: "pending" };
   if (typeof received !== "bigint") return giveBack(failure(received), order.from, order.amount);
   const sent = await agent.withdraw(account, order.to, received);
+  if (sent === "undeliverable") {
+    return (await homeAsNear(agent, account, order.to, received, bound)) ? { status: "returned", code: "not_deliverable", asset: FUNDING_ASSET } : { status: "pending" };
+  }
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.to } : { status: "pending" };
 }
 
@@ -318,7 +337,10 @@ export async function placeLimitBuy(chain: ChainPort, agent: AgentPort, account:
   return (await agent.withdraw(account, FUNDING_ASSET, preview.spend)) === "success" ? { status: "returned", code: "placement_failed" } : { status: "pending" };
 }
 
-/** What one sweep sent home, and what it tried to send but could not (`asset` or `asset (public)`). */
+/**
+ * What one sweep sent home (`asset`, `asset (public)`, or `asset (as NEAR)` when it could only
+ * reach the wallet sold for NEAR), and what it tried to send but could not.
+ */
 export interface SweepResult {
   sent: string[];
   stuck: string[];
@@ -327,10 +349,12 @@ export interface SweepResult {
 /**
  * Sends everything the agent holds back to the user's wallet, from both balances. While a limit
  * order is open the funding token stays on the confidential balance, since its money may still be
- * resting there. Tokens the wallet cannot hold yet stay until the user enables them.
+ * resting there. Tokens the wallet cannot hold yet stay until the user enables them. An asset the
+ * Agent API cannot send to the wallet is sold for NEAR within the user's price protection.
  */
 export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAccount): Promise<SweepResult> {
   const result: SweepResult = { sent: [], stuck: [] };
+  const bound = await agent.signedPriceBound(account.agentId);
   const sendHome = async (asset: string, free: bigint, from: BalanceSource) => {
     if (free <= 0n) return;
     const contract = tokenContract(asset);
@@ -338,7 +362,12 @@ export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAc
     const deliverable = asset === FUNDING_ASSET || (contract !== null && (await chain.registered(contract, account.owner)));
     if (!deliverable) return;
     const label = from === "public" ? `${asset} (public)` : asset;
-    ((await agent.withdraw(account, asset, free, from)) === "success" ? result.sent : result.stuck).push(label);
+    const sent = await agent.withdraw(account, asset, free, from);
+    if (sent === "undeliverable" && from === "confidential" && asset !== FUNDING_ASSET) {
+      ((await homeAsNear(agent, account, asset, free, bound)) ? result.sent : result.stuck).push(`${asset} (as NEAR)`);
+      return;
+    }
+    (sent === "success" ? result.sent : result.stuck).push(label);
   };
   const ordersOpen = (await agent.openLimitOrders(account.agentId)) > 0;
   for (const [asset, free] of await agent.available(account.agentId)) {
@@ -410,7 +439,9 @@ function settled(status: StatusResponse["status"]): Settled {
 const REQUEST_TIMEOUT_MS = 150_000;
 const atomic = z.string().regex(/^\d+$/);
 const balancesSchema = z.object({ balances: z.array(z.object({ asset_id: z.string(), available_raw: atomic })) });
-const statusSchema = z.object({ correlation_id: z.string(), status: z.string() });
+const statusSchema = z.object({ correlation_id: z.string(), status: z.string(), failure_code: z.string().nullish() });
+/** Failure codes that mean the asset cannot leave the agent this way at all, not a passing failure. */
+const UNDELIVERABLE = new Set(["unsupported_token", "unsupported_chain"]);
 const decimalString = z.string().regex(/^\d+(\.\d+)?$/);
 const dryQuoteSchema = z.object({
   quote: z.object({ amount_out: atomic, min_amount_out: atomic, time_estimate_seconds: z.number().nonnegative().nullish() }),
@@ -461,21 +492,24 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
   const notStarted = (error: unknown): Settled => (error instanceof AgentApiRefusal && error.status < 500 ? "failed" : "pending");
   const followUp = async (correlationId: string) =>
     placedSchema.parse(await call(`/v1/status?correlation_id=${encodeURIComponent(correlationId)}&wait_ms=${SETTLE_WAIT_MS}`));
-  const run = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<Settled> => {
+  /** Runs one execution and follows it; `code` is the refusal or failure code when there is one. */
+  const execute = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<{ settled: Settled; code: string | null }> => {
     let started: z.infer<typeof statusSchema>;
     try {
       started = statusSchema.parse(await call(path, body, { "X-Grant-Token": account.grantToken, "Idempotency-Key": createIdempotencyKey() }));
     } catch (error) {
-      return notStarted(error);
+      return { settled: notStarted(error), code: error instanceof AgentApiRefusal ? error.code : null };
     }
     const first = settled(started.status as StatusResponse["status"]);
-    if (first !== "pending") return first;
+    if (first !== "pending") return { settled: first, code: started.failure_code ?? null };
     try {
-      return settled((await followUp(started.correlation_id)).status as StatusResponse["status"]);
+      const followed = await followUp(started.correlation_id);
+      return { settled: settled(followed.status as StatusResponse["status"]), code: followed.failure_code ?? null };
     } catch {
-      return "pending";
+      return { settled: "pending", code: null };
     }
   };
+  const run = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<Settled> => (await execute(account, path, body)).settled;
   const balances = async (agentId: string, source: BalanceSource) => {
     const view = balancesSchema.parse(await call(`${agentPath(agentId, "balances")}?source=${source}`));
     return new Map(view.balances.map((b) => [b.asset_id, BigInt(b.available_raw)] as const));
@@ -509,8 +543,11 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
     },
     swap: (account, from, to, amount, minOut) =>
       run(account, agentPath(account.agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), min_amount_out: minOut.toString(), confidential: true }),
-    withdraw: (account, asset, amount, from = "confidential") =>
-      run(account, agentPath(account.agentId, "withdraw"), { asset, amount: amount.toString(), chain: "near", recipient: account.owner, confidential: from === "confidential" }),
+    async withdraw(account, asset, amount, from = "confidential") {
+      const body = { asset, amount: amount.toString(), chain: "near", recipient: account.owner, confidential: from === "confidential" };
+      const done = await execute(account, agentPath(account.agentId, "withdraw"), body);
+      return done.settled === "failed" && done.code !== null && UNDELIVERABLE.has(done.code) ? "undeliverable" : done.settled;
+    },
     async previewLimit(agentId, order) {
       try {
         const preview = limitPreviewSchema.parse(await call(agentPath(agentId, "limit-orders"), { ...limitBody(order), dry: true }));
