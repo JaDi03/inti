@@ -17,6 +17,7 @@ const config: LimitsConfig = {
   wasmUrl: "/inti-spending-limits.wasm",
   wasmSha256: SPENDING_LIMITS_WASM_SHA256,
   agentApiHost: "api.demo.agentsonintents.com",
+  siteHost: "getinti.xyz",
 };
 
 /** An installed account whose Inti key answers as given; `null` means the account has no such key. */

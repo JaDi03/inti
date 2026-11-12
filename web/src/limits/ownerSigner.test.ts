@@ -24,6 +24,7 @@ const config: LimitsConfig = {
   wasmUrl: "/inti-spending-limits.wasm",
   wasmSha256: SPENDING_LIMITS_WASM_SHA256,
   agentApiHost: "api.demo.agentsonintents.com",
+  siteHost: "getinti.xyz",
 };
 
 /** A user wallet whose key really signs, plus a record of every hash it was asked to sign. */
@@ -204,7 +205,7 @@ describe("signing with the user's account key", () => {
       domain: "near-intents-agent-api.agent-grant.v6",
       expires_at_ms: now + 90 * 86_400_000,
       issued_at_ms: now,
-      label: "Inti trading",
+      label: "Inti trading (getinti.xyz)",
       network: "mainnet",
       nonce: "ef".repeat(32),
       owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },
@@ -232,6 +233,8 @@ describe("signing with the user's account key", () => {
     ["another owner", { owner: { account_id: "cd".repeat(32), public_key: "ed25519:x", type: "near" } }],
     ["another service", { recipient: "evil.example" }],
     ["another label", { label: "Something else" }],
+    ["a grant for another Inti site", { label: "Inti trading (localhost:5173)" }],
+    ["a grant without a site", { label: "Inti trading" }],
     ["a year-long grant", { expires_at_ms: Date.now() + 365 * 86_400_000 }],
     ["an expired grant", { expires_at_ms: Date.now() - 1000 }],
     ["an extra field", { transfer_to: "attacker.near" }],
@@ -288,7 +291,7 @@ describe("renewing the grant", () => {
       domain: "near-intents-agent-api.agent-grant.v6",
       expires_at_ms: now + 7 * 86_400_000,
       issued_at_ms: now,
-      label: "Inti trading",
+      label: "Inti trading (getinti.xyz)",
       network: "mainnet",
       nonce: "ef".repeat(32),
       owner: { account_id: wallet.accountId, public_key: wallet.publicKey.toString(), type: "near" },

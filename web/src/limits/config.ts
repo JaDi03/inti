@@ -29,6 +29,8 @@ export interface LimitsConfig {
   wasmSha256: string;
   /** Host of the NEAR Intents Agent API: the only service a grant may be signed for. */
   agentApiHost: string;
+  /** This site's host: a grant is signed only if it is labeled for this site. */
+  siteHost: string;
 }
 
 /**
@@ -62,5 +64,6 @@ export function loadLimitsConfig(agentAccount: string | null): LimitsConfig {
     wasmUrl: "/inti-spending-limits.wasm",
     wasmSha256: SPENDING_LIMITS_WASM_SHA256,
     agentApiHost: required("INTI_AGENT_API_HOST"),
+    siteHost: window.location.host,
   };
 }
