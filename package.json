@@ -15,7 +15,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "cycle": "tsx --env-file=.env agent/cli/cycle.ts",
     "server": "tsx --env-file=.env agent/server/index.ts",
     "new-key": "tsx agent/cli/new-key.ts",
     "web:dev": "pnpm --filter inti-web dev",
