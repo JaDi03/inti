@@ -2,6 +2,7 @@ import { Account, KeyPair } from "near-api-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
+import { ASSET_KEYS } from "../../../agent/policy/assets";
 import { assetContract } from "./ownerActions";
 
 const config: LimitsConfig = {
@@ -35,7 +36,12 @@ describe("whether the saved limits cover selling", () => {
   it("is false for an account set up before selling, and true once its limits were saved again", async () => {
     expect(await installed(null, ["wrap.near"]).status("ab".repeat(32))).toMatchObject({ sellsAllowed: false, limit: { perOrder: 1n, perDay: 2n } });
     vi.restoreAllMocks();
-    expect(await installed(null, ["wrap.near", assetContract("gold")]).status("ab".repeat(32))).toMatchObject({ sellsAllowed: true });
+    expect(await installed(null, ["wrap.near", ...ASSET_KEYS.map(assetContract)]).status("ab".repeat(32))).toMatchObject({ sellsAllowed: true });
+  });
+
+  it("is false when one asset has no limit, as after Bitcoin moved to another token", async () => {
+    const withoutBitcoin = ASSET_KEYS.filter((k) => k !== "bitcoin").map(assetContract);
+    expect(await installed(null, ["wrap.near", ...withoutBitcoin]).status("ab".repeat(32))).toMatchObject({ sellsAllowed: false });
   });
 });
 

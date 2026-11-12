@@ -105,7 +105,7 @@ describe("trading", () => {
     const down = setup({ spentFails: true });
     expect(await down.t.buyNow("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
     // Bitcoin was sold today but has no fresh price, so today's total is unknown.
-    const unpriced = setup({ spent: { "btc.omft.near": 1n } });
+    const unpriced = setup({ spent: { "nbtc.bridge.near": 1n } });
     expect(await unpriced.t.exchange("did:privy:alice", GOLD, FUNDING_ASSET, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
     expect(await unpriced.t.roomToday(ACTIVE.ownerAccount)).toBeNull();
     // A sale of an asset priced at zero cannot be valued, so it does not start.

@@ -108,11 +108,12 @@ export class LimitsClient {
     if (state.codeHash === NO_CODE) return { kind: "not-installed", available };
 
     const token = this.config.token.id;
-    const [onChainConfig, limit, sellLimit, spent, balance, intiKey] = await Promise.all([
+    const [onChainConfig, limit, sellLimits, spent, balance, intiKey] = await Promise.all([
       this.view<{ agent: string }>(accountId, "get_config"),
       this.view<{ per_order: string; per_day: string } | null>(accountId, "get_limit", { token }),
-      // Every save writes all the limits together, so one asset tells whether selling is covered.
-      this.view<unknown>(accountId, "get_limit", { token: assetContract(ASSET_KEYS[0]) }),
+      // Selling is covered only when every tradable asset has its limit: an account saved before an
+      // asset was added or replaced lacks that one, and the app asks to save the limits again.
+      Promise.all(ASSET_KEYS.map((k) => this.view<unknown>(accountId, "get_limit", { token: assetContract(k) }))),
       this.view<string>(accountId, "get_spent_last_24h", { token }),
       this.view<string>(token, "ft_balance_of", { account_id: accountId }),
       this.intiKey(accountId),
@@ -124,7 +125,7 @@ export class LimitsClient {
       intiFeesLeft: intiKey.feesLeft,
       agent: onChainConfig.agent,
       limit: limit ? { perOrder: BigInt(limit.per_order), perDay: BigInt(limit.per_day) } : null,
-      sellsAllowed: sellLimit != null,
+      sellsAllowed: sellLimits.every((l) => l != null),
       spentToday: BigInt(spent),
       spendable: BigInt(balance),
       setAside: state.balance.usedOnStorage,
