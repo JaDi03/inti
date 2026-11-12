@@ -51,7 +51,7 @@ type Wallet = ReturnType<typeof userWallet>;
 /** Prices of 2026-11-11, from the Agent API token list. */
 const PRICES = { near: 3.55, gold: 4016.03, euro: 1.11, bitcoin: 73948, ethereum: 2056.35, solana: 83.43 };
 const GOLD_SELL_LINE = (perOrder: string, perDay: string) =>
-  `The same limit for selling Gold: at most ${perOrder} XAUT per order and ${perDay} XAUT per day. What Inti sells always comes back to your wallet.`;
+  `The same limit for selling Gold: at most ${perOrder} XAUT per order and ${perDay} XAUT per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
 
 function sign(wallet: Wallet, receiverId: string, txActions: Action[]) {
   return wallet.signer.signTransaction(createTransaction(wallet.accountId, wallet.publicKey, receiverId, 1n, txActions, new Uint8Array(32)));

@@ -102,7 +102,7 @@ function describeOwnAccountAction(action: Action, config: LimitsConfig, accountI
       const { symbol, decimals } = ASSETS[key];
       const perOrder = fromAtomic(atomicArg(a.per_order, methodName).toString(), decimals);
       const perDay = fromAtomic(atomicArg(a.per_day, methodName).toString(), decimals);
-      return `The same limit for selling ${ASSETS[key].name}: at most ${perOrder} ${symbol} per order and ${perDay} ${symbol} per day. What Inti sells always comes back to your wallet.`;
+      return `The same limit for selling ${ASSETS[key].name}: at most ${perOrder} ${symbol} per order and ${perDay} ${symbol} per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
     }
     refuse(`the method ${methodName} is not one Inti uses.`);
   }
