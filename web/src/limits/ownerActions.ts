@@ -90,10 +90,19 @@ function describeOwnAccountAction(action: Action, config: LimitsConfig, accountI
     }
     if (methodName === "set_limit") {
       const a = argsOf(args, methodName, ["token", "per_order", "per_day"]);
-      if (a.token !== token.id || deposit !== 1n) refuse("the limit is for another token or attaches a deposit.");
-      const perOrder = fromAtomic(atomicArg(a.per_order, methodName).toString(), token.decimals);
-      const perDay = fromAtomic(atomicArg(a.per_day, methodName).toString(), token.decimals);
-      return `Set your limit: at most ${perOrder} ${token.symbol} per order and ${perDay} ${token.symbol} per day.`;
+      if (deposit !== 1n) refuse("the limit attaches a deposit.");
+      if (a.token === token.id) {
+        const perOrder = fromAtomic(atomicArg(a.per_order, methodName).toString(), token.decimals);
+        const perDay = fromAtomic(atomicArg(a.per_day, methodName).toString(), token.decimals);
+        return `Set your limit: at most ${perOrder} ${token.symbol} per order and ${perDay} ${token.symbol} per day.`;
+      }
+      // Selling limits: only for the assets Inti trades, never for any other token.
+      const key = ASSET_KEYS.find((k) => assetContract(k) === a.token);
+      if (!key) refuse("the limit is for a token Inti does not trade.");
+      const { symbol, decimals } = ASSETS[key];
+      const perOrder = fromAtomic(atomicArg(a.per_order, methodName).toString(), decimals);
+      const perDay = fromAtomic(atomicArg(a.per_day, methodName).toString(), decimals);
+      return `The same limit for selling ${ASSETS[key].name}: at most ${perOrder} ${symbol} per order and ${perDay} ${symbol} per day. What Inti sells always comes back to your wallet.`;
     }
     refuse(`the method ${methodName} is not one Inti uses.`);
   }
@@ -242,7 +251,7 @@ export function describeGrant(grant: GrantMessage, accountId: string, publicKey:
   const until = new Date(expires).toISOString().slice(0, 10);
   return [
     `Let Inti trade for your agent until ${until}, without asking you each time.`,
-    "It can only buy within the spending limits you set, and everything it buys goes to your wallet.",
+    "It can only buy and sell within the spending limits you set, and everything it buys or sells for goes to your wallet.",
     "You can turn it off at any time.",
   ];
 }

@@ -31,6 +31,14 @@ export interface DashboardData {
   agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
 
+/** Today's prices for saving limits; they come with the dashboard, which the server keeps for a few seconds. */
+export async function fetchPrices(getAccessToken: () => Promise<string | null>): Promise<DashboardData["prices"]> {
+  const token = await getAccessToken();
+  const data = token ? await fetchDashboard(token) : null;
+  if (!data) throw new Error("Prices are not available right now. Try again in a minute.");
+  return data.prices;
+}
+
 /** Prices and the user's own agent, from Inti's server. Null when the server cannot be reached. */
 export async function fetchDashboard(accessToken: string): Promise<DashboardData | null> {
   if (!API_URL) return null;
