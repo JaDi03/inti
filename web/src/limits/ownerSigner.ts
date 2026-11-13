@@ -19,8 +19,8 @@ export class SigningCancelledError extends Error {}
 /**
  * Wraps the user's full-access signer: a transaction is signed only if every action is one
  * Inti uses (see ownerActions) and the user confirms the plain-language description first.
- * It also refuses to sign until the account has a second factor (passkey or authenticator app). The only delegate action it signs is
- * the one that creates the user's own agent, and the only messages are a grant for that agent and
+ * It also refuses to sign until the account has a second factor (passkey or authenticator app). The only delegate actions it signs
+ * create the user's own agent or freeze it, and the only messages are a grant for that agent and
  * a change of its price protection.
  */
 export class OwnerSigner extends Signer {

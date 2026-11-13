@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoins, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoins, KeyRound, Snowflake, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
@@ -11,6 +11,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
+import { freezeAgent, FreezeError } from "../agent/freeze";
 import { fetchDashboard, sellHeld, type DashboardData, type HeldSale } from "./dashboardClient";
 import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
@@ -430,6 +431,25 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
   const orders = data?.agent?.orders;
   const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
 
+  const [freezing, setFreezing] = useState(false);
+  const [freezeNote, setFreezeNote] = useState<string | null>(null);
+  const freeze = async () => {
+    if (!policy || policy.maxDeviationBps === null || !agentAccount) return;
+    setFreezing(true);
+    setFreezeNote(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new FreezeError("Your session expired. Sign in again and retry.");
+      const outcome = await freezeAgent({ accessToken: token, accountId: address, agentAccount, maxDeviationBps: policy.maxDeviationBps, config, provider: client.provider, signer });
+      setFreezeNote(outcome === "processing" ? "Your agent is being frozen. Check again in a minute." : "Your agent is frozen. It can do nothing until you unfreeze it.");
+      await state.load(true);
+    } catch (e) {
+      setFreezeNote(e instanceof Error ? e.message : "Your agent could not be frozen.");
+    } finally {
+      setFreezing(false);
+    }
+  };
+
   const pauseOrResume = async () => {
     setBusy(true);
     setError(null);
@@ -533,7 +553,30 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
       </FoldCard>
       {confirmDialog}
 
-      <FoldCard id="agent" icon={<Sparkles className="size-4 text-primary" />} title="Your agent's rules">
+      <FoldCard
+        id="agent"
+        icon={<Sparkles className="size-4 text-primary" />}
+        title="Your agent's rules"
+        extra={
+          policy?.frozen ? (
+            <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-900">
+              <Snowflake className="size-3.5" /> Frozen
+            </span>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-full px-2.5 text-xs"
+              title="Stop your agent at once: it can do nothing until you unfreeze it"
+              disabled={freezing || !policy || !agentAccount || policy.maxDeviationBps === null}
+              onClick={() => void freeze()}
+            >
+              {freezing ? <Loader2 className="animate-spin" /> : <Snowflake />} Freeze
+            </Button>
+          )
+        }
+      >
+        {freezeNote && <p className="mt-2 break-words text-sm">{freezeNote}</p>}
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
         {agentAccount && (
           <div className="mt-3">
