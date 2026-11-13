@@ -79,6 +79,8 @@ export function App() {
   const [copied, setCopied] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
+  /** What the agent is doing for the message it is working on, one line per step. */
+  const [steps, setSteps] = useState<string[]>([]);
   const creating = useRef(false);
   const nextId = useRef(1);
   const chatEnd = useRef<HTMLLIElement>(null);
@@ -145,15 +147,17 @@ export function App() {
     if (limits.setup.kind === "error") return addMessage("inti", UNAVAILABLE);
     if (needsActivation) return addMessage("inti", ACTIVATE_FIRST);
     setThinking(true);
+    setSteps([]);
     try {
-      const token = await getAccessToken();
-      if (!token) throw new AgentError("Your session expired. Sign in again and retry.");
-      const reply = await askAgent(token, text);
-      addMessage("inti", reply.report || "Done.", reply.simulated, reply.events.some((e) => e.type === "limit_order_placed"), reply.proofId ?? null);
+      const reply = await askAgent(getAccessToken, text, setSteps);
+      // An empty report means the run stopped before the model could answer.
+      const fallback = reply.stopReason === "done" ? "Done." : "I stopped before finishing this. Check your portfolio to see what went through.";
+      addMessage("inti", reply.report || fallback, reply.simulated, reply.events.some((e) => e.type === "limit_order_placed"), reply.proofId ?? null);
     } catch (error) {
       addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
     } finally {
       setThinking(false);
+      setSteps([]);
       // An order may have spent NEAR for orders or brought an asset: the wallet card reads them again.
       void limits.refresh();
     }
@@ -328,7 +332,7 @@ export function App() {
                 proof={m.proofId ? <SignedReply proofId={m.proofId} getAccessToken={getAccessToken} /> : undefined}
               />
             ))}
-            {thinking && <TypingIndicator firstOfTurn={messages.at(-1)?.from !== "inti"} />}
+            {thinking && <TypingIndicator firstOfTurn={messages.at(-1)?.from !== "inti"} steps={steps} />}
             {activationCard && <li className="mt-5 flex justify-center">{activationCard}</li>}
             <li ref={chatEnd} aria-hidden="true" />
           </ol>
