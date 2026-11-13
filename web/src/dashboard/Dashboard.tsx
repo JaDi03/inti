@@ -326,7 +326,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       </section>
       ))}
       {part !== "wallet" && (
-        <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
+        <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs 0.00125 NEAR, once.</p>
       )}
 
       {part !== "wallet" && (
