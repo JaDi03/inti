@@ -351,7 +351,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {part !== "wallet" && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
-          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. NEAR from sales stays here and pays for the next purchases.</p>
+          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
           <ul className={CARD_GRID}>
             {(() => {
               // Null while the agent's balance cannot be read.
