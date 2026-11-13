@@ -99,7 +99,14 @@ function replayRtmr3(events: z.infer<typeof eventSchema>[]): string {
 const withTimeout = <T>(work: Promise<T>): Promise<T> =>
   Promise.race([work, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), STEP_TIMEOUT_MS).unref())]);
 
-/** Runs every check once, with a fresh nonce. A step that cannot run counts as failed. */
+/** Most machines one check verifies; each costs a quote check with Intel and one with NVIDIA. */
+const MAX_MACHINES = 8;
+
+/**
+ * Runs every check once, with a fresh nonce. NEAR AI may serve the model from several machines;
+ * all of them must name this model and share one signing key, so a reply's signature points to a
+ * single key, and every machine must pass every check. A step that cannot run counts as failed.
+ */
 export async function attestModel(model: string, deps: AttestationDeps): Promise<ModelAttestation> {
   const passed = new Set<AttestationCheckId>();
   const nonce = deps.nonce();
@@ -110,12 +117,31 @@ export async function attestModel(model: string, deps: AttestationDeps): Promise
     for (const [k, v] of Object.entries({ model, provider: "near", include_tls_fingerprint: "false", signing_algo: "ecdsa", nonce })) url.searchParams.set(k, v);
     const res = await deps.fetch(url, { headers: { Accept: "application/json", "x-no-aliasing": "true" }, signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`report HTTP ${res.status}`);
-    // Exactly one report for this model: several would leave which key signs ambiguous.
     const reports = reportSchema.parse(await res.json()).model_attestations ?? [];
-    const m = reports.length === 1 ? modelSchema.parse(reports[0]) : null;
-    if (!m || (m.model_name !== undefined && m.model_name !== model)) throw new Error("no single model report");
+    if (reports.length === 0 || reports.length > MAX_MACHINES) throw new Error("no usable model reports");
+    const machines = reports.map((r) => modelSchema.parse(r));
+    // One key for every machine: with several, a reply's signature could not be tied to one check.
+    const keys = new Set(machines.map((m) => m.signing_address.toLowerCase()));
+    if (keys.size !== 1 || machines.some((m) => m.model_name !== undefined && m.model_name !== model)) throw new Error("machines disagree");
     passed.add("report");
-    signingAddress = m.signing_address.toLowerCase();
+    signingAddress = [...keys][0] ?? null;
+    const results = await Promise.all(machines.map((m) => checkMachine(m, nonce, deps)));
+    for (const id of ATTESTATION_CHECKS) if (id !== "report" && results.every((r) => r.passed.has(id))) passed.add(id);
+    const statuses = [...new Set(results.flatMap((r) => (r.intelStatus === null ? [] : [r.intelStatus])))];
+    intelStatus = statuses.length > 0 ? statuses.join(", ") : null;
+  } catch {
+    // The checks not reached stay failed; the reason is not shown to the user.
+  }
+  const checks = ATTESTATION_CHECKS.map((id) => ({ id, ok: passed.has(id) }));
+  return { model, ok: checks.every((c) => c.ok), checks, signingAddress, intelStatus, checkedAt: new Date(deps.now()).toISOString() };
+}
+
+/** The checks one machine's report passes. A step that cannot run leaves the rest failed. */
+async function checkMachine(m: z.infer<typeof modelSchema>, nonce: string, deps: AttestationDeps): Promise<{ passed: Set<AttestationCheckId>; intelStatus: string | null }> {
+  const passed = new Set<AttestationCheckId>();
+  let intelStatus: string | null = null;
+  const signingAddress = m.signing_address.toLowerCase();
+  try {
     if (m.request_nonce === nonce) passed.add("nonce");
 
     const quote = await withTimeout(deps.verifyQuote(Buffer.from(m.intel_quote, "hex")));
@@ -151,8 +177,7 @@ export async function attestModel(model: string, deps: AttestationDeps): Promise
       }
     }
   } catch {
-    // The checks not reached stay failed; the reason is not shown to the user.
+    // The checks not reached stay failed for this machine.
   }
-  const checks = ATTESTATION_CHECKS.map((id) => ({ id, ok: passed.has(id) }));
-  return { model, ok: checks.every((c) => c.ok), checks, signingAddress, intelStatus, checkedAt: new Date(deps.now()).toISOString() };
+  return { passed, intelStatus };
 }
