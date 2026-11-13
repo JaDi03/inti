@@ -78,6 +78,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
   const [lastTx, setLastTx] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -100,6 +101,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
       setLastTx(Array.isArray(hashes) ? (hashes.at(-1) ?? null) : hashes);
       setEditing(false);
       setAdding(false);
+      setMoving(false);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "The transaction failed.");
@@ -207,10 +209,22 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
             onSubmit={(value) => void run("Adding NEAR for orders...", () => client.addForOrders(address, signer, value))}
             onCancel={() => setAdding(false)}
           />
+        ) : moving ? (
+          <MoveToWalletForm
+            decimals={decimals}
+            symbol={symbol}
+            max={status.spendable}
+            busy={busy}
+            onSubmit={(value) => void run("Moving NEAR to your wallet...", () => client.moveToWallet(address, signer, value))}
+            onCancel={() => setMoving(false)}
+          />
         ) : (
           <div className="mt-5 flex flex-wrap gap-2">
             <Button disabled={busy !== null} onClick={() => setAdding(true)}>
               Add NEAR for orders
+            </Button>
+            <Button variant="outline" disabled={busy !== null || status.spendable === 0n} onClick={() => setMoving(true)}>
+              Move to wallet
             </Button>
             <Button variant="outline" disabled={busy !== null} onClick={() => setEditing(true)}>
               Edit limits
@@ -233,7 +247,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
           <PasskeyProtection />
         </div>
 
-        {!editing && !adding && (
+        {!editing && !adding && !moving && (
           <div className="mt-5 rounded-xl border p-3 text-sm">
             <p className="font-medium">Turn off Inti</p>
             <p className="mt-1 text-muted-foreground">
@@ -398,6 +412,39 @@ export function AddForOrdersForm({ decimals, symbol, max, busy, onSubmit, onCanc
       <div className="flex gap-2">
         <Button type="submit" size="lg" className="rounded-full px-5" disabled={problem !== null || busy !== null}>
           Add NEAR
+        </Button>
+        <Button type="button" variant="ghost" size="lg" onClick={onCancel} disabled={busy !== null}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** How much of the NEAR set aside for orders goes back to the wallet; all of it unless the user changes it. */
+export function MoveToWalletForm({ decimals, symbol, max, busy, onSubmit, onCancel }: AddForOrdersProps) {
+  const [value, setValue] = useState(fromAtomic(max.toString(), decimals));
+  const parsed = parse(value, decimals);
+  const problem =
+    parsed === null || parsed === 0n ? "Enter an amount greater than zero." : parsed > max ? `You can move at most ${display(max, decimals)} ${symbol}.` : null;
+
+  return (
+    <form
+      className="mt-4 flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (problem || parsed === null) return;
+        onSubmit(parsed);
+      }}
+    >
+      <p className="text-sm text-muted-foreground">
+        It goes back to your wallet as plain NEAR. Inti stays on; it pays for orders with what is left here, and with the NEAR your agent holds.
+      </p>
+      <AmountField label="Move to wallet" symbol={symbol} value={value} onChange={setValue} />
+      {problem && <p className="text-sm text-destructive">{problem}</p>}
+      <div className="flex gap-2">
+        <Button type="submit" size="lg" className="rounded-full px-5" disabled={problem !== null || busy !== null}>
+          Move NEAR
         </Button>
         <Button type="button" variant="ghost" size="lg" onClick={onCancel} disabled={busy !== null}>
           Cancel
