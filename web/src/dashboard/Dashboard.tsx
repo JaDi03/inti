@@ -263,7 +263,13 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
-      {part !== "wallet" && <h2 className="px-1 font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>}
+      {part !== "wallet" && (
+        <div className="-mb-2 px-1">
+          <h2 className="font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>
+          {/* Tells these areas apart from what the agent holds, further down. */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">In your wallet</p>
+        </div>
+      )}
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
         <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
