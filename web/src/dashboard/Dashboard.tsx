@@ -151,8 +151,11 @@ interface MoneyProps {
   /** Re-reads the account's own balances (NEAR, NEAR for orders), which the dashboard does not read. */
   onChanged: () => void;
   getAccessToken: () => Promise<string | null>;
-  /** The wallet card, the asset areas, or both. */
-  part: "wallet" | "assets" | "both";
+  /**
+   * The wallet card, the asset areas, or both. "assets" is what the wallet holds and what the agent
+   * holds together; on a phone each has its own tab: "walletAssets" and "agent".
+   */
+  part: "wallet" | "assets" | "both" | "walletAssets" | "agent";
   className?: string;
 }
 
@@ -161,6 +164,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
+  const showWallet = part === "wallet" || part === "both";
+  const showWalletAssets = part === "assets" || part === "both" || part === "walletAssets";
+  const showAgent = part === "assets" || part === "both" || part === "agent";
   const [receiving, setReceiving] = useState(false);
   const [busy, setBusy] = useState<AssetKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -235,7 +241,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      {part !== "assets" && (
+      {showWallet && (
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -279,14 +285,14 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
-      {part !== "wallet" && (
+      {showWalletAssets && (
         <div className="-mb-2 px-1">
           <h2 className="font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>
           {/* Tells these areas apart from what the agent holds, further down. */}
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">In your wallet</p>
         </div>
       )}
-      {part !== "wallet" && GROUPS.map((group) => (
+      {showWalletAssets && GROUPS.map((group) => (
       <section key={group.title}>
         <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
@@ -341,11 +347,11 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
         </ul>
       </section>
       ))}
-      {part !== "wallet" && (
+      {showWalletAssets && (
         <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs 0.00125 NEAR, once.</p>
       )}
 
-      {part !== "wallet" && (
+      {showAgent && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
           <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
@@ -815,17 +821,21 @@ interface LayoutProps {
   onExport: () => void;
   /** Re-reads the account after the user changed something on it. */
   onChanged: () => void;
-  /** On a phone, which one shows: the chat or the portfolio. */
-  view: "chat" | "portfolio";
+  /** On a phone, which section shows. */
+  view: MobileView;
   /** True once the user signed Inti's first permission, so the dashboard reads it at once. */
   grantSigned: boolean;
   children: React.ReactNode;
 }
 
+/** The sections a phone shows one at a time, each under its own tab. */
+export const MOBILE_VIEWS = ["chat", "wallet", "assets", "agent", "settings"] as const;
+export type MobileView = (typeof MOBILE_VIEWS)[number];
+
 /**
  * The chat with the portfolio around it. Wide screens: what the user sets up (wallet, limits,
  * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
- * Phones: the chat or the portfolio, one at a time.
+ * Phones: one section at a time (chat, wallet, assets, agent, settings), so nothing needs a long scroll.
  */
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken, grantSigned);
@@ -844,7 +854,19 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
       </aside>
       {children}
       <aside className={cn(side, view === "chat" ? "hidden" : "flex-1", "lg:block lg:w-[380px] lg:flex-none lg:shrink-0 lg:pr-6 lg:pl-0")}>
-        <div className="mx-auto flex max-w-md flex-col gap-4">
+        {/* Phones: only the section of the open tab. */}
+        <div className="mx-auto flex max-w-md flex-col gap-4 lg:hidden">
+          {view === "wallet" && <MoneyPanel {...money} part="wallet" />}
+          {view === "assets" && <MoneyPanel {...money} part="walletAssets" />}
+          {view === "agent" && <MoneyPanel {...money} part="agent" />}
+          {view === "settings" && (
+            <>
+              <RulesPanel {...rules} />
+              <SecurityPanel {...security} />
+            </>
+          )}
+        </div>
+        <div className="mx-auto hidden max-w-md flex-col gap-4 lg:flex">
           <MoneyPanel {...money} part="wallet" className="xl:hidden" />
           <MoneyPanel {...money} part="assets" />
           <RulesPanel {...rules} className="xl:hidden" />
