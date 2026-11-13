@@ -5,6 +5,7 @@
  */
 import { NEAR_AI_MODEL, NearAiBrain } from "../brains/nearai.js";
 import { attestModel, liveAttestationDeps } from "./attestation.js";
+import { proveReply } from "./replyProof.js";
 import { demoPolicy, demoPortfolio, fetchTokens } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { agentApiAccounts } from "./agents.js";
@@ -59,6 +60,8 @@ async function main(): Promise<void> {
     chain,
     dashboard: dashboard({ agents, grants, view: agentApiView(config.agentApiKey, config.agentApiUrl), tokens }),
     attest: () => attestModel(NEAR_AI_MODEL, liveAttestationDeps),
+    proveReply: (model, calls, attestedKey) =>
+      proveReply(model, calls, { fetch, apiKey: config.nearAiApiKey, attestedKey, wait: (ms) => new Promise((r) => setTimeout(r, ms)), now: Date.now }),
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
     allowedOrigins: config.allowedOrigins,

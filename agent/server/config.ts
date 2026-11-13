@@ -45,6 +45,12 @@ export const LIMITS = {
   verificationsAtOnce: 3,
   /** How long one check's result is shown to everyone before the next visitor triggers a new one. */
   sharedVerificationMs: 5 * 60_000,
+  /** Recent replies whose signatures can still be checked; the oldest is dropped first. */
+  proofsInMemory: 2000,
+  /** Reply signature checks one user may run per day; each asks NEAR AI once per model call. */
+  proofsPerUserPerDay: 300,
+  /** Reply signature checks per day for everyone. */
+  proofsPerDayTotal: 5000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
 } as const;
