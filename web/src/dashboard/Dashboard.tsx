@@ -558,6 +558,8 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         id="agent"
         icon={<Sparkles className="size-4 text-primary" />}
         title="Your agent's rules"
+        // Ice blue while frozen, so the state shows at a glance.
+        className={policy?.frozen ? "border-sky-300 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/50" : undefined}
         extra={
           policy?.frozen ? (
             <span className="flex items-center gap-1">
