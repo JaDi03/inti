@@ -25,15 +25,22 @@ Giving an AI agent money usually means giving it your keys. With Inti your funds
 2. **Set your limits**: how much one order may spend, and how much in a day. The app installs the Spending Limits contract on your account and adds Inti's key, which can call only `fund_agent` (`web/src/limits/client.ts`).
 3. **Create your agent** on the NEAR Intents [Agent API](https://docs.agentsonintents.com) and sign a trading permission (a grant) for 7, 30 or 90 days.
 4. **Chat**: "buy $5 of bitcoin", "sell half my ether", "buy Zcash if it drops to $900". The agent quotes, buys, sells or places an order that waits for a price.
-5. **Results go to your wallet.** Anything left with the agent is sent back to your wallet every 5 minutes.
+5. **Results go to your wallet**, except gold, euro and Solana, which your agent keeps (see below). Anything else left with the agent is sent back to your wallet every 5 minutes.
 
 The agent buys and sells bitcoin (BTC), ether (ETH) and Zcash (ZEC), and pays with NEAR (`agent/policy/assets.ts`). Its trades run on the agent's confidential balance in NEAR Intents.
 
-### Earlier version: gold, euro and Solana
+### Gold, euro and Solana: kept by your agent
 
-Until 12 November 2026 Inti also bought gold (XAUT), euro (EURe) and Solana and sent them to the user's NEAR wallet. The Agent API now trades only from the agent's confidential balance, and from there it sends to a NEAR wallet only the assets 1Click lists on the NEAR chain. Gold, euro and Solana are not on that list, so Inti no longer offers them. That version is kept in the tag [`gold-euro-sol-final`](https://github.com/JaDi03/inti/tree/gold-euro-sol-final).
+The agent also buys gold (XAUT), euro (EURe) and Solana (SOL) (`agent/policy/heldAssets.ts`). These stay in your agent's confidential balance on NEAR Intents instead of going to your wallet. The dashboard shows how much your agent holds of each, with its price. When you ask Inti to sell, the agent sells for NEAR and sends the NEAR to your wallet.
 
-One of its trades on mainnet, a sale of gold for Solana on 12 November 2026:
+Why they stay with the agent: since 12 November 2026 the Agent API trades only from the agent's confidential balance. From there it can send to a NEAR wallet only tokens that live on NEAR, and these three live on Ethereum, Gnosis and Solana.
+
+What this means for you:
+
+- The agent's rules are the ones you signed: it can send only to you, and you can freeze it at any time with your own signature.
+- Withdrawals and sales go through the agent, so they need Inti's server to be running. While it is down, your gold, euro and SOL stay with your agent. They do not move anywhere else.
+
+Until 12 November 2026 Inti sent gold, euro and Solana to the user's NEAR wallet. That version is in the tag [`gold-euro-sol-final`](https://github.com/JaDi03/inti/tree/gold-euro-sol-final). One of its trades on mainnet, a sale of gold for Solana on 12 November 2026:
 
 1. [`7BrWbDgR`](https://nearblocks.io/txns/7BrWbDgRiVyknCV2Trr5KrggQvMMRNH1K9XQVvavhnhx): the Spending Limits contract on the user's account sends 0.000062 XAUT to the agent in NEAR Intents.
 2. [`CCAuxeuM`](https://nearblocks.io/txns/CCAuxeuMU2BsLT5ZeMWEcS9jnFrXpvk9R9g46TeAvVRs): the agent gives the gold to a market maker.

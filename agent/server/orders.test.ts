@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buyHeld, heldBalances, sellHeld } from "./held.js";
 import {
   agentApiPort,
   bandFromPolicy,
@@ -334,42 +335,137 @@ describe("exchange", () => {
 });
 
 describe("sweep", () => {
+  const WALLET_BTC = [tokenContract(BTC) ?? "", tokenContract(GOLD) ?? ""];
+
   it("sends everything home, but keeps tokens the wallet cannot hold yet", async () => {
     const w = world({ registered: [] });
     w.agentHeld.set(FUNDING_ASSET, 5n);
-    w.agentHeld.set(GOLD, 7n);
+    w.agentHeld.set(BTC, 7n);
     expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [FUNDING_ASSET], stuck: [] });
-    expect(w.agentHeld.get(GOLD)).toBe(7n);
+    expect(w.agentHeld.get(BTC)).toBe(7n);
+  });
+
+  it("leaves gold the agent keeps for its owner, even when the wallet could hold it", async () => {
+    const w = world({ registered: WALLET_BTC, undeliverable: ["GOLD"] });
+    w.agentHeld.set(GOLD, 254n);
+    w.agentHeld.set(FUNDING_ASSET, 5n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [FUNDING_ASSET], stuck: [] });
+    expect(w.log).toEqual(["withdraw wNEAR 5"]);
+    expect(w.agentHeld.get(GOLD)).toBe(254n);
   });
 
   it("empties the public balance too, since nothing trades from it", async () => {
-    const w = world({ openOrders: 1 });
-    w.agentPublic.set(GOLD, 2826247n);
+    const w = world({ openOrders: 1, registered: WALLET_BTC });
+    w.agentPublic.set(BTC, 2826247n);
     w.agentPublic.set(FUNDING_ASSET, 4n);
-    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (public)`, `${FUNDING_ASSET} (public)`], stuck: [] });
-    expect(w.log).toEqual(["withdraw public GOLD 2826247", "withdraw public wNEAR 4"]);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${BTC} (public)`, `${FUNDING_ASSET} (public)`], stuck: [] });
+    expect(w.log).toEqual(["withdraw public BTC 2826247", "withdraw public wNEAR 4"]);
   });
 
   it("sells an asset that cannot leave the agent for NEAR and sends the NEAR home", async () => {
-    const w = world({ out: (amount) => amount * 3n, undeliverable: ["GOLD"] });
-    w.agentHeld.set(GOLD, 255n);
-    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (as NEAR)`], stuck: [] });
-    expect(w.log).toEqual(["withdraw GOLD 255", "swap GOLD>wNEAR 255", "withdraw wNEAR 765"]);
+    const w = world({ out: (amount) => amount * 3n, undeliverable: ["BTC"], registered: WALLET_BTC });
+    w.agentHeld.set(BTC, 255n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${BTC} (as NEAR)`], stuck: [] });
+    expect(w.log).toEqual(["withdraw BTC 255", "swap BTC>wNEAR 255", "withdraw wNEAR 765"]);
   });
 
   it("reports what it could not send instead of staying silent", async () => {
-    const w = world({ withdraw: "failed" });
-    w.agentPublic.set(GOLD, 9n);
-    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [], stuck: [`${GOLD} (public)`] });
+    const w = world({ withdraw: "failed", registered: WALLET_BTC });
+    w.agentPublic.set(BTC, 9n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [], stuck: [`${BTC} (public)`] });
   });
 
   it("keeps the funding token while a limit order is open, and still sends what it bought", async () => {
-    const w = world({ openOrders: 1 });
+    const w = world({ openOrders: 1, registered: WALLET_BTC });
     w.agentHeld.set(FUNDING_ASSET, 10n);
-    w.agentHeld.set(GOLD, 7n);
+    w.agentHeld.set(BTC, 7n);
     await sweep(w.chain, w.agent, ACCOUNT);
-    expect(w.log).toEqual(["withdraw GOLD 7"]);
+    expect(w.log).toEqual(["withdraw BTC 7"]);
     expect(w.agentHeld.get(FUNDING_ASSET)).toBe(10n);
+  });
+});
+
+describe("buyHeld", () => {
+  it("funds the agent with exactly the order and buys gold that stays on the agent", async () => {
+    const w = world({ registered: [] });
+    expect(await buyHeld(w.chain, w.agent, ACCOUNT, GOLD, ORDER.amount, noWait)).toEqual({ status: "done", spent: ORDER.amount, received: 300n, asset: GOLD });
+    expect(w.log).toEqual([`fund ${ORDER.amount}`, `shield ${ORDER.amount}`, `swap ${ORDER.amount}`]);
+    expect(w.agentHeld.get(GOLD)).toBe(300n);
+  });
+
+  it("refuses an asset the agent does not keep, and an order with no route, before moving anything", async () => {
+    const w = world({ noRoute: ["wNEAR>GOLD"] });
+    expect(await buyHeld(w.chain, w.agent, ACCOUNT, BTC, ORDER.amount, noWait)).toEqual({ status: "refused", code: "unknown_asset" });
+    expect(await buyHeld(w.chain, w.agent, ACCOUNT, GOLD, ORDER.amount, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    expect(w.log).toEqual([]);
+  });
+
+  it("applies the owner's limits before moving anything", async () => {
+    const w = world({ perOrder: ORDER.amount - 1n });
+    expect(await buyHeld(w.chain, w.agent, ACCOUNT, GOLD, ORDER.amount, noWait)).toEqual({ status: "refused", code: "over_order_limit" });
+    expect(w.log).toEqual([]);
+  });
+
+  it("sends the NEAR back when the swap fails, and says so only once it is back", async () => {
+    const back = world({ failSwap: ["wNEAR>GOLD"], out: (a) => a });
+    expect(await buyHeld(back.chain, back.agent, ACCOUNT, GOLD, ORDER.amount, noWait)).toEqual({ status: "returned", code: "swap_failed" });
+    expect(back.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
+    const slow = world({ failSwap: ["wNEAR>GOLD"], out: (a) => a, withdraw: "pending" });
+    expect(await buyHeld(slow.chain, slow.agent, ACCOUNT, GOLD, ORDER.amount, noWait)).toEqual({ status: "pending" });
+  });
+
+  it("never accepts less than the price protection the user signed", async () => {
+    const w = world({ quote: { amountOut: 1000n, minAmountOut: 900n }, bound: 100 });
+    await buyHeld(w.chain, w.agent, ACCOUNT, GOLD, ORDER.amount, noWait);
+    expect(w.minOuts).toEqual([990n]);
+  });
+});
+
+describe("sellHeld", () => {
+  it("sells gold from the agent for NEAR and sends the NEAR home", async () => {
+    const w = world({ out: (amount) => amount * 1000n });
+    w.agentHeld.set(GOLD, 254n);
+    expect(await sellHeld(w.agent, ACCOUNT, GOLD, 254n)).toEqual({ status: "done", sold: 254n, received: 254_000n });
+    expect(w.log).toEqual(["swap GOLD>wNEAR 254", "withdraw wNEAR 254000"]);
+    expect(w.agentHeld.get(GOLD)).toBe(0n);
+  });
+
+  it("refuses more than the agent holds, an asset it does not keep, or no route, with nothing moved", async () => {
+    const w = world({ noRoute: ["GOLD>wNEAR"], out: (a) => a });
+    w.agentHeld.set(GOLD, 10n);
+    w.agentHeld.set(BTC, 10n);
+    expect(await sellHeld(w.agent, ACCOUNT, GOLD, 11n)).toEqual({ status: "refused", code: "not_enough" });
+    expect(await sellHeld(w.agent, ACCOUNT, GOLD, 0n)).toEqual({ status: "refused", code: "not_enough" });
+    expect(await sellHeld(w.agent, ACCOUNT, BTC, 5n)).toEqual({ status: "refused", code: "unknown_asset" });
+    expect(await sellHeld(w.agent, ACCOUNT, GOLD, 5n)).toEqual({ status: "refused", code: "no_quote" });
+    expect(w.log).toEqual([]);
+  });
+
+  it("keeps the gold on the agent when the swap fails, and leaves a slow NEAR return to the sweep", async () => {
+    const failed = world({ failSwap: ["GOLD>wNEAR"], out: (a) => a });
+    failed.agentHeld.set(GOLD, 10n);
+    expect(await sellHeld(failed.agent, ACCOUNT, GOLD, 10n)).toEqual({ status: "kept", code: "swap_failed" });
+    expect(failed.agentHeld.get(GOLD)).toBe(10n);
+    const slow = world({ out: (a) => a, withdraw: "pending" });
+    slow.agentHeld.set(GOLD, 10n);
+    expect(await sellHeld(slow.agent, ACCOUNT, GOLD, 10n)).toEqual({ status: "pending" });
+  });
+
+  it("never accepts less than the price protection the user signed", async () => {
+    const w = world({ quote: { amountOut: 1000n, minAmountOut: 900n }, bound: 200, out: (a) => a * 100n });
+    w.agentHeld.set(GOLD, 10n);
+    await sellHeld(w.agent, ACCOUNT, GOLD, 10n);
+    expect(w.minOuts).toEqual([980n]);
+  });
+});
+
+describe("heldBalances", () => {
+  it("lists only what the agent keeps for its owner", async () => {
+    const w = world();
+    w.agentHeld.set(GOLD, 254n);
+    w.agentHeld.set(BTC, 3n);
+    w.agentHeld.set(FUNDING_ASSET, 9n);
+    expect(await heldBalances(w.agent, "agent_1")).toEqual(new Map([[GOLD, 254n]]));
   });
 });
 

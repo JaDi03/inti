@@ -5,6 +5,7 @@ import type { PricedToken } from "../core/portfolio.js";
 import { ToolInputError, type AgentEvent } from "../core/tools.js";
 import { fromAtomic } from "../policy/units.js";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../policy/assets.js";
+import { HELD_ASSETS, HELD_KEYS, tradable, TRADABLE_KEYS, type TradableKey } from "../policy/heldAssets.js";
 import { FUNDING_ASSET, FUNDING_TOKEN, tokenContract, type ChainPort, type SwapQuote } from "./orders.js";
 import type { Trading } from "./trading.js";
 
@@ -16,9 +17,12 @@ const usd = z
   .string()
   .regex(/^\d{1,4}(\.\d{1,2})?$/)
   .describe('Amount in US dollars, e.g. "5" or "2.50"');
-const asset = z.enum(ASSET_KEYS).describe("Which asset to buy, by its key from get_portfolio");
-const sold = z.enum(ASSET_KEYS).describe("Which asset of the owner's wallet to sell, by its key from get_portfolio");
-const receive = z.enum(["near", ...ASSET_KEYS]).describe('What the owner receives: "near", or another asset by its key from get_portfolio');
+const asset = z.enum(TRADABLE_KEYS).describe("Which asset to buy, by its key from get_portfolio");
+const walletAsset = z.enum(ASSET_KEYS).describe("Which asset to buy, by its key from get_portfolio (assets, not held_by_agent)");
+const sold = z.enum(TRADABLE_KEYS).describe("Which asset the owner holds to sell, by its key from get_portfolio");
+const receive = z
+  .enum(["near", ...ASSET_KEYS])
+  .describe('What the owner receives: "near", or another asset by its key from get_portfolio. An asset held by the agent sells only for "near".');
 const reason = z.string().min(1).max(300).describe("One sentence: why this order serves the request");
 
 const inputs = {
@@ -28,7 +32,7 @@ const inputs = {
   buy_now: z.strictObject({ asset, usd, reason }),
   sell_now: z.strictObject({ asset: sold, receive, usd, reason }),
   buy_at_price: z.strictObject({
-    asset,
+    asset: walletAsset,
     usd,
     price_usd: z
       .string()
@@ -42,15 +46,17 @@ type ToolName = keyof typeof inputs;
 
 const descriptions: Record<ToolName, string> = {
   get_portfolio:
-    "The owner's wallet: each asset with its price, whether it is enabled, how much the owner holds and its value; the owner's NEAR set aside for orders; and what the owner's one daily limit still allows today across buying and selling.",
+    "The owner's wallet: each asset with its price, whether it is enabled, how much the owner holds and its value; the assets the owner's agent holds for them (held_by_agent: gold, the euro and SOL, which stay with the agent instead of the wallet); the owner's NEAR set aside for orders; and what the owner's one daily limit still allows today across buying and selling. Selling what the agent holds does not count against it, since that money only goes to the owner's wallet.",
   get_quote:
     "What buying an asset now for an amount in US dollars would cost, without buying: the NEAR it takes, what the owner would receive and its value, and the cost (what the route keeps of the value at current prices). Use it for any question about price, cost or fees of buying now.",
   get_sell_quote:
     "What selling an amount in US dollars of an asset the owner holds would give now, without selling: what the owner would receive (NEAR or another asset) and the cost. Use it for any question about selling or swapping one asset for another.",
-  buy_now: "Buy an asset now for an amount in US dollars, paid with the owner's NEAR. The result goes to the owner's wallet. The code checks the owner's limits first.",
+  buy_now:
+    "Buy an asset now for an amount in US dollars, paid with the owner's NEAR. Gold, the euro and SOL stay with the owner's agent, in its private balance; every other asset goes to the owner's wallet. The code checks the owner's limits first.",
   sell_now:
-    'Sell an amount in US dollars of an asset the owner holds, now. receive "near" sells it for NEAR, which arrives in the wallet as plain NEAR; to buy with it later the owner adds it as NEAR for orders in Spending limits. Another asset key swaps one asset for the other. The result goes to the owner\'s wallet. The code checks the owner\'s limits and holdings first.',
-  buy_at_price: "Place an order that buys the asset only if its price falls to price_usd within the given days. The money waits with the agent until it fills or expires.",
+    'Sell an amount in US dollars of an asset the owner holds, now. receive "near" sells it for NEAR, which arrives in the wallet as plain NEAR; to buy with it later the owner adds it as NEAR for orders in Spending limits. Another asset key swaps one asset for the other. Gold, the euro and SOL are sold from what the agent holds, only for "near". The code checks the owner\'s limits and holdings first.',
+  buy_at_price:
+    "Place an order that buys the asset only if its price falls to price_usd within the given days. The money waits with the agent until it fills or expires. Not for gold, the euro or SOL.",
   ask_user: "Ask the owner a question when the request is unclear. Ends the cycle.",
 };
 
@@ -84,6 +90,8 @@ const REASONS: Record<string, string> = {
   placement_failed: "the order could not be placed; the money went back to the wallet",
   not_deliverable: "the trading service cannot send this asset from the agent to the wallet right now, so nothing was bought: the agent sold it back for NEAR, which is in the wallet as plain NEAR",
   shield_failed:"the money could not be moved into the agent's private balance, so nothing was traded; it went back to the wallet",
+  sells_for_near: "gold, the euro and SOL held by the agent can only be sold for NEAR",
+  kept_on_agent: "the sale did not happen; the asset is still with the owner's agent",
 };
 
 const pricesOf = async (tokens: () => Promise<PricedToken[]>) => {
@@ -144,20 +152,22 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
    * rounded to cents, may land a little above what the wallet holds: up to 1% above, it sells
    * what is there.
    */
-  const toSell = async (key: AssetKey, amountUsd: string, receiveKey: "near" | AssetKey) => {
+  const toSell = async (key: TradableKey, amountUsd: string, receiveKey: "near" | AssetKey) => {
     if (receiveKey === key) throw new ToolInputError(REASONS.same_asset ?? "same asset");
     if (usdStringToMicro(amountUsd) < usdStringToMicro(MIN_ORDER_USD) || usdStringToMicro(amountUsd) > usdStringToMicro(MAX_ORDER_USD)) {
       throw new ToolInputError(`amount must be between ${MIN_ORDER_USD} and ${MAX_ORDER_USD} USD`);
     }
+    const a = tradable(key);
+    if (a.held && receiveKey !== "near") throw new ToolInputError(REASONS.sells_for_near ?? "sells for near only");
     const { byId } = await pricesOf(deps.tokens);
-    const a = ASSETS[key];
     const token = byId.get(a.assetId);
     if (!token?.price) return null;
     const wanted = (usdStringToMicro(amountUsd) * 10n ** BigInt(token.decimals)) / priceToMicro(token.price);
-    const held = await deps.chain.tokenBalance(tokenContract(a.assetId) ?? "", deps.owner);
+    // An asset the agent keeps is sold from the agent's balance; any other from the wallet.
+    const held = a.held ? ((await deps.trading.held(deps.userId)).get(a.assetId) ?? 0n) : await deps.chain.tokenBalance(tokenContract(a.assetId) ?? "", deps.owner);
     const amount = wanted > held && wanted * 99n <= held * 100n ? held : wanted;
     const to = receiveKey === "near" ? FUNDING_ASSET : ASSETS[receiveKey].assetId;
-    return { from: a.assetId, to, amount, token, toToken: byId.get(to) };
+    return { from: a.assetId, to, amount, token, toToken: byId.get(to), held: a.held };
   };
 
   return {
@@ -184,6 +194,14 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
               return { key, name: a.name, symbol: a.symbol, kind: a.kind, price_usd: t?.price ?? null, enabled, in_wallet: t ? fromAtomic(held.toString(), t.decimals) : "0", in_wallet_usd: value };
             }),
           );
+          const onAgent = await deps.trading.held(deps.userId);
+          const heldByAgent = HELD_KEYS.map((key) => {
+            const a = HELD_ASSETS[key];
+            const t = byId.get(a.assetId);
+            const amount = onAgent.get(a.assetId) ?? 0n;
+            const value = t?.price ? microToUsd((amount * priceToMicro(t.price)) / 10n ** BigInt(a.decimals)) : null;
+            return { key, name: a.name, symbol: a.symbol, kind: a.kind, price_usd: t?.price ?? null, held: fromAtomic(amount.toString(), a.decimals), held_usd: value };
+          });
           // One daily limit across buying and selling; null when it cannot be read right now.
           const room = await deps.trading.roomToday(deps.owner);
           return JSON.stringify({
@@ -194,11 +212,12 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
               ? { per_order_usd: toUsd(limit.perOrder), per_day_usd: toUsd(limit.perDay), left_today_usd: room === null ? null : microToUsd(room) }
               : null,
             assets,
+            held_by_agent: heldByAgent,
           });
         }
         case "get_quote": {
           const input = parsed.data as z.infer<typeof inputs.get_quote>;
-          const a = ASSETS[input.asset as AssetKey];
+          const a = tradable(input.asset as TradableKey);
           const { byId, wnear } = await spend(input.usd);
           const bought = byId.get(a.assetId);
           if (!bought?.price) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
@@ -208,14 +227,18 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
         }
         case "buy_now": {
           const input = parsed.data as z.infer<typeof inputs.buy_now>;
-          const a = ASSETS[input.asset as AssetKey];
+          const a = tradable(input.asset as TradableKey);
           const { wnear } = await spend(input.usd);
-          const result = await deps.trading.buyNow(deps.userId, a.assetId, wnear);
+          const result = a.held ? await deps.trading.buyHeld(deps.userId, a.assetId, wnear) : await deps.trading.buyNow(deps.userId, a.assetId, wnear);
           if (result.status === "done") {
             events.push({ type: "swap_executed", from: "NEAR", to: a.symbol, amountIn: input.usd, amountOut: "", usd: input.usd, reason: input.reason });
-            return JSON.stringify({ status: "bought", asset: a.name, spent_usd: input.usd, note: "It is in the owner's wallet now." });
+            const where = a.held ? "It is held by the owner's agent, in its private balance, and shows on its card in the portfolio." : "It is in the owner's wallet now.";
+            return JSON.stringify({ status: "bought", asset: a.name, spent_usd: input.usd, note: where });
           }
-          if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The purchase is still settling; the result will reach the wallet on its own." });
+          if (result.status === "pending") {
+            const where = a.held ? "the result will show with the owner's agent on its own" : "the result will reach the wallet on its own";
+            return JSON.stringify({ status: "in_progress", note: `The purchase is still settling; ${where}.` });
+          }
           events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: result.code, reason: REASONS[result.code] ?? result.code });
           return JSON.stringify({ status: result.status, reason: REASONS[result.code] ?? result.code });
         }
@@ -243,7 +266,7 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
         }
         case "get_sell_quote": {
           const input = parsed.data as z.infer<typeof inputs.get_sell_quote>;
-          const sale = await toSell(input.asset as AssetKey, input.usd, input.receive as "near" | AssetKey);
+          const sale = await toSell(input.asset as TradableKey, input.usd, input.receive as "near" | AssetKey);
           if (!sale?.toToken?.price) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
           const result = await deps.trading.quoteExchange(deps.userId, sale.from, sale.to, sale.amount);
           if (result.status !== "quoted") return JSON.stringify({ status: "refused", reason: REASONS[result.code] ?? result.code });
@@ -263,10 +286,21 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
         }
         case "sell_now": {
           const input = parsed.data as z.infer<typeof inputs.sell_now>;
-          const sale = await toSell(input.asset as AssetKey, input.usd, input.receive as "near" | AssetKey);
+          const sale = await toSell(input.asset as TradableKey, input.usd, input.receive as "near" | AssetKey);
           if (!sale) return JSON.stringify({ status: "refused", reason: REASONS.no_price });
+          const sold = tradable(input.asset as TradableKey).symbol;
+          if (sale.held) {
+            const result = await deps.trading.sellHeld(deps.userId, sale.from, sale.amount);
+            if (result.status === "done") {
+              events.push({ type: "swap_executed", from: sold, to: "NEAR", amountIn: input.usd, amountOut: "", usd: input.usd, reason: input.reason });
+              return JSON.stringify({ status: "sold", sold, received: "NEAR", sold_usd: input.usd, note: "The NEAR is in the owner's wallet as plain NEAR; to buy with it, the owner adds it as NEAR for orders in Spending limits." });
+            }
+            if (result.status === "pending") return JSON.stringify({ status: "in_progress", note: "The sale is still settling; the NEAR will reach the wallet on its own." });
+            const code = result.status === "kept" ? "kept_on_agent" : result.code;
+            events.push({ type: "swap_denied", from: sold, amountIn: input.usd, code, reason: REASONS[code] ?? code });
+            return JSON.stringify({ status: result.status, reason: REASONS[code] ?? code });
+          }
           const result = await deps.trading.exchange(deps.userId, sale.from, sale.to, sale.amount);
-          const sold = ASSETS[input.asset as AssetKey].symbol;
           const got = input.receive === "near" ? "NEAR" : ASSETS[input.receive as AssetKey].symbol;
           if (result.status === "done") {
             events.push({ type: "swap_executed", from: sold, to: got, amountIn: input.usd, amountOut: "", usd: input.usd, reason: input.reason });

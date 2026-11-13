@@ -11,6 +11,7 @@ import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
 import { LIMITS } from "./config.js";
 import type { GrantRecord, GrantStore } from "./grants.js";
 import { DailyQuota } from "./quota.js";
+import type { Trading } from "./trading.js";
 
 // Real tokens and prices copied from GET /v1/tokens.
 const { tokens } = JSON.parse(readFileSync(new URL("../core/fixtures/priced-tokens.json", import.meta.url), "utf8")) as {
@@ -255,7 +256,7 @@ describe("GET /api/dashboard", () => {
       dashboard: Object.assign(
         (userId: string) => {
           asked.push(userId);
-          return Promise.resolve({ prices: { near: 3.58, bitcoin: null, ethereum: null, zcash: null }, agent: null });
+          return Promise.resolve({ prices: { near: 3.58, bitcoin: null, ethereum: null, zcash: null, gold: null, euro: null, solana: null }, agent: null });
         },
         { forget: () => undefined },
       ),
@@ -268,6 +269,84 @@ describe("GET /api/dashboard", () => {
     expect(ok.statusCode).toBe(200);
     expect(ok.headers["cache-control"]).toBe("no-store");
     expect(asked).toEqual(["did:privy:alice"]);
+  });
+});
+
+describe("POST /api/held/sell", () => {
+  const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
+  /** Trading that keeps the same gold for every user and records every sale, with whose it was. */
+  function heldTrading(heldGold = 254n) {
+    const sales: string[] = [];
+    const trading = {
+      held: () => Promise.resolve(new Map([[GOLD, heldGold]])),
+      sellHeld: (userId: string, asset: string, amount: bigint) => {
+        sales.push(`${userId} ${asset === GOLD ? "gold" : asset} ${amount}`);
+        return Promise.resolve({ status: "done", sold: amount, received: 278_524n * 10n ** 18n });
+      },
+    } as unknown as Trading;
+    return { trading, sales };
+  }
+  const sell = async (server: Awaited<ReturnType<typeof app>>, auth: string | null, payload: unknown) =>
+    server.inject({
+      method: "POST",
+      url: "/api/held/sell",
+      headers: { "content-type": "application/json", origin: ORIGIN, ...(auth ? { authorization: auth } : {}) },
+      payload: JSON.stringify(payload),
+    });
+
+  it("sells all the signed-in user's own gold for NEAR, even while the chat is paused", async () => {
+    const { trading, sales } = heldTrading();
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ trading, dashboard, agentEnabled: false });
+    const res = await sell(server, `Bearer ${await token()}`, { asset: "gold" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: "done", received: "0.278524" });
+    expect(sales).toEqual(["did:privy:alice gold 254"]);
+    expect(forgotten).toEqual(["did:privy:alice"]);
+  });
+
+  it("refuses without a valid session, an unknown asset, an amount or another user, before anything moves", async () => {
+    const { trading, sales } = heldTrading();
+    const server = await app({ trading });
+    expect((await sell(server, null, { asset: "gold" })).statusCode).toBe(401);
+    expect((await sell(server, `Bearer ${await token({ key: otherKey })}`, { asset: "gold" })).statusCode).toBe(401);
+    const alice = `Bearer ${await token()}`;
+    expect((await sell(server, alice, { asset: "bitcoin" })).statusCode).toBe(400);
+    expect((await sell(server, alice, { asset: "gold", amount: "1" })).statusCode).toBe(400);
+    expect((await sell(server, alice, { asset: "gold", userId: "did:privy:bob" })).statusCode).toBe(400);
+    expect(sales).toEqual([]);
+  });
+
+  it("says there is nothing to sell without counting it, and caps sales per user per day", async () => {
+    const empty = await app({ trading: heldTrading(0n).trading, heldSaleQuota: new DailyQuota(1, 100) });
+    const alice = `Bearer ${await token()}`;
+    expect((await sell(empty, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "not_enough" });
+    expect((await sell(empty, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "not_enough" });
+    const capped = await app({ trading: heldTrading().trading, heldSaleQuota: new DailyQuota(1, 100) });
+    expect((await sell(capped, alice, { asset: "gold" })).statusCode).toBe(200);
+    expect((await sell(capped, alice, { asset: "gold" })).statusCode).toBe(429);
+    expect((await sell(capped, `Bearer ${await token({ sub: "did:privy:bob" })}`, { asset: "gold" })).statusCode).toBe(200);
+  });
+
+  it("does not count a sale that never happened toward the day's sales", async () => {
+    const trading = {
+      held: () => Promise.resolve(new Map([[GOLD, 254n]])),
+      sellHeld: () => Promise.resolve({ status: "refused", code: "busy" }),
+    } as unknown as Trading;
+    const server = await app({ trading, heldSaleQuota: new DailyQuota(1, 100) });
+    const alice = `Bearer ${await token()}`;
+    expect((await sell(server, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "busy" });
+    expect((await sell(server, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "busy" });
+    const failing = await app({ trading: { held: () => Promise.reject(new Error("down")) } as unknown as Trading, heldSaleQuota: new DailyQuota(1, 100) });
+    expect((await sell(failing, alice, { asset: "gold" })).statusCode).toBe(502);
+    expect((await sell(failing, alice, { asset: "gold" })).statusCode).toBe(502);
+  });
+
+  it("answers a generic error when the agent's balance cannot be read", async () => {
+    const trading = { held: () => Promise.reject(new Error("agent api answered 502 at https://upstream")) } as unknown as Trading;
+    const res = await sell(await app({ trading }), `Bearer ${await token()}`, { asset: "gold" });
+    expect(res.statusCode).toBe(502);
+    expect(res.body).not.toContain("upstream");
   });
 });
 

@@ -51,6 +51,10 @@ export const LIMITS = {
   proofsPerUserPerDay: 300,
   /** Reply signature checks per day for everyone. */
   proofsPerDayTotal: 5000,
+  /** Sales from the dashboard of what the agent keeps, per user per day; each one trades on the Agent API. */
+  heldSalesPerUserPerDay: 20,
+  /** Those sales per day for everyone. */
+  heldSalesPerDayTotal: 2000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
 } as const;

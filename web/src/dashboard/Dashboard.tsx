@@ -1,6 +1,7 @@
-import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoins, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
+import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
 import { fromAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,7 +11,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
-import { fetchDashboard, type DashboardData } from "./dashboardClient";
+import { fetchDashboard, sellHeld, type DashboardData, type HeldSale } from "./dashboardClient";
 import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
@@ -30,6 +31,13 @@ const TILE: Record<AssetKey, string> = {
   zcash: "bg-yellow-300",
 };
 
+/** Gold's yellow, the euro's blue and Solana's purple, in the same light shades. */
+const HELD_TILE: Record<HeldKey, string> = {
+  gold: "bg-amber-200",
+  euro: "bg-sky-300",
+  solana: "bg-purple-300",
+};
+
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
@@ -37,6 +45,8 @@ const GROUPS: { title: string; keys: AssetKey[] }[] = [
 ];
 
 const NEAR_DECIMALS = 24;
+/** Shortest time between the tap that asks and the tap that sells. */
+const CONFIRM_DELAY_MS = 500;
 const HIDDEN = "••••";
 /**
  * What one order reserves from Inti's fee allowance: 100 TGas at NEAR's lowest gas price
@@ -139,13 +149,14 @@ interface MoneyProps {
   onManage: () => void;
   /** Re-reads the account's own balances (NEAR, NEAR for orders), which the dashboard does not read. */
   onChanged: () => void;
+  getAccessToken: () => Promise<string | null>;
   /** The wallet card, the asset areas, or both. */
   part: "wallet" | "assets" | "both";
   className?: string;
 }
 
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
-export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, part, className }: MoneyProps) {
+export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, getAccessToken, part, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
@@ -164,6 +175,42 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       setError(e instanceof Error ? e.message : `${ASSETS[key].name} could not be enabled.`);
     } finally {
       setBusy(null);
+    }
+  };
+
+  // Selling what the agent keeps takes two taps, since it moves real money: the first only asks.
+  const [confirming, setConfirming] = useState<HeldKey | null>(null);
+  const [selling, setSelling] = useState<HeldKey | null>(null);
+  const [saleNote, setSaleNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(null), 5_000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+
+  // When the first tap asked; a second tap sooner than CONFIRM_DELAY_MS is a double click, not a yes.
+  const askedAt = useRef(0);
+  const pressSell = async (key: HeldKey) => {
+    if (selling) return;
+    if (confirming !== key) {
+      setSaleNote(null);
+      setConfirming(key);
+      askedAt.current = Date.now();
+      return;
+    }
+    if (Date.now() - askedAt.current < CONFIRM_DELAY_MS) return;
+    setConfirming(null);
+    setSelling(key);
+    try {
+      const token = await getAccessToken();
+      const sale: HeldSale = token ? await sellHeld(token, key) : { status: "error", code: "unauthorized" };
+      setSaleNote(saleMessage(sale, HELD_ASSETS[key].name));
+      if (sale.status === "done" || sale.status === "pending") {
+        onChanged();
+        await load(true);
+      }
+    } finally {
+      setSelling(null);
     }
   };
 
@@ -222,7 +269,13 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
-      {part !== "wallet" && <h2 className="px-1 font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>}
+      {part !== "wallet" && (
+        <div className="-mb-2 px-1">
+          <h2 className="font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>
+          {/* Tells these areas apart from what the agent holds, further down. */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">In your wallet</p>
+        </div>
+      )}
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
         <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
@@ -279,7 +332,58 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       </section>
       ))}
       {part !== "wallet" && (
-        <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
+        <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs 0.00125 NEAR, once.</p>
+      )}
+
+      {part !== "wallet" && (
+        <section>
+          <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
+          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
+          <ul className="grid auto-rows-fr grid-cols-2 gap-3">
+            {HELD_KEYS.map((key, i) => {
+              const a = HELD_ASSETS[key];
+              const held = data?.agent?.held;
+              // Null while the agent's balance cannot be read; an asset it does not hold reads as zero.
+              const amount = held ? (held.find((h) => h.asset === key)?.amount ?? "0") : null;
+              const price = data?.prices[key];
+              const wide = HELD_KEYS.length % 2 === 1 && i === HELD_KEYS.length - 1;
+              return (
+                <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", HELD_TILE[key], wide && "col-span-2")}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className="size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70" />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
+                        <p className="text-xs opacity-70">{a.symbol}</p>
+                      </div>
+                    </div>
+                    <SellHeldButton
+                      name={a.name}
+                      state={selling === key ? "selling" : confirming === key ? "confirm" : "idle"}
+                      blockedBy={
+                        amount === null || Number(amount) === 0 ? "Nothing to sell" : !data?.agent?.grantUntil ? "Renew Inti's permission to sell" : selling !== null ? "Another sale is running" : null
+                      }
+                      onPress={() => void pressSell(key)}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
+                    <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
+                      {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
+                    </p>
+                    <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {(confirming || saleNote) && (
+            <p role="status" className="mt-2 px-1 text-sm">
+              {confirming ? `Tap ✓ again to sell all your ${HELD_ASSETS[confirming].name} for NEAR.` : saleNote}
+            </p>
+          )}
+        </section>
       )}
 
       {error && <p className="break-words text-sm text-destructive">{error}</p>}
@@ -612,7 +716,7 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
-  const money = { address, config, client, status, state, onManage, onChanged };
+  const money = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>
@@ -632,6 +736,51 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
         </div>
       </aside>
     </>
+  );
+}
+
+/** What the owner reads after pressing sell on one of the agent's assets. */
+function saleMessage(sale: HeldSale, name: string): string {
+  switch (sale.status) {
+    case "done":
+      return `Sold. ${shortAmount(sale.received)} NEAR is in your wallet.`;
+    case "pending":
+      return "The sale is still settling. Check back in a minute.";
+    case "kept":
+      return `The sale did not go through. Your ${name} is still with your agent.`;
+    case "refused":
+      if (sale.code === "no_grant") return "Inti's permission expired. Renew it in Your agent's rules, then sell.";
+      if (sale.code === "busy") return "Another order is still running. Try again in a minute.";
+      if (sale.code === "no_quote") return "There is no market for this sale right now. Nothing moved. Try again later.";
+      if (sale.code === "not_enough") return "Nothing to sell right now.";
+      return "The sale was refused. Nothing moved.";
+    case "error":
+      if (sale.code === "user_limit" || sale.code === "server_limit") return "Too many sales today. Try again tomorrow.";
+      if (sale.code === "unauthorized") return "Sign in again, then sell.";
+      return "Inti's server could not be reached. Nothing moved.";
+  }
+}
+
+/**
+ * A round button on an asset's card that sells all of it for NEAR. Its label shows on hover and to
+ * screen readers; the first press asks, the second sells.
+ */
+function SellHeldButton({ name, state, blockedBy, onPress }: { name: string; state: "idle" | "confirm" | "selling"; blockedBy: string | null; onPress: () => void }) {
+  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR`);
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={state === "selling" || (state === "idle" && blockedBy !== null)}
+      onClick={onPress}
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center rounded-full shadow-sm transition-colors disabled:opacity-40",
+        state === "confirm" ? "bg-primary text-primary-foreground" : "bg-neutral-950 text-white hover:bg-neutral-800",
+      )}
+    >
+      {state === "selling" ? <Loader2 className="size-4 animate-spin" /> : state === "confirm" ? <Check className="size-4" /> : <HandCoins className="size-4" />}
+    </button>
   );
 }
 

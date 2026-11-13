@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { Account, JsonRpcProvider, KeyPair, KeyPairSigner } from "near-api-js";
 import type { KeyPairString } from "near-api-js";
 import { z } from "zod";
+import { isHeld } from "../policy/heldAssets.js";
 import { toAtomic } from "../policy/units.js";
 
 /** Where an order runs: the user's own account and agent, and the grant that lets Inti act. */
@@ -234,7 +235,7 @@ async function homeAsNear(agent: AgentPort, account: OrderAccount, asset: string
  * confidential balance and waits until the agent can trade it. "returned" means the money could
  * not be shielded and is back in the wallet.
  */
-async function fund(
+export async function fund(
   chain: ChainPort,
   agent: AgentPort,
   account: OrderAccount,
@@ -275,7 +276,7 @@ async function reaches(read: () => Promise<Map<string, bigint>>, asset: string, 
  * Swaps `amount` of `from` into `to` on the agent, never below the user's signed price protection.
  * Returns what arrived, measured as the change in the agent's balance of `to`.
  */
-async function swapOnAgent(agent: AgentPort, account: OrderAccount, from: string, to: string, amount: bigint, bound: number | null): Promise<bigint | "no_route" | "failed" | "pending"> {
+export async function swapOnAgent(agent: AgentPort, account: OrderAccount, from: string, to: string, amount: bigint, bound: number | null): Promise<bigint | "no_route" | "failed" | "pending"> {
   const quote = await agent.quote(account.agentId, from, to, amount);
   if (quote === null) return "no_route";
   const held = (await agent.available(account.agentId)).get(to) ?? 0n;
@@ -378,13 +379,14 @@ export interface SweepResult {
  * Sends everything the agent holds back to the user's wallet, from both balances. While a limit
  * order is open the funding token stays on the confidential balance, since its money may still be
  * resting there. Tokens the wallet cannot hold yet stay until the user enables them. An asset the
- * Agent API cannot send to the wallet is sold for NEAR within the user's price protection.
+ * Agent API cannot send to the wallet is sold for NEAR within the user's price protection. Assets
+ * the agent keeps for the owner (gold, the euro, SOL) stay where they are.
  */
 export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAccount): Promise<SweepResult> {
   const result: SweepResult = { sent: [], stuck: [] };
   const bound = await agent.signedPriceBound(account.agentId);
   const sendHome = async (asset: string, free: bigint, from: BalanceSource) => {
-    if (free <= 0n) return;
+    if (free <= 0n || isHeld(asset)) return;
     const contract = tokenContract(asset);
     // NEAR arrives as plain NEAR and needs no registration.
     const deliverable = asset === FUNDING_ASSET || (contract !== null && (await chain.registered(contract, account.owner)));

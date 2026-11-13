@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { PricedToken } from "../core/portfolio.js";
 import { agentPolicy } from "../policy/agentPolicy.js";
 import type { AgentAccounts, AgentLookup } from "./agents.js";
-import { dashboard, DASHBOARD_TTL_MS, orderView, summarizePolicy, type AgentView } from "./dashboard.js";
+import { dashboard, DASHBOARD_TTL_MS, heldView, orderView, summarizePolicy, type AgentView } from "./dashboard.js";
 import type { GrantStore } from "./grants.js";
 import { FUNDING_ASSET } from "./orders.js";
 
 const ZEC = "nep141:zec.omft.near";
+const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
 const OWNER = "91".repeat(32);
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const TOKENS: PricedToken[] = [
@@ -31,6 +32,8 @@ function setup(lookups: Record<string, AgentLookup>) {
       return Promise.resolve({ policy: agentPolicy(OWNER) } as never);
     },
     openOrders: () => Promise.resolve([ORDER]),
+    // What a real confidential balance lists: gold the agent keeps, plus NEAR, which is not shown as held.
+    balances: () => Promise.resolve(new Map([[GOLD, 254n], [FUNDING_ASSET, 10n ** 23n]])),
   };
   let clock = NOW;
   const d = dashboard({ agents, grants, view, tokens: () => Promise.resolve(TOKENS), now: () => clock });
@@ -77,9 +80,16 @@ describe("dashboard", () => {
     const alice = await d("did:privy:alice");
     expect(alice.prices).toMatchObject({ near: 3.58, zcash: 956.27, bitcoin: null });
     expect(alice.agent).toMatchObject({ account: ALICE.agentAccount, grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
+    expect(alice.agent?.held).toEqual([{ asset: "gold", amount: "0.000254" }]);
     expect(JSON.stringify(alice)).not.toContain("ngt_secret");
     expect(await d("did:privy:bob")).toMatchObject({ agent: null });
     expect(read).toEqual(["agent_a"]);
+  });
+
+  it("lists only the assets the agent keeps, in whole units", () => {
+    const SOL = "nep141:sol.omft.near";
+    expect(heldView(new Map([[SOL, 12_444_200n], [GOLD, 0n], [ZEC, 5n]]))).toEqual([{ asset: "solana", amount: "0.0124442" }]);
+    expect(heldView(new Map())).toEqual([]);
   });
 
   it("reuses a user's dashboard for a few seconds instead of asking the Agent API again", async () => {

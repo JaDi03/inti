@@ -6,6 +6,7 @@ import { demoPolicy, demoPortfolio } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import { ASSETS } from "../policy/assets.js";
+import { HELD_ASSETS } from "../policy/heldAssets.js";
 import { FUNDING_ASSET, type ChainPort } from "./orders.js";
 import { realTools, usdPriceToWnear, usdToWnear } from "./realTools.js";
 import type { Trading } from "./trading.js";
@@ -13,6 +14,7 @@ import type { Trading } from "./trading.js";
 const OWNER = "91".repeat(32);
 const TOKENS: PricedToken[] = [
   { asset_id: ASSETS.zcash.assetId, symbol: "ZEC", decimals: 8, blockchain: "zec", price: 956.27 },
+  { asset_id: HELD_ASSETS.gold.assetId, symbol: "XAUT", decimals: 6, blockchain: "eth", price: 3885.33 },
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.55 },
 ];
 
@@ -41,6 +43,16 @@ function setup() {
     },
     // Two dollars of the day's one limit are left.
     roomToday: () => Promise.resolve(2_000_000n),
+    buyHeld: (_u: string, asset: string, amount: bigint) => {
+      orders.push({ kind: "held", asset, amount });
+      return Promise.resolve({ status: "done", spent: amount, received: 254n, asset });
+    },
+    sellHeld: (_u: string, asset: string, amount: bigint) => {
+      orders.push({ kind: "sell held", asset, amount });
+      return Promise.resolve({ status: "done", sold: amount, received: 1n });
+    },
+    // The agent keeps 0.000254 gold (about 1 dollar) for the owner.
+    held: () => Promise.resolve(new Map([[HELD_ASSETS.gold.assetId, 254n]])),
   } as unknown as Trading;
   const chain: ChainPort = {
     registered: (contract) => Promise.resolve(contract === "zec.omft.near"),
@@ -66,6 +78,30 @@ describe("realTools", () => {
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "bitcoin", enabled: false, kind: "crypto" }));
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "ethereum", symbol: "ETH", kind: "crypto" }));
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "bitcoin", symbol: "BTC", kind: "crypto" }));
+    expect(view.held_by_agent).toContainEqual({ key: "gold", name: "Gold", symbol: "XAUT", kind: "real-world", price_usd: 3885.33, held: "0.000254", held_usd: "0.98" });
+    expect(view.held_by_agent).toContainEqual(expect.objectContaining({ key: "solana", held: "0", price_usd: null }));
+  });
+
+  it("buys gold for the agent to keep, and says where it is", async () => {
+    const { tools, orders } = setup();
+    const out = JSON.parse(await tools.run("buy_now", { asset: "gold", usd: "1", reason: "owner asked" }, [])) as Record<string, unknown>;
+    expect(out).toMatchObject({ status: "bought", asset: "Gold" });
+    expect(out.note).toContain("held by the owner's agent");
+    expect(orders).toEqual([{ kind: "held", asset: HELD_ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
+  });
+
+  it("sells gold from what the agent holds, only for NEAR, and never as a price order", async () => {
+    const { tools, orders } = setup();
+    const events: AgentEvent[] = [];
+    // 0.98 dollars is a little above what 0.000254 gold is worth at its price: it sells exactly that.
+    const out = JSON.parse(await tools.run("sell_now", { asset: "gold", receive: "near", usd: "0.99", reason: "sell all" }, events)) as Record<string, unknown>;
+    expect(out).toMatchObject({ status: "sold", sold: "XAUT", received: "NEAR" });
+    expect(orders).toEqual([{ kind: "sell held", asset: HELD_ASSETS.gold.assetId, amount: 254n }]);
+    expect(events[0]).toMatchObject({ type: "swap_executed", from: "XAUT", to: "NEAR" });
+    await expect(tools.run("sell_now", { asset: "gold", receive: "zcash", usd: "0.5", reason: "x" }, [])).rejects.toThrow("only be sold for NEAR");
+    await expect(tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3000", days: 3 }, [])).rejects.toThrow("invalid input");
+    await expect(tools.run("sell_now", { asset: "zcash", receive: "gold", usd: "1", reason: "x" }, [])).rejects.toThrow("invalid input");
+    expect(orders).toHaveLength(1);
   });
 
   it("buys the fixed asset id with the dollar amount converted to wNEAR", async () => {
