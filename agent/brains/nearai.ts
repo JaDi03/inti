@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import type { AssistantTurn, Brain, ToolCall, ToolSpec, Turn } from "../core/types.js";
 
@@ -40,6 +41,34 @@ function toMessages(system: string, history: readonly Turn[]): OpenAI.ChatComple
   return messages;
 }
 
+/** SHA-256 hashes of the exact bytes of one call, the ones NEAR AI signs for its response id. */
+export interface CallHashes {
+  requestHash?: string;
+  responseHash?: string;
+}
+
+const sha256 = (bytes: string | Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * A fetch that keeps the hashes of the request body and the uncompressed response body, as NEAR AI's
+ * response signatures cover them (docs.near.ai/cloud/verification), and asks NEAR AI to serve the
+ * exact model named, never an alias. The model's answer is passed on unchanged.
+ */
+export function hashingFetch(into: CallHashes, base: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("x-no-aliasing", "true");
+    headers.set("accept-encoding", "identity");
+    const res = await base(input, { ...init, headers });
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (typeof init?.body === "string") {
+      into.requestHash = sha256(init.body);
+      into.responseHash = sha256(body);
+    }
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  };
+}
+
 /** Tool arguments arrive as a JSON string; bad JSON is passed on so tool validation rejects it. */
 function parseArguments(raw: string): unknown {
   try {
@@ -49,7 +78,7 @@ function parseArguments(raw: string): unknown {
   }
 }
 
-/** Brain on NEAR AI Cloud. Each step keeps the chat id, which signs the response inside the TEE. */
+/** Brain on NEAR AI Cloud. Each step keeps the chat id and the hashes NEAR AI signs for it inside the TEE. */
 export class NearAiBrain implements Brain {
   readonly name: string;
 
@@ -65,7 +94,9 @@ export class NearAiBrain implements Brain {
   }
 
   async step(system: string, history: readonly Turn[], tools: readonly ToolSpec[]): Promise<AssistantTurn> {
-    const response = await this.client.chat.completions.create({
+    // One client copy per call, so each call keeps its own hashes even while others run.
+    const hashes: CallHashes = {};
+    const response = await this.client.withOptions({ fetch: hashingFetch(hashes) }).chat.completions.create({
       model: this.model,
       max_tokens: MAX_OUTPUT_TOKENS,
       temperature: TEMPERATURE,
@@ -91,7 +122,12 @@ export class NearAiBrain implements Brain {
       toolCalls,
       stop: toolCalls.length > 0 ? "tool_use" : "end",
       raw: message,
-      audit: { provider: "nearai", model: this.model, responseId: response.id },
+      audit: {
+        provider: "nearai",
+        model: this.model,
+        responseId: response.id,
+        ...(hashes.requestHash && hashes.responseHash ? { requestHash: hashes.requestHash, responseHash: hashes.responseHash } : {}),
+      },
     };
   }
 }

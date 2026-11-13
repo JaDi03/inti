@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import type OpenAI from "openai";
 import { describe, expect, it } from "vitest";
 import type { ToolSpec, Turn } from "../core/types.js";
-import { NearAiBrain } from "./nearai.js";
+import { hashingFetch, NearAiBrain, type CallHashes } from "./nearai.js";
 
 type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming;
 
@@ -9,6 +10,7 @@ type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming;
 function fakeClient(replies: Array<Partial<OpenAI.ChatCompletion>>) {
   const requests: CreateParams[] = [];
   const client = {
+    withOptions: () => client,
     chat: {
       completions: {
         create: (params: CreateParams) => {
@@ -86,6 +88,24 @@ describe("NearAiBrain", () => {
     const { client } = fakeClient([reply]);
     const turn = await new NearAiBrain(client).step("s", [{ role: "user", text: "hi" }], tools);
     expect(turn.toolCalls[0]?.input).toBe("{not json");
+  });
+
+  it("keeps the hashes of the exact bytes NEAR AI signs, and asks for the exact model", async () => {
+    const sent: Headers[] = [];
+    const base = ((_input: URL | string, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers));
+      return Promise.resolve(new Response('{"id":"chatcmpl-9"}', { status: 200, headers: { "content-type": "application/json" } }));
+    }) as typeof fetch;
+    const hashes: CallHashes = {};
+    const res = await hashingFetch(hashes, base)("https://cloud-api.near.ai/v1/chat/completions", { method: "POST", body: '{"model":"m"}' });
+    // The model's answer goes on unchanged.
+    expect(await res.text()).toBe('{"id":"chatcmpl-9"}');
+    expect(hashes).toEqual({
+      requestHash: createHash("sha256").update('{"model":"m"}').digest("hex"),
+      responseHash: createHash("sha256").update('{"id":"chatcmpl-9"}').digest("hex"),
+    });
+    expect(sent[0]?.get("x-no-aliasing")).toBe("true");
+    expect(sent[0]?.get("accept-encoding")).toBe("identity");
   });
 
   it("fails loudly when the output is cut by max_tokens", async () => {
