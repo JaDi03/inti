@@ -2,8 +2,8 @@ import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoi
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
-import { fromAtomic, toAtomic } from "../../../agent/policy/units";
-import { anyRose, type Balances } from "../sound/balanceRise";
+import { fromAtomic } from "../../../agent/policy/units";
+import { anyRose, assetBalances, type Balances } from "../sound/balanceRise";
 import { playCash } from "../sound/cashSound";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -118,7 +118,7 @@ function useDashboard(
   // "Cha-ching" when any asset card, in the wallet or with the agent, holds more than at the last read.
   const lastBalances = useRef<Balances | null>(null);
   useEffect(() => {
-    const now = assetBalances(data, assets);
+    const now = assetBalances(assets, data?.agent);
     if (anyRose(lastBalances.current, now)) playCash();
     lastBalances.current = now;
   }, [data, assets]);
@@ -151,23 +151,6 @@ function useDashboard(
   return { data, assets, loading, load };
 }
 
-/**
- * The atomic balance of every asset card that was read: the wallet's assets and what the agent
- * holds (its NEAR, gold, the euro, SOL). The wallet's own NEAR is left out, so moving NEAR between
- * the wallet and orders is quiet.
- */
-function assetBalances(data: DashboardData | null, assets: AssetRow[] | null): Balances {
-  const out = new Map<string, bigint>();
-  for (const row of assets ?? []) out.set(row.key, row.balance);
-  const agent = data?.agent;
-  if (agent?.cash != null) out.set("agent-near", BigInt(toAtomic(agent.cash, NEAR_DECIMALS)));
-  if (agent?.held) {
-    for (const key of HELD_KEYS) {
-      out.set(`agent-${key}`, BigInt(toAtomic(agent.held.find((h) => h.asset === key)?.amount ?? "0", HELD_ASSETS[key].decimals)));
-    }
-  }
-  return out;
-}
 
 interface MoneyProps {
   address: string;
