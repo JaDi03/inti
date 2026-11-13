@@ -6,4 +6,6 @@ dist/
 target/
 grants.json
 grants.json.tmp
+agent-spend.json
+agent-spend.json.tmp
 inti-key.json
