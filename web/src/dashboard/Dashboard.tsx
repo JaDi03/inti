@@ -367,7 +367,12 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     />
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    {/* The first tap asks here, on the card the owner is looking at. */}
+                    {confirming === key ? (
+                      <p className="text-[11px] font-bold uppercase tracking-wide">Tap ✓ again to sell</p>
+                    ) : (
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    )}
                     <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                       {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
@@ -378,9 +383,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
               );
             })}
           </ul>
-          {(confirming || saleNote) && (
+          {saleNote && (
             <p role="status" className="mt-2 px-1 text-sm">
-              {confirming ? `Tap ✓ again to sell all your ${HELD_ASSETS[confirming].name} for NEAR.` : saleNote}
+              {saleNote}
             </p>
           )}
         </section>
@@ -766,7 +771,7 @@ function saleMessage(sale: HeldSale, name: string): string {
  * screen readers; the first press asks, the second sells.
  */
 function SellHeldButton({ name, state, blockedBy, onPress }: { name: string; state: "idle" | "confirm" | "selling"; blockedBy: string | null; onPress: () => void }) {
-  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR`);
+  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR (tap twice)`);
   return (
     <button
       type="button"
