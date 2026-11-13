@@ -50,14 +50,20 @@ describe("preparePolicy", () => {
 describe("prepareFreeze", () => {
   it("asks for a freeze of exactly this agent, and passes the rules preview on for the owner's check", async () => {
     const { accounts, generated } = api(null);
-    expect(await accounts.prepareFreeze(AGENT)).toEqual({ status: "pending_signature", correlationId: "intent_x", intent: { standard: "nep413" }, preview: { policy: {} } });
-    expect(generated).toEqual([{ type: "agent_freeze", agent_id: AGENT }]);
+    expect(await accounts.prepareFreeze(AGENT, true)).toEqual({ status: "pending_signature", correlationId: "intent_x", intent: { standard: "nep413" }, preview: { policy: {} } });
+    await accounts.prepareFreeze(AGENT, false);
+    expect(generated).toEqual([
+      { type: "agent_freeze", agent_id: AGENT },
+      { type: "agent_unfreeze", agent_id: AGENT },
+    ]);
   });
 
-  it("says an agent already frozen needs nothing signed, and treats any other refusal as an outage", async () => {
+  it("says an agent already in that state needs nothing signed, and treats any other refusal as an outage", async () => {
+    // The Agent API's own codes, as it answers them.
     const answer = (status: number, code: string) => () => Promise.resolve(Response.json({ errors: [{ status: String(status), code }] }, { status }));
-    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_frozen") as typeof fetch).prepareFreeze(AGENT)).toEqual({ status: "already_frozen" });
-    await expect(agentApiAccounts("key", "https://api.example", answer(409, "something_else") as typeof fetch).prepareFreeze(AGENT)).rejects.toThrow("agents_unavailable");
+    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_frozen") as typeof fetch).prepareFreeze(AGENT, true)).toEqual({ status: "already_frozen" });
+    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_unfrozen") as typeof fetch).prepareFreeze(AGENT, false)).toEqual({ status: "already_unfrozen" });
+    await expect(agentApiAccounts("key", "https://api.example", answer(409, "something_else") as typeof fetch).prepareFreeze(AGENT, true)).rejects.toThrow("agents_unavailable");
   });
 });
 

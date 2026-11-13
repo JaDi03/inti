@@ -43,14 +43,17 @@ export interface AgentAccounts {
    * grant replaces them instead of adding to them. Grants with another label are never touched.
    */
   prepareRevokes(agentId: string): Promise<PreparedRevoke[]>;
-  /** Asks for the document the owner signs to freeze their agent. Nothing happens until it is signed and sent. */
-  prepareFreeze(agentId: string): Promise<PreparedFreeze>;
+  /**
+   * Asks for the document the owner signs to freeze their agent (`frozen` true) or unfreeze it.
+   * Nothing happens until it is signed and sent.
+   */
+  prepareFreeze(agentId: string, frozen: boolean): Promise<PreparedFreeze>;
 }
 
 export type PreparedFreeze =
   | { status: "pending_signature"; correlationId: string; intent: unknown; preview: { policy: unknown } }
-  /** The agent is already frozen: nothing to sign. */
-  | { status: "already_frozen" };
+  /** The agent is already in the asked state: nothing to sign. */
+  | { status: "already_frozen" | "already_unfrozen" };
 
 export interface PreparedRevoke {
   correlationId: string;
@@ -68,7 +71,7 @@ export type PreparedPolicy =
   | { status: "cooldown"; availableAt: string };
 
 /** The owner-signed actions Inti sends. */
-export type OwnerIntentType = "agent_create" | "grant_issue" | "policy_update" | "grant_revoke" | "agent_freeze";
+export type OwnerIntentType = "agent_create" | "grant_issue" | "policy_update" | "grant_revoke" | "agent_freeze" | "agent_unfreeze";
 
 const grantsSchema = z.object({
   data: z.array(z.object({ grant_id: z.string().regex(/^[0-9a-f]{64}$/), label: z.string(), expires_at: z.string(), revoked_at: z.string().nullable() })),
@@ -185,12 +188,14 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
         throw unavailable(error);
       }
     },
-    async prepareFreeze(agentId) {
+    async prepareFreeze(agentId, frozen) {
       try {
-        const res = await request<{ correlation_id: string; intent: unknown; preview: { policy: unknown } }>("/v1/generate-intent", { type: "agent_freeze", agent_id: agentId });
+        const type = frozen ? "agent_freeze" : "agent_unfreeze";
+        const res = await request<{ correlation_id: string; intent: unknown; preview: { policy: unknown } }>("/v1/generate-intent", { type, agent_id: agentId });
         return { status: "pending_signature", correlationId: res.correlation_id, intent: res.intent, preview: { policy: res.preview.policy } };
       } catch (error) {
         if (error instanceof UpstreamError && error.code === "wallet_already_frozen") return { status: "already_frozen" };
+        if (error instanceof UpstreamError && error.code === "wallet_already_unfrozen") return { status: "already_unfrozen" };
         throw unavailable(error);
       }
     },

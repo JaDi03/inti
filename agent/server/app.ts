@@ -68,6 +68,8 @@ const prepareGrantBody = z.strictObject({ days: z.literal(GRANT_DAY_CHOICES).opt
 const preparePolicyBody = z.strictObject({
   maxDeviationBps: z.literal(PRICE_PROTECTION_BPS),
 });
+/** Whether the owner freezes (true) or unfreezes (false) their agent. */
+const prepareFreezeBody = z.strictObject({ frozen: z.boolean() });
 /** Which asset the agent keeps to sell; always all of it. */
 const sellHeldBody = z.strictObject({ asset: z.enum(HELD_KEYS) });
 const submitAgentBody = z.strictObject({
@@ -125,8 +127,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const policyQuota = new DailyQuota(LIMITS.policyChangesPerUserPerDay, LIMITS.policyChangesPerDayTotal);
   // Rule changes waiting for a signature, and the user each one belongs to.
   const pendingPolicies = new Map<string, string>();
-  // Freezes waiting for the owner's signature, and the user each one belongs to.
-  const pendingFreezes = new Map<string, string>();
+  // Freezes and unfreezes waiting for the owner's signature, the user each one belongs to and which it is.
+  const pendingFreezes = new Map<string, { userId: string; type: "agent_freeze" | "agent_unfreeze" }>();
   const verifyQuota = deps.verifyQuota ?? new DailyQuota(LIMITS.verificationsPerUserPerDay, LIMITS.verificationsPerDayTotal);
   let verifying = 0;
   let lastAttestation: { at: number; result: ModelAttestation } | null = null;
@@ -417,11 +419,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
   });
 
-  // The document the user's wallet signs to freeze their own agent. Nothing comes from the request:
-  // the agent is the session's own, and nothing happens until the user signs and sends it.
+  // The document the user's wallet signs to freeze or unfreeze their own agent. Only that choice
+  // comes from the request: the agent is the session's own, and nothing happens until the user
+  // signs and sends it.
   app.post("/api/agent/freeze/prepare", async (req, reply) => {
     const userId = await signedInUser(req, reply);
     if (userId === null) return reply;
+    const body = prepareFreezeBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
     let taken = false;
     try {
       const agent = await deps.agents.find(userId);
@@ -432,13 +437,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         return reply.code(429).send({ error: "rate_limited" });
       }
       taken = true;
-      const prepared = await deps.agents.prepareFreeze(agent.agentId);
-      if (prepared.status === "already_frozen") {
+      const prepared = await deps.agents.prepareFreeze(agent.agentId, body.data.frozen);
+      if (prepared.status !== "pending_signature") {
         policyQuota.giveBack(userId);
         return prepared;
       }
-      remember(pendingFreezes, prepared.correlationId, userId);
-      req.log.info({ userId }, "freeze_prepared");
+      remember(pendingFreezes, prepared.correlationId, { userId, type: body.data.frozen ? "agent_freeze" : "agent_unfreeze" });
+      req.log.info({ userId, frozen: body.data.frozen }, "freeze_prepared");
       return prepared;
     } catch (error) {
       if (taken) policyQuota.giveBack(userId);
@@ -446,15 +451,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
   });
 
-  // Sends the signed freeze. Only the user who asked for it may send it.
+  // Sends the signed freeze or unfreeze. Only the user who asked for it may send it.
   app.post("/api/agent/freeze/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
     const userId = await signedInUser(req, reply);
     if (userId === null) return reply;
     const body = submitAgentBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (pendingFreezes.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
+    const pending = pendingFreezes.get(body.data.correlationId);
+    if (pending?.userId !== userId) return reply.code(404).send({ error: "not_found" });
     try {
-      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "agent_freeze");
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, pending.type);
       if (outcome === "success") deps.dashboard?.forget(userId);
       if (outcome !== "processing") pendingFreezes.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "freeze_submitted");
