@@ -53,7 +53,9 @@ export interface AgentAccounts {
 export type PreparedFreeze =
   | { status: "pending_signature"; correlationId: string; intent: unknown; preview: { policy: unknown } }
   /** The agent is already in the asked state: nothing to sign. */
-  | { status: "already_frozen" | "already_unfrozen" };
+  | { status: "already_frozen" | "already_unfrozen" }
+  /** The Agent API waits a while after a freeze before it accepts an unfreeze; it opens at `availableAt`. */
+  | { status: "cooldown"; availableAt: string };
 
 export interface PreparedRevoke {
   correlationId: string;
@@ -81,6 +83,8 @@ const policyViewSchema = z.object({
   revision: z.number().int().min(0).nullable(),
   cooldowns: z.object({ policy_change_available_at: z.string().nullable() }),
 });
+
+const unfreezeViewSchema = z.object({ cooldowns: z.object({ unfreeze_available_at: z.string().max(40).nullable() }) });
 
 /** Longest the server waits for one Agent API answer; a status read may hold for 30 s by design. */
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -190,6 +194,11 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
     },
     async prepareFreeze(agentId, frozen) {
       try {
+        if (!frozen) {
+          const view = unfreezeViewSchema.parse(await request(`/v1/agents/${encodeURIComponent(agentId)}/policy`));
+          const availableAt = view.cooldowns.unfreeze_available_at;
+          if (availableAt !== null && Date.parse(availableAt) > Date.now()) return { status: "cooldown", availableAt };
+        }
         const type = frozen ? "agent_freeze" : "agent_unfreeze";
         const res = await request<{ correlation_id: string; intent: unknown; preview: { policy: unknown } }>("/v1/generate-intent", { type, agent_id: agentId });
         return { status: "pending_signature", correlationId: res.correlation_id, intent: res.intent, preview: { policy: res.preview.policy } };

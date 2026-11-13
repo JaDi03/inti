@@ -58,6 +58,18 @@ describe("prepareFreeze", () => {
     ]);
   });
 
+  it("asks for no unfreeze while the Agent API still waits after a freeze", async () => {
+    const policyView = (unfreezeAt: string | null) => (input: string | URL | Request) =>
+      new URL(input instanceof Request ? input.url : input).pathname.endsWith("/policy")
+        ? Promise.resolve(Response.json({ revision: 5, cooldowns: { policy_change_available_at: null, unfreeze_available_at: unfreezeAt } }))
+        : Promise.resolve(Response.json({ correlation_id: "intent_y", intent: { standard: "nep366" }, preview: { policy: {} } }));
+    expect(await agentApiAccounts("key", "https://api.example", policyView("2999-01-01T00:00:00.000Z") as typeof fetch).prepareFreeze(AGENT, false)).toEqual({
+      status: "cooldown",
+      availableAt: "2999-01-01T00:00:00.000Z",
+    });
+    expect((await agentApiAccounts("key", "https://api.example", policyView("2000-01-01T00:00:00.000Z") as typeof fetch).prepareFreeze(AGENT, false)).status).toBe("pending_signature");
+  });
+
   it("says an agent already in that state needs nothing signed, and treats any other refusal as an outage", async () => {
     // The Agent API's own codes, as it answers them.
     const answer = (status: number, code: string) => () => Promise.resolve(Response.json({ errors: [{ status: String(status), code }] }, { status }));

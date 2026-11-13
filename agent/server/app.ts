@@ -438,6 +438,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       }
       taken = true;
       const prepared = await deps.agents.prepareFreeze(agent.agentId, body.data.frozen);
+      if (prepared.status === "cooldown") {
+        // Nothing was prepared, so the try does not count.
+        policyQuota.giveBack(userId);
+        return reply.code(409).send({ error: "cooldown", availableAt: prepared.availableAt });
+      }
       if (prepared.status !== "pending_signature") {
         policyQuota.giveBack(userId);
         return prepared;
