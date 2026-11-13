@@ -50,6 +50,19 @@ The model decides; the code and the contract enforce the limits.
 
 Until you have an agent and a live grant, the chat runs on a simulated portfolio and no funds move.
 
+### Private AI, checked live
+
+Next to the logo, a shield says whether the model is verified. Tap it to see each check and run them again.
+
+```ts
+if (reportData.slice(64) === nonce) passed.add("binds_nonce");
+if (reportData.slice(0, 64) === signingAddress.slice(2).padEnd(64, "0")) passed.add("binds_key");
+```
+
+`agent/server/attestation.ts`: Inti sends NEAR AI a new random challenge and gets back the hardware report of its model. It checks the Intel TDX quote against Intel's own certificates ([@phala/dcap-qvl](https://github.com/Phala-Network/dcap-qvl)), that the quote carries the challenge and the model's signing key, that the machine is not in debug mode and runs the software it measured, and asks NVIDIA whether the GPU is genuine. The steps follow [NEAR AI's verification docs](https://docs.near.ai/cloud/verification). Nothing is stored.
+
+This proves where the model runs. It does not yet prove that each reply came from that chip, and Inti's own server still sees your messages to pass them on.
+
 ### The limits
 
 ```rust
