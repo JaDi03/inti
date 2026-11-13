@@ -45,9 +45,10 @@ export interface DashboardView {
   prices: Record<"near" | TradableKey, number | null>;
   /**
    * `account` is the agent's own NEAR account on NEAR Intents, as the Agent API knows it. `held` is
-   * what the agent keeps for its owner (gold, the euro, SOL), or null when it cannot be read.
+   * what the agent keeps for its owner (gold, the euro, SOL) and `cash` the NEAR it holds to spend
+   * next, in whole NEAR; each is null when it cannot be read.
    */
-  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null } | null;
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null; cash: string | null } | null;
 }
 
 /** What the dashboard reads from the Agent API about one agent. Reads only. */
@@ -187,6 +188,7 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
         policy: policy ? summarizePolicy(policy, agent.ownerAccount, now()) : null,
         orders: orders ? orders.map((o) => orderView(o, tokens)) : null,
         held: balances ? heldView(balances) : null,
+        cash: balances ? fromAtomic((balances.get(FUNDING_ASSET) ?? 0n).toString(), 24) : null,
       };
     }
 

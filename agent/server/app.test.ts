@@ -306,6 +306,31 @@ describe("GET /api/dashboard", () => {
   });
 });
 
+describe("POST /api/agent/cash/home", () => {
+  it("sends the NEAR of the signed-in user's own agent home, and caps sends per user per day", async () => {
+    const asked: string[] = [];
+    const results = [{ status: "done", sent: 5n * 10n ** 23n }, { status: "refused", code: "not_enough" }];
+    const trading = {
+      sendCashHome: (userId: string) => {
+        asked.push(userId);
+        return Promise.resolve(results.shift());
+      },
+    } as unknown as Trading;
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ trading, dashboard, heldSaleQuota: new DailyQuota(1, 100) });
+    const send = async (auth: string | null) =>
+      server.inject({ method: "POST", url: "/api/agent/cash/home", headers: { origin: ORIGIN, ...(auth ? { authorization: auth } : {}) } });
+    expect((await send(null)).statusCode).toBe(401);
+    expect(asked).toEqual([]);
+    const alice = `Bearer ${await token()}`;
+    expect((await send(alice)).json()).toEqual({ status: "done", sent: "0.5" });
+    expect(forgotten).toEqual(["did:privy:alice"]);
+    // The day's one send is used; a second one is capped before it reaches the agent.
+    expect((await send(alice)).statusCode).toBe(429);
+    expect(asked).toEqual(["did:privy:alice"]);
+  });
+});
+
 describe("POST /api/held/sell", () => {
   const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
   /** Trading that keeps the same gold for every user and records every sale, with whose it was. */

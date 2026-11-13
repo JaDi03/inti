@@ -47,12 +47,17 @@ function setup() {
       orders.push({ kind: "held", asset, amount });
       return Promise.resolve({ status: "done", spent: amount, received: 254n, asset });
     },
-    sellHeld: (_u: string, asset: string, amount: bigint) => {
-      orders.push({ kind: "sell held", asset, amount });
-      return Promise.resolve({ status: "done", sold: amount, received: 1n });
+    tradeHeld: (_u: string, from: string, to: string, amount: bigint) => {
+      orders.push({ kind: `trade held to ${to}`, asset: from, amount });
+      return Promise.resolve({ status: "done", spent: amount, received: 1n, asset: to, kept: to === FUNDING_ASSET });
     },
-    // The agent keeps 0.000254 gold (about 1 dollar) for the owner.
+    sendCashHome: () => {
+      orders.push({ kind: "cash home", asset: FUNDING_ASSET, amount: 0n });
+      return Promise.resolve({ status: "done", sent: 5n * 10n ** 23n });
+    },
+    // The agent keeps 0.000254 gold (about 1 dollar) for the owner, and 0.2 NEAR from earlier sales.
     held: () => Promise.resolve(new Map([[HELD_ASSETS.gold.assetId, 254n]])),
+    cash: () => Promise.resolve(2n * 10n ** 23n),
   } as unknown as Trading;
   const chain: ChainPort = {
     registered: (contract) => Promise.resolve(contract === "zec.omft.near"),
@@ -72,6 +77,8 @@ describe("realTools", () => {
     const view = JSON.parse(await tools.run("get_portfolio", {}, [])) as Record<string, unknown>;
     expect(view.paid_with).toBe("NEAR");
     expect(view.near_for_orders).toBe("0.1");
+    expect(view.near_on_agent).toBe("0.2");
+    expect(view.near_on_agent_usd).toBe("0.71");
     expect(view.money_for_orders_usd).toBe("0.35");
     expect(view.limits).toEqual({ per_order_usd: "1.06", per_day_usd: "3.55", left_today_usd: "2.00" });
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "zcash", enabled: true, price_usd: 956.27, in_wallet: "0.008", in_wallet_usd: "7.65" }));
@@ -90,22 +97,41 @@ describe("realTools", () => {
     expect(orders).toEqual([{ kind: "held", asset: HELD_ASSETS.gold.assetId, amount: usdToWnear("1", 3_550_000n) }]);
   });
 
-  it("sells gold from what the agent holds, only for NEAR, and never as a price order", async () => {
+  it("sells gold where the agent holds it, for NEAR that stays with the agent, and never as a price order", async () => {
     const { tools, orders } = setup();
     const events: AgentEvent[] = [];
     // 0.98 dollars is a little above what 0.000254 gold is worth at its price: it sells exactly that.
     const out = JSON.parse(await tools.run("sell_now", { asset: "gold", receive: "near", usd: "0.99", reason: "sell all" }, events)) as Record<string, unknown>;
     expect(out).toMatchObject({ status: "sold", sold: "XAUT", received: "NEAR" });
-    expect(orders).toEqual([{ kind: "sell held", asset: HELD_ASSETS.gold.assetId, amount: 254n }]);
+    expect(out.note).toContain("stays with the owner's agent");
+    expect(orders).toEqual([{ kind: `trade held to ${FUNDING_ASSET}`, asset: HELD_ASSETS.gold.assetId, amount: 254n }]);
     expect(events[0]).toMatchObject({ type: "swap_executed", from: "XAUT", to: "NEAR" });
-    await expect(tools.run("sell_now", { asset: "gold", receive: "zcash", usd: "0.5", reason: "x" }, [])).rejects.toThrow("only be sold for NEAR");
     // Below the usual 0.10 minimum, what the agent keeps still sells; other assets do not.
     await tools.run("sell_now", { asset: "gold", receive: "near", usd: "0.09", reason: "sell all" }, []);
-    expect(orders[1]).toMatchObject({ kind: "sell held", asset: HELD_ASSETS.gold.assetId });
+    expect(orders[1]).toMatchObject({ kind: `trade held to ${FUNDING_ASSET}`, asset: HELD_ASSETS.gold.assetId });
     await expect(tools.run("sell_now", { asset: "zcash", receive: "near", usd: "0.09", reason: "x" }, [])).rejects.toThrow("between");
     orders.splice(1);
     await expect(tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3000", days: 3 }, [])).rejects.toThrow("invalid input");
-    await expect(tools.run("sell_now", { asset: "zcash", receive: "gold", usd: "1", reason: "x" }, [])).rejects.toThrow("invalid input");
+    expect(orders).toHaveLength(1);
+  });
+
+  it("swaps gold straight into another asset inside the agent, and a wallet asset into gold", async () => {
+    const { tools, orders } = setup();
+    const out = JSON.parse(await tools.run("sell_now", { asset: "gold", receive: "zcash", usd: "0.5", reason: "owner asked" }, [])) as Record<string, unknown>;
+    expect(out).toMatchObject({ status: "sold", sold: "XAUT", received: "ZEC" });
+    expect(out.note).toContain("in the owner's wallet");
+    expect(orders[0]).toMatchObject({ kind: `trade held to ${ASSETS.zcash.assetId}`, asset: HELD_ASSETS.gold.assetId });
+    const toGold = JSON.parse(await tools.run("sell_now", { asset: "zcash", receive: "gold", usd: "1", reason: "owner asked" }, [])) as Record<string, unknown>;
+    expect(toGold.note).toContain("held by the owner's agent");
+    expect(orders[1]).toEqual({ kind: `sell to ${HELD_ASSETS.gold.assetId}`, asset: ASSETS.zcash.assetId, amount: 104_572n });
+  });
+
+  it("sends the agent's NEAR to the wallet only through its own tool, with no amount or recipient to choose", async () => {
+    const { tools, orders } = setup();
+    const out = JSON.parse(await tools.run("send_near_to_wallet", { reason: "owner asked" }, [])) as Record<string, unknown>;
+    expect(out).toMatchObject({ status: "sent", near: "0.5" });
+    await expect(tools.run("send_near_to_wallet", { reason: "x", to: "attacker.near" }, [])).rejects.toThrow("invalid input");
+    await expect(tools.run("send_near_to_wallet", { reason: "x", amount: "1" }, [])).rejects.toThrow("invalid input");
     expect(orders).toHaveLength(1);
   });
 
@@ -154,7 +180,7 @@ describe("realTools", () => {
     expect(events).toEqual([{ type: "limit_order_placed", to: "ZEC", usd: "1", priceUsd: "900", days: "3" }]);
     const out = JSON.parse(await tools.run("buy_at_price", { asset: "zcash", usd: "1", price_usd: "900", days: 3 }, [])) as Record<string, unknown>;
     expect(out.fee).toBe("1Click charges 0.20% on every limit order.");
-    expect(out.leftover).toContain("comes back to the wallet as regular NEAR");
+    expect(out.leftover).toContain("stays with the owner's agent as NEAR");
     expect(orders[0]).toMatchObject({ kind: "limit", asset: ASSETS.zcash.assetId, price: usdPriceToWnear("900", 3_550_000n), days: 3 });
     expect(usdPriceToWnear("900", 3_550_000n)).toBe("253.521126");
   });
@@ -172,12 +198,12 @@ describe("realTools", () => {
     expect(orders).toEqual([]);
   });
 
-  it("sells the fixed asset id for NEAR, the dollar amount converted at its price, and says how the NEAR arrives", async () => {
+  it("sells the fixed asset id for NEAR, the dollar amount converted at its price, and says the NEAR stays with the agent", async () => {
     const { tools, orders } = setup();
     const events: AgentEvent[] = [];
     const out = JSON.parse(await tools.run("sell_now", { asset: "zcash", receive: "near", usd: "1", reason: "owner asked" }, events)) as Record<string, unknown>;
     expect(out).toMatchObject({ status: "sold", sold: "ZEC", received: "NEAR", sold_usd: "1" });
-    expect(out.note).toContain("plain NEAR");
+    expect(out.note).toContain("pays for the next purchases");
     // 1 dollar at 956.27 per ZEC is 0.00104572 ZEC, rounded down.
     expect(orders).toEqual([{ kind: `sell to ${FUNDING_ASSET}`, asset: ASSETS.zcash.assetId, amount: 104_572n }]);
     expect(events[0]).toMatchObject({ type: "swap_executed", from: "ZEC", to: "NEAR" });

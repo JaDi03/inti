@@ -206,6 +206,30 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     return deps.dashboard(userId);
   });
 
+  // Sends all the NEAR the user's agent holds to the user's wallet. Like the sale below it does not
+  // go through the model, and the agent and the amount come from the session, never the request.
+  app.post("/api/agent/cash/home", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const trading = deps.trading;
+    if (!trading) return reply.code(503).send({ error: "unavailable" });
+    // Shares the sale's daily cap: each one is an Agent API action on the owner's agent.
+    const allowed = heldSaleQuota.take(userId);
+    if (allowed !== "ok") return reply.code(429).send({ error: allowed });
+    try {
+      const result = await trading.sendCashHome(userId);
+      req.log.info({ userId, status: result.status, ...("code" in result ? { code: result.code } : {}) }, "cash_sent_home");
+      if (result.status !== "done" && result.status !== "pending") heldSaleQuota.giveBack(userId);
+      else deps.dashboard?.forget(userId);
+      if (result.status === "done") return { status: "done", sent: fromAtomic(result.sent.toString(), 24) };
+      return "code" in result ? { status: result.status, code: result.code } : { status: result.status };
+    } catch (error) {
+      heldSaleQuota.giveBack(userId);
+      req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "cash_home_failed");
+      return reply.code(502).send({ error: "agent_unavailable" });
+    }
+  });
+
   // Sells all of one asset the user's agent keeps, for NEAR sent to the user's wallet. It does not
   // go through the model, so the owner can always get out, even while the chat is paused. The
   // agent comes from the session and the amount from the agent's own balance, never the request.

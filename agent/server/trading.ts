@@ -2,6 +2,7 @@ import { priceToMicro } from "../core/money.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { ASSET_KEYS, ASSETS } from "../policy/assets.js";
 import type { AgentAccounts } from "./agents.js";
+import { freeCash, sendCashHome, tradeOnAgent, type CashHomeResult, type InsideResult } from "./agentCash.js";
 import { buyHeld, heldBalances, sellHeld, type HeldBuyResult, type HeldSellResult } from "./held.js";
 import { usableGrant, type GrantStore } from "./grants.js";
 import {
@@ -39,8 +40,11 @@ export type QuoteResult =({ status: "quoted" } & SwapQuote) | { status: "refused
 /** Why an order never started. */
 export type NotStarted = {
   status: "refused";
-  code: "no_agent" | "no_grant" | "busy" | "unknown_asset" | "price_out_of_band" | "no_price" | "too_small" | "over_daily_limit" | "limit_unchecked";
+  code: "no_agent" | "no_grant" | "busy" | "unknown_asset" | "price_out_of_band" | "no_price" | "too_small" | "over_daily_limit" | "limit_unchecked" | "over_order_limit" | "token_not_allowed";
 };
+
+/** Trades inside the agent are remembered this long against the daily limit. */
+const DAY_MS = 86_400_000;
 
 /** Every token Inti trades, whose orders count against the one daily limit the user sets. */
 const TRADED_ASSETS = [FUNDING_ASSET, ...ASSET_KEYS.map((k) => ASSETS[k].assetId)];
@@ -69,6 +73,16 @@ export const LIMIT_ORDER_MAX_DAYS = 7;
 export function trading(deps: TradingDeps) {
   const now = deps.now ?? Date.now;
   const busy = new Set<string>();
+  /**
+   * What each owner's agent spent from what it already holds, in micro-dollars: Spending Limits
+   * only sees money leaving the wallet, so these count against the same daily limit here.
+   */
+  const spentOnAgent = new Map<string, { at: number; micro: bigint }[]>();
+  const agentSpentToday = (owner: string): bigint => {
+    const recent = (spentOnAgent.get(owner) ?? []).filter((s) => now() - s.at < DAY_MS);
+    spentOnAgent.set(owner, recent);
+    return recent.reduce((a, s) => a + s.micro, 0n);
+  };
 
   /** The user's own agent and live grant, or why there is none. */
   const accountOf = async (userId: string): Promise<OrderAccount | NotStarted> => {
@@ -110,7 +124,7 @@ export function trading(deps: TradingDeps) {
           return valueMicro(amount, token);
         }),
       );
-      const room = valueMicro(limit.perDay, near) - spent.reduce((a, b) => a + b, 0n);
+      const room = valueMicro(limit.perDay, near) - spent.reduce((a, b) => a + b, 0n) - agentSpentToday(owner);
       return room > 0n ? room : 0n;
     } catch {
       return null;
@@ -131,29 +145,96 @@ export function trading(deps: TradingDeps) {
     }
   };
 
+  /**
+   * Checks a trade the agent pays from what it holds against the owner's per-order and daily limits,
+   * and returns its value in micro-dollars to remember once it runs.
+   */
+  const checkInside = async (owner: string, assetId: string, amount: bigint): Promise<NotStarted | bigint> => {
+    const tokens = await deps.tokens();
+    const token = tokens.find((t) => t.asset_id === assetId && t.price !== null);
+    const near = tokens.find((t) => t.asset_id === FUNDING_ASSET && t.price !== null);
+    const limit = await deps.chain.limit(owner, FUNDING_TOKEN).catch(() => undefined);
+    if (limit === null) return { status: "refused", code: "token_not_allowed" };
+    if (!token || !near || limit === undefined) return { status: "refused", code: "limit_unchecked" };
+    try {
+      const value = valueMicro(amount, token);
+      if (value > valueMicro(limit.perOrder, near)) return { status: "refused", code: "over_order_limit" };
+      const over = await checkRoom(owner, assetId, amount);
+      return over ?? value;
+    } catch {
+      return { status: "refused", code: "limit_unchecked" };
+    }
+  };
+
+  /** Runs a trade from what the agent holds, after the limits, and remembers what it spent. */
+  const insideTrade = async (account: OrderAccount, from: string, to: string, amount: bigint): Promise<InsideResult | NotStarted> => {
+    // Selling for NEAR only turns what the agent holds into money it can spend; it buys nothing.
+    const value = to === FUNDING_ASSET ? 0n : await checkInside(account.owner, from, amount);
+    if (typeof value !== "bigint") return value;
+    const result = await tradeOnAgent(deps.chain, deps.agent, account, from, to, amount);
+    if (value > 0n && (result.status === "done" || result.status === "pending")) {
+      spentOnAgent.set(account.owner, [...(spentOnAgent.get(account.owner) ?? []), { at: now(), micro: value }]);
+    }
+    return result;
+  };
+
   return {
     /** What today's one daily limit still allows, in micro-dollars, or null when it cannot be read. */
     roomToday: async (owner: string): Promise<bigint | null> => roomToday(owner, await deps.tokens()),
 
-    /** Spends `amount` (atomic wNEAR) on `asset` now; the result lands in the user's wallet. */
-    buyNow: (userId: string, asset: string, amount: bigint): Promise<BuyResult | NotStarted> =>
+    /**
+     * Spends `amount` (atomic wNEAR) on `asset` now; the result lands in the user's wallet. It is paid
+     * with the NEAR the agent holds when that covers it, otherwise from the wallet.
+     */
+    buyNow: (userId: string, asset: string, amount: bigint): Promise<BuyResult | InsideResult | NotStarted> =>
       exclusive(userId, async () => {
         const account = await accountOf(userId);
         if ("status" in account) return account;
+        if ((await freeCash(deps.agent, account.agentId)) >= amount) return insideTrade(account, FUNDING_ASSET, asset, amount);
         const over = await checkRoom(account.owner, FUNDING_ASSET, amount);
         if (over) return over;
         return buy(deps.chain, deps.agent, account, { buyAsset: asset, amount });
       }),
 
-    /** Spends `amount` (atomic wNEAR) on an asset the agent keeps for the user; it stays on the agent. */
-    buyHeld: (userId: string, asset: string, amount: bigint): Promise<HeldBuyResult | NotStarted> =>
+    /**
+     * Spends `amount` (atomic wNEAR) on an asset the agent keeps for the user; it stays on the agent.
+     * Paid like `buyNow`: with the agent's NEAR when it covers it, otherwise from the wallet.
+     */
+    buyHeld: (userId: string, asset: string, amount: bigint): Promise<HeldBuyResult | InsideResult | NotStarted> =>
       exclusive(userId, async () => {
         const account = await accountOf(userId);
         if ("status" in account) return account;
+        if ((await freeCash(deps.agent, account.agentId)) >= amount) return insideTrade(account, FUNDING_ASSET, asset, amount);
         const over = await checkRoom(account.owner, FUNDING_ASSET, amount);
         if (over) return over;
         return buyHeld(deps.chain, deps.agent, account, asset, amount);
       }),
+
+    /**
+     * Swaps `amount` (atomic) of an asset the agent holds into `to`: NEAR, which stays on the agent to
+     * spend next, an asset it keeps, or an asset sent to the wallet. Anything but a sale for NEAR
+     * counts against the owner's limits.
+     */
+    tradeHeld: (userId: string, from: string, to: string, amount: bigint): Promise<InsideResult | NotStarted> =>
+      exclusive(userId, async () => {
+        const account = await accountOf(userId);
+        if ("status" in account) return account;
+        return insideTrade(account, from, to, amount);
+      }),
+
+    /** Sends all the NEAR the agent holds to the user's wallet. It spends nothing, so no limit applies. */
+    sendCashHome: (userId: string): Promise<CashHomeResult | NotStarted> =>
+      exclusive(userId, async () => {
+        const account = await accountOf(userId);
+        if ("status" in account) return account;
+        return sendCashHome(deps.agent, account);
+      }),
+
+    /** NEAR the user's agent holds, atomic, free or not; zero when there is no agent. */
+    async cash(userId: string): Promise<bigint> {
+      const agent = await deps.agents.find(userId);
+      return agent.status === "active" ? ((await deps.agent.available(agent.agentId)).get(FUNDING_ASSET) ?? 0n) : 0n;
+    },
 
     /**
      * Sells `amount` (atomic) of an asset the agent keeps for NEAR, sent to the user's wallet. It
