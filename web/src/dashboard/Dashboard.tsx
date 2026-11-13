@@ -11,7 +11,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
-import { freezeAgent, FreezeError } from "../agent/freeze";
+import { FreezeError, setAgentFrozen } from "../agent/freeze";
 import { fetchDashboard, sellHeld, type DashboardData, type HeldSale } from "./dashboardClient";
 import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
@@ -433,18 +433,19 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
 
   const [freezing, setFreezing] = useState(false);
   const [freezeNote, setFreezeNote] = useState<string | null>(null);
-  const freeze = async () => {
+  const setFrozen = async (frozen: boolean) => {
     if (!policy || policy.maxDeviationBps === null || !agentAccount) return;
     setFreezing(true);
     setFreezeNote(null);
     try {
       const token = await getAccessToken();
       if (!token) throw new FreezeError("Your session expired. Sign in again and retry.");
-      const outcome = await freezeAgent({ accessToken: token, accountId: address, agentAccount, maxDeviationBps: policy.maxDeviationBps, config, provider: client.provider, signer });
-      setFreezeNote(outcome === "processing" ? "Your agent is being frozen. Check again in a minute." : "Your agent is frozen. It can do nothing until you unfreeze it.");
+      const outcome = await setAgentFrozen({ accessToken: token, accountId: address, agentAccount, maxDeviationBps: policy.maxDeviationBps, config, provider: client.provider, signer, frozen });
+      if (outcome === "processing") setFreezeNote("NEAR Intents is still saving the change. Check again in a minute.");
+      else setFreezeNote(frozen ? "Your agent is frozen. It can do nothing until you unfreeze it." : "Your agent is unfrozen. Inti can trade for you again.");
       await state.load(true);
     } catch (e) {
-      setFreezeNote(e instanceof Error ? e.message : "Your agent could not be frozen.");
+      setFreezeNote(e instanceof Error ? e.message : "Your agent's state could not be changed.");
     } finally {
       setFreezing(false);
     }
@@ -559,8 +560,20 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
         title="Your agent's rules"
         extra={
           policy?.frozen ? (
-            <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-900">
-              <Snowflake className="size-3.5" /> Frozen
+            <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-900">
+                <Snowflake className="size-3.5" /> Frozen
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 rounded-full px-2.5 text-xs"
+                title="Let Inti trade for you again, within your rules"
+                disabled={freezing || !agentAccount || policy.maxDeviationBps === null}
+                onClick={() => void setFrozen(false)}
+              >
+                {freezing && <Loader2 className="animate-spin" />} Unfreeze
+              </Button>
             </span>
           ) : (
             <Button
@@ -568,7 +581,7 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
               className="h-7 rounded-full bg-sky-200 px-2.5 text-xs text-sky-950 hover:bg-sky-300"
               title="Stop your agent at once: it can do nothing until you unfreeze it"
               disabled={freezing || !policy || !agentAccount || policy.maxDeviationBps === null}
-              onClick={() => void freeze()}
+              onClick={() => void setFrozen(true)}
             >
               {freezing ? <Loader2 className="animate-spin" /> : <Snowflake />} Freeze
             </Button>

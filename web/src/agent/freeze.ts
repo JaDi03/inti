@@ -17,7 +17,7 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "Too many changes today. Try again tomorrow.",
   agents_unavailable: "I couldn't reach NEAR Intents right now. Try again in a minute.",
 };
-const GENERIC = "Your agent could not be frozen. Nothing was signed. Try again in a minute.";
+const GENERIC = "Your agent's state could not be changed. Nothing was signed. Try again in a minute.";
 
 export class FreezeError extends Error {}
 
@@ -70,8 +70,8 @@ function base64(bytes: Uint8Array): string {
  * agent was created; every one of those must send only to the owner's own account. So a freeze can
  * never open a new place for money to go.
  */
-export function frozenRulesAreSafe(policy: unknown, owner: string, maxDeviationBps: PriceProtectionBps): boolean {
-  const expected = { ...agentPolicy(owner, maxDeviationBps), frozen: true };
+export function frozenRulesAreSafe(policy: unknown, owner: string, maxDeviationBps: PriceProtectionBps, frozen = true): boolean {
+  const expected = { ...agentPolicy(owner, maxDeviationBps), frozen };
   if (typeof policy !== "object" || policy === null) return false;
   const { destinations, ...rest } = policy as { destinations?: unknown };
   const expectedRest = Object.fromEntries(Object.entries(expected).filter(([k]) => k !== "destinations"));
@@ -101,18 +101,18 @@ interface FreezeArgs {
 }
 
 /**
- * Freezes the user's agent: every action of it fails until the owner unfreezes it. The rules
- * stored with the freeze are encrypted, so before signing the app checks that the Agent API's
- * preview of them is exactly the user's own rules marked frozen, and that the request is for the
- * user's own agent. "already" means it was frozen before.
+ * Freezes the user's agent (`frozen` true: every action of it fails until the owner unfreezes it)
+ * or unfreezes it. The rules stored with either are encrypted, so before signing the app checks
+ * that the Agent API's preview of them is the user's own rules, frozen or not as asked, and that
+ * the request is that very change for the user's own agent. "already" means nothing had to change.
  */
-export async function freezeAgent({ accessToken, accountId, agentAccount, maxDeviationBps, config, provider, signer }: FreezeArgs): Promise<"frozen" | "already" | "processing"> {
+export async function setAgentFrozen({ accessToken, accountId, agentAccount, maxDeviationBps, config, provider, signer, frozen }: FreezeArgs & { frozen: boolean }): Promise<"done" | "already" | "processing"> {
   if (!PRICE_PROTECTION_BPS.includes(maxDeviationBps as PriceProtectionBps)) throw new FreezeError(GENERIC);
-  const prepared = await call("/api/agent/freeze/prepare", accessToken, {});
-  if (prepared.status === "already_frozen") return "already";
+  const prepared = await call("/api/agent/freeze/prepare", accessToken, { frozen });
+  if (prepared.status === (frozen ? "already_frozen" : "already_unfrozen")) return "already";
   if (prepared.status !== "pending_signature" || typeof prepared.correlationId !== "string") throw new FreezeError(GENERIC);
   const preview = (prepared.preview ?? {}) as { policy?: unknown };
-  if (!frozenRulesAreSafe(preview.policy, accountId, maxDeviationBps as PriceProtectionBps)) {
+  if (!frozenRulesAreSafe(preview.policy, accountId, maxDeviationBps as PriceProtectionBps, frozen)) {
     throw new FreezeError("The agent's rules are not the ones Inti expected, so nothing was signed.");
   }
 
@@ -122,13 +122,14 @@ export async function freezeAgent({ accessToken, accountId, agentAccount, maxDev
     actions: payload.actions.map((a) => actions.functionCall(a.params.methodName, a.params.args, BigInt(a.params.gas), BigInt(a.params.deposit))),
     blockHeightTtl: SIGNATURE_TTL_BLOCKS,
   });
-  if (agentFreezeOf(signedDelegate.delegateAction, config) !== agentAccount) throw new FreezeError("The freeze is not for your agent, so it was not sent.");
+  const signedFor = agentFreezeOf(signedDelegate.delegateAction, config);
+  if (signedFor.agentAccount !== agentAccount || signedFor.frozen !== frozen) throw new FreezeError("The request is not the change you asked for on your agent, so it was not sent.");
 
   const sent = await call("/api/agent/freeze/submit", accessToken, {
     correlationId: prepared.correlationId,
     signedData: { ...(prepared.intent as object), signed_delegate: base64(encodeSignedDelegate(signedDelegate)) },
   });
-  if (sent.status === "success") return "frozen";
+  if (sent.status === "success") return "done";
   if (sent.status === "processing") return "processing";
   throw new FreezeError(GENERIC);
 }

@@ -472,7 +472,15 @@ describe("creating the user's own agent", () => {
     const wallet = userWallet();
     const { signedDelegate } = await wallet.signer.signDelegateAction(creation(wallet, "outlayer.near", freezeCalls()));
     expect(wallet.shown).toEqual([[`Freeze your agent (${AGENT}): it can do nothing until you unfreeze it.`, "Its money stays with it. Nothing is sent anywhere."]]);
-    expect(agentFreezeOf(signedDelegate.delegateAction, config)).toBe(AGENT);
+    expect(agentFreezeOf(signedDelegate.delegateAction, config)).toEqual({ agentAccount: AGENT, frozen: true });
+  });
+
+  it("shows an unfreeze of the user's own agent in plain words, and tells it apart from a freeze", async () => {
+    const wallet = userWallet();
+    const unfreeze = [freezeCalls()[0] as Action, actions.functionCall("unfreeze_wallet", { wallet_pubkey: rules.wallet_pubkey }, 5n * 10n ** 13n, 0n)];
+    const { signedDelegate } = await wallet.signer.signDelegateAction(creation(wallet, "outlayer.near", unfreeze));
+    expect(wallet.shown).toEqual([[`Unfreeze your agent (${AGENT}): Inti can trade for you again, within your rules.`]]);
+    expect(agentFreezeOf(signedDelegate.delegateAction, config)).toEqual({ agentAccount: AGENT, frozen: false });
   });
 
   const refusedFreezes: [string, (w: Wallet) => ReturnType<typeof creation>][] = [

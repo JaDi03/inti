@@ -13,6 +13,11 @@ describe("frozenRulesAreSafe", () => {
     expect(frozenRulesAreSafe(frozen({ destinations: { mode: "only", list: OLDER_LIST } }), OWNER, 200)).toBe(true);
   });
 
+  it("checks an unfreeze against the same rules, marked not frozen", () => {
+    expect(frozenRulesAreSafe(frozen({ frozen: false, destinations: { mode: "only", list: OLDER_LIST } }), OWNER, 200, false)).toBe(true);
+    expect(frozenRulesAreSafe(frozen(), OWNER, 200, false)).toBe(false);
+  });
+
   it.each([
     ["not marked frozen", frozen({ frozen: false })],
     ["another price protection", frozen({ limit_order: { max_deviation_bps: 300 } })],
