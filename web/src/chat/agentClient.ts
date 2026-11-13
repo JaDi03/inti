@@ -20,6 +20,7 @@ const MESSAGES: Record<string, string> = {
   agent_unavailable: "I couldn't reach my tools right now. Try again in a minute.",
 };
 const GENERIC = "Something went wrong. Try again in a minute.";
+const STILL_WORKING = "Inti is still working on this. Check your balance in a few minutes before you ask again.";
 
 export class AgentError extends Error {}
 
@@ -33,7 +34,9 @@ export async function askAgent(accessToken: string, message: string): Promise<Ag
       body: JSON.stringify({ message }),
       signal: AbortSignal.timeout(120_000),
     });
-  } catch {
+  } catch (error) {
+    // The server got the message and may still be running an order: a retry could buy twice.
+    if (error instanceof DOMException && error.name === "TimeoutError") throw new AgentError(STILL_WORKING);
     throw new AgentError("I couldn't reach Inti's server. Check your connection and retry.");
   }
   const body = (await res.json().catch(() => ({}))) as Partial<AgentReply> & { error?: string };

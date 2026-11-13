@@ -35,6 +35,8 @@ function world(
     quote?: { amountOut: bigint; minAmountOut: bigint } | null;
     bound?: number | null;
     swap?: Settled;
+    /** A swap still reported as processing whose result is already in the balance. */
+    creditedWhileProcessing?: boolean;
     rate?: bigint;
     preview?: { spend: bigint } | { refused: string };
     place?: Settled;
@@ -43,6 +45,8 @@ function world(
     held?: bigint;
     /** Pairs "from>to" with no route, and pairs whose swap fails. */
     noRoute?: string[];
+    /** The missing routes (and a null quote) appear only after funding. */
+    routeLostAfterFunding?: boolean;
     failSwap?: string[];
     /** What a swap gives; by default the purchase rate of the buy tests. */
     out?: (amount: bigint) => bigint;
@@ -83,15 +87,17 @@ function world(
       return Promise.resolve(outcome);
     },
     quote: (_id, from, to) => {
-      if (opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
-      const q = opts.quote === undefined ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
+      // A route that disappears once the agent is funded: the quote before funding still finds it.
+      const beforeLoss = opts.routeLostAfterFunding === true && !log.some((l) => l.startsWith("fund"));
+      if (!beforeLoss && opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
+      const q = opts.quote === undefined || (beforeLoss && opts.quote === null) ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
       return Promise.resolve(q && { ...q, costUsd: null, costPercent: null, seconds: null });
     },
     swap: (_a, from, to, amount, minOut) => {
       log.push(opts.out ? `swap ${NAME[from]}>${NAME[to]} ${amount}` : `swap ${amount}`);
       minOuts.push(minOut);
       const outcome = opts.failSwap?.includes(`${NAME[from]}>${NAME[to]}`) ? "failed" : (opts.swap ?? "success");
-      if (outcome === "success") {
+      if (outcome === "success" || (outcome === "pending" && opts.creditedWhileProcessing)) {
         agentHeld.set(from, (agentHeld.get(from) ?? 0n) - amount);
         agentHeld.set(to, (agentHeld.get(to) ?? 0n) + (opts.out ? opts.out(amount) : amount / (opts.rate ?? 10n ** 21n)));
       }
@@ -164,8 +170,14 @@ describe("buy", () => {
     expect(w.log).toEqual([]);
   });
 
-  it("returns the money when there is no route or the swap fails", async () => {
-    const noRoute = world({ quote: null });
+  it("refuses before moving anything when there is no route, often an amount too small for the asset", async () => {
+    const w = world({ quote: null });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    expect(w.log).toEqual([]);
+  });
+
+  it("returns the money when the route is gone by the swap or the swap fails", async () => {
+    const noRoute = world({ quote: null, routeLostAfterFunding: true });
     expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "no_route" });
     expect(noRoute.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
     const failed = world({ swap: "failed" });
@@ -182,7 +194,7 @@ describe("buy", () => {
   });
 
   it("says the money came back only once it did, when the return itself is refused or slow", async () => {
-    const noRoute = world({ quote: null, withdraw: "failed" });
+    const noRoute = world({ quote: null, routeLostAfterFunding: true, withdraw: "failed" });
     expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
     const failedSwap = world({ swap: "failed", withdraw: "failed" });
     expect(await buy(failedSwap.chain, failedSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
@@ -210,6 +222,22 @@ describe("buy", () => {
     const slowSwap = world({ swap: "pending" });
     expect(await buy(slowSwap.chain, slowSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
     expect(slowSwap.log.some((l) => l.startsWith("withdraw"))).toBe(false);
+  });
+
+  it("delivers a swap still reported as processing once its result is in the balance", async () => {
+    const w = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 300n, minAmountOut: 290n } });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "done", spent: ORDER.amount, received: 300n, asset: GOLD });
+    expect(w.log.at(-1)).toBe("withdraw GOLD 300");
+  });
+
+  it("takes no credit its own quote cannot explain as the result of a swap still processing", async () => {
+    // 300 arrives where the quote said 100: another credit, so the swap is left to the sweep.
+    const w = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 100n, minAmountOut: 95n } });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    expect(w.log.some((l) => l.startsWith("withdraw"))).toBe(false);
+    // Less than the minimum this swap accepts is not its result either.
+    const short = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 1000n, minAmountOut: 990n }, bound: null });
+    expect(await buy(short.chain, short.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
   });
 });
 
@@ -253,8 +281,16 @@ describe("exchange", () => {
     expect([...big.log, ...late.log]).toEqual([]);
   });
 
-  it("sends back the asset sold when there is no route or the swap fails, and the NEAR when only the second step fails", async () => {
-    const noRoute = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"] });
+  it("refuses a sale before moving anything when there is no route, directly or through NEAR", async () => {
+    const w = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"] });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    const swapTo = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC", "wNEAR>BTC"] });
+    expect(await exchange(swapTo.chain, swapTo.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    expect([...w.log, ...swapTo.log]).toEqual([]);
+  });
+
+  it("sends back the asset sold when the route is gone by the swap or the swap fails, and the NEAR when only the second step fails", async () => {
+    const noRoute = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], routeLostAfterFunding: true });
     expect(await exchange(noRoute.chain, noRoute.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "returned", code: "no_route", asset: GOLD });
     expect(noRoute.log.at(-1)).toBe("withdraw GOLD 1000");
 
@@ -274,8 +310,20 @@ describe("exchange", () => {
   });
 
   it("says the asset came back only once it did, and leaves a slow return to the sweep", async () => {
-    const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], withdraw: "pending" });
+    const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], routeLostAfterFunding: true, withdraw: "pending" });
     expect(await exchange(slow.chain, slow.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "pending" });
+  });
+
+  it("delivers a sale still reported as processing once its result is in the balance", async () => {
+    const w = world({ held: 1000n, out: double, swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 2000n, minAmountOut: 1950n } });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "done", spent: 1000n, received: 2000n, asset: FUNDING_ASSET });
+  });
+
+  it("does not chain the second step on a credit the first step's quote cannot explain", async () => {
+    // GOLD>BTC has no route; the first step to NEAR still processes and 2000 lands where 250 was quoted.
+    const w = world({ held: 1000n, out: double, noRoute: ["GOLD>BTC"], swap: "pending", creditedWhileProcessing: true, registered: [tokenContract(BTC) ?? ""] });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, { from: GOLD, to: BTC, amount: 1000n }, noWait)).toEqual({ status: "pending" });
+    expect(w.log.filter((l) => l.startsWith("swap"))).toEqual(["swap GOLD>wNEAR 1000"]);
   });
 
   it("never accepts less than the price protection the user signed, on every step", async () => {

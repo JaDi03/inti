@@ -6,15 +6,15 @@ import { dashboard, DASHBOARD_TTL_MS, orderView, summarizePolicy, type AgentView
 import type { GrantStore } from "./grants.js";
 import { FUNDING_ASSET } from "./orders.js";
 
-const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
+const ZEC = "nep141:zec.omft.near";
 const OWNER = "91".repeat(32);
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const TOKENS: PricedToken[] = [
-  { asset_id: GOLD, symbol: "XAUT", decimals: 6, blockchain: "eth", price: 4026.83 },
+  { asset_id: ZEC, symbol: "ZEC", decimals: 8, blockchain: "zec", price: 956.27 },
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.58 },
 ];
 // Shape of a real open order from GET /v1/agents/{id}/limit-orders.
-const ORDER = { base_asset: GOLD, quantity: "97", price: "1145.251396", deadline: "2026-11-12T00:05:13.023Z", fill_status: "awaiting_deposit" };
+const ORDER = { base_asset: ZEC, quantity: "104000", price: "267.111111", deadline: "2026-11-12T00:05:13.023Z", fill_status: "awaiting_deposit" };
 
 /** An agent per user and a record of which agent ids were read. */
 function setup(lookups: Record<string, AgentLookup>) {
@@ -63,10 +63,10 @@ describe("dashboard", () => {
 
   it("shows an open order in the owner's terms", () => {
     expect(orderView(ORDER, TOKENS)).toEqual({
-      asset: "gold",
-      amount: "0.000097",
-      priceNear: "1145.251396",
-      priceUsd: "4100.00",
+      asset: "zcash",
+      amount: "0.00104",
+      priceNear: "267.111111",
+      priceUsd: "956.26",
       deadline: "2026-11-12T00:05:13.023Z",
       status: "awaiting_deposit",
     });
@@ -75,7 +75,7 @@ describe("dashboard", () => {
   it("reads only the signed-in user's own agent, and never returns the grant token", async () => {
     const { d, read } = setup({ "did:privy:alice": ALICE });
     const alice = await d("did:privy:alice");
-    expect(alice.prices).toMatchObject({ near: 3.58, gold: 4026.83, euro: null });
+    expect(alice.prices).toMatchObject({ near: 3.58, zcash: 956.27, bitcoin: null });
     expect(alice.agent).toMatchObject({ account: ALICE.agentAccount, grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
     expect(JSON.stringify(alice)).not.toContain("ngt_secret");
     expect(await d("did:privy:bob")).toMatchObject({ agent: null });

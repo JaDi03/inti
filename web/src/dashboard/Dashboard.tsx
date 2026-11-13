@@ -15,27 +15,25 @@ import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
+import { shortAmount } from "./shortAmount";
 
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
 /**
- * One color per asset that matches its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
- * blue for the euro), in the same light shade with dark text so it reads in both themes.
+ * One color per asset that matches its brand (Bitcoin orange, Ether's blue, Zcash yellow), in the
+ * same light shade with dark text so it reads in both themes.
  */
 const TILE: Record<AssetKey, string> = {
-  gold: "bg-yellow-300",
-  euro: "bg-sky-300",
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
-  solana: "bg-purple-300",
+  zcash: "bg-yellow-300",
 };
 
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
-  { title: "Real-world assets", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "real-world") },
-  { title: "Currencies", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "currency") },
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
+  { title: "Privacy", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "privacy") },
 ];
 
 const NEAR_DECIMALS = 24;
@@ -139,13 +137,15 @@ interface MoneyProps {
   state: DashboardState;
   /** Opens the Spending limits window (add NEAR, edit limits, pause or turn off Inti). */
   onManage: () => void;
+  /** Re-reads the account's own balances (NEAR, NEAR for orders), which the dashboard does not read. */
+  onChanged: () => void;
   /** The wallet card, the asset areas, or both. */
   part: "wallet" | "assets" | "both";
   className?: string;
 }
 
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
-export function MoneyPanel({ address, config, client, status, state, onManage, part, className }: MoneyProps) {
+export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, part, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
@@ -170,6 +170,8 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
   const nearPrice = data?.prices.near ?? null;
   const inWallet = usd(fromAtomic(status.available.toString(), NEAR_DECIMALS), nearPrice);
   const forOrders = usd(fromAtomic(status.spendable.toString(), NEAR_DECIMALS), nearPrice);
+  // NEAR the network keeps aside for the account's storage (mostly the Spending Limits contract): shown, but not in the total, since it cannot be used.
+  const locked = usd(fromAtomic(status.setAside.toString(), NEAR_DECIMALS), nearPrice);
   const assetValues = (assets ?? []).map((r) => usd(fromAtomic(r.balance.toString(), DECIMALS[r.key]), data?.prices[r.key]) ?? 0);
   const total = inWallet === null || forOrders === null ? null : [inWallet, forOrders, ...assetValues].reduce((a, b) => a + b, 0);
   const show = (text: string) => (hidden ? HIDDEN : text);
@@ -186,7 +188,16 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
             <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
               {hidden ? <EyeOff /> : <Eye />}
             </Button>
-            <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={loading} onClick={() => void load()}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Refresh"
+              disabled={loading}
+              onClick={() => {
+                onChanged();
+                void load();
+              }}
+            >
               <RefreshCw className={cn(loading && "animate-spin")} />
             </Button>
           </div>
@@ -197,6 +208,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
         <dl className="mt-4 flex flex-col gap-2 text-sm">
           <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
           <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
+          <BalanceRow label="Kept for account storage" near={show(`${nearText(status.setAside)} NEAR`)} value={show(money(locked))} />
         </dl>
         <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
           <Button variant="outline" className="rounded-full" onClick={() => setReceiving(true)}>
@@ -210,9 +222,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
       )}
       {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
+      {part !== "wallet" && <h2 className="px-1 font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>}
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
-        <h2 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h2>
+        <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -225,7 +238,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
               <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", TILE[key], wide && "col-span-2")}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70", key === "gold" && "p-1")} />
+                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70")} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
                       <p className="text-xs opacity-70">{a.symbol}</p>
@@ -240,9 +253,11 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
                 <div>
                   {row?.enabled ? (
                     <>
+                      {/* What the owner holds, not the asset's price, which is the line below. */}
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Your balance</p>
                       <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                       <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
-                        {show(`${amount ?? "--"} ${a.symbol}`)}
+                        {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
                       </p>
                     </>
                   ) : (
@@ -255,7 +270,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
                       {busy === key ? <Loader2 className="animate-spin" /> : null} Enable
                     </Button>
                   )}
-                  <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `1 ${a.symbol} = ${money(price)}`}</p>
+                  <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
                 </div>
               </li>
             );
@@ -597,7 +612,7 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
-  const money = { address, config, client, status, state, onManage };
+  const money = { address, config, client, status, state, onManage, onChanged };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>

@@ -21,7 +21,7 @@ type Message = { id: number; from: "user" | "inti"; text: string; simulated?: bo
 const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 4 steps, right here.";
 
 /** First messages offered on an empty chat. None of them moves money: a purchase is always typed by the user. */
-const SUGGESTIONS = ["What can you buy for me?", "How much does $5 of gold cost right now?", "How much can you spend today?"];
+const SUGGESTIONS = ["What can you buy for me?", "How much does $5 of bitcoin cost right now?", "How much can you spend today?"];
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -152,6 +152,8 @@ export function App() {
       addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
     } finally {
       setThinking(false);
+      // An order may have spent NEAR for orders or brought an asset: the wallet card reads them again.
+      void limits.refresh();
     }
   };
 
@@ -327,7 +329,7 @@ export function App() {
         )}
 
         <div className={cn("flex w-full shrink-0 justify-center pb-6", empty && !activationCard ? "mt-8" : "mt-auto")}>
-          <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. buy $5 of gold" disabled={thinking} />
+          <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. buy $5 of bitcoin" disabled={thinking} />
         </div>
         {walletError && <p className="pb-4 text-sm text-destructive">{walletError}</p>}
       </main>
