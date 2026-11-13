@@ -43,6 +43,8 @@ export const LIMITS = {
   verificationsPerDayTotal: 1000,
   /** Model checks running at the same time; more wait for the next try. */
   verificationsAtOnce: 3,
+  /** How long one check's result is shown to everyone before the next visitor triggers a new one. */
+  sharedVerificationMs: 5 * 60_000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
 } as const;
