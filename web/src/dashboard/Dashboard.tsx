@@ -854,17 +854,16 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
       </aside>
       {children}
       <aside className={cn(side, view === "chat" ? "hidden" : "flex-1", "lg:block lg:w-[380px] lg:flex-none lg:shrink-0 lg:pr-6 lg:pl-0")}>
-        {/* Phones: only the section of the open tab. */}
+        {/*
+          Phones: only the open tab's section shows. All stay mounted, so a sale or a send that is
+          still running keeps its state and shows its result after the owner switches tabs.
+        */}
         <div className="mx-auto flex max-w-md flex-col gap-4 lg:hidden">
-          {view === "wallet" && <MoneyPanel {...money} part="wallet" />}
-          {view === "assets" && <MoneyPanel {...money} part="walletAssets" />}
-          {view === "agent" && <MoneyPanel {...money} part="agent" />}
-          {view === "settings" && (
-            <>
-              <RulesPanel {...rules} />
-              <SecurityPanel {...security} />
-            </>
-          )}
+          <MoneyPanel {...money} part="wallet" className={cn(view !== "wallet" && "hidden")} />
+          <MoneyPanel {...money} part="walletAssets" className={cn(view !== "assets" && "hidden")} />
+          <MoneyPanel {...money} part="agent" className={cn(view !== "agent" && "hidden")} />
+          <RulesPanel {...rules} className={cn(view !== "settings" && "hidden")} />
+          <SecurityPanel {...security} className={cn(view !== "settings" && "hidden")} />
         </div>
         <div className="mx-auto hidden max-w-md flex-col gap-4 lg:flex">
           <MoneyPanel {...money} part="wallet" className="xl:hidden" />
