@@ -35,6 +35,10 @@ async function call(path: string, accessToken: string, body: unknown): Promise<R
     throw new FreezeError("I couldn't reach Inti's server. Check your connection and retry.");
   }
   const answer = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (answer.error === "cooldown" && typeof answer.availableAt === "string") {
+    const at = new Date(answer.availableAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    throw new FreezeError(`NEAR Intents waits 10 minutes after a freeze. You can unfreeze after ${at}.`);
+  }
   if (!res.ok || typeof answer.status !== "string") throw new FreezeError(MESSAGES[String(answer.error ?? "")] ?? GENERIC);
   return answer;
 }
