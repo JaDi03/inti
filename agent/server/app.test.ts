@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { ScriptedBrain } from "../brains/scripted.js";
 import { demoPolicy, demoPortfolio } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
-import type { Brain } from "../core/types.js";
+import type { Brain, Turn } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
@@ -235,6 +235,34 @@ describe("POST /api/chat", () => {
     await chat(server, `Bearer ${await token()}`, { message: "buy" });
     const bob = await chat(server, `Bearer ${await token({ sub: "did:privy:bob" })}`, { message: "look" });
     expect(bob.json()).toMatchObject({ report: "Checked.", events: [] });
+  });
+
+  it("shows the model each user's own earlier exchanges, at most the latest ten, never another user's", async () => {
+    const seen: (readonly Turn[])[] = [];
+    const brain: Brain = {
+      name: "recorder",
+      step: (_system, history) => {
+        // A copy: the cycle adds this step's reply to the same history afterwards.
+        seen.push([...history]);
+        const last = history.at(-1);
+        return Promise.resolve({ role: "assistant", text: `re: ${last?.role === "user" ? last.text : ""}`, toolCalls: [], stop: "end" });
+      },
+    };
+    const server = await app({ brain });
+    const alice = `Bearer ${await token()}`;
+    await chat(server, alice, { message: "buy $1 of bitcoin" });
+    await chat(server, alice, { message: "and how much did it cost?" });
+    expect(seen[1]).toEqual([
+      { role: "user", text: "buy $1 of bitcoin" },
+      { role: "assistant", text: "re: buy $1 of bitcoin", toolCalls: [], stop: "end" },
+      { role: "user", text: "and how much did it cost?" },
+    ]);
+    await chat(server, `Bearer ${await token({ sub: "did:privy:bob" })}`, { message: "hi" });
+    expect(seen[2]).toEqual([{ role: "user", text: "hi" }]);
+    for (let i = 0; i < 12; i++) await chat(server, alice, { message: `m${i}` });
+    const last = seen.at(-1) ?? [];
+    expect(last.filter((t) => t.role === "user")).toHaveLength(LIMITS.contextExchanges + 1);
+    expect(last[0]).toEqual({ role: "user", text: "m1" });
   });
 
   it("answers 503 when the agent is paused", async () => {

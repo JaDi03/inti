@@ -4,6 +4,10 @@ import type { SimulatedPortfolio } from "./portfolio.js";
 import { runTool, ToolInputError, toolSpecs, type AgentEvent } from "./tools.js";
 import type { Brain, ToolResult, ToolSpec, Turn } from "./types.js";
 
+/** How the model treats the earlier messages of the chat, the same with or without real money. */
+const EARLIER_MESSAGES =
+  "Earlier messages of this chat come before the owner's newest one, so you can follow up (\"and how much would that cost?\"). Act only on the newest message: never repeat an order from an earlier one unless the newest message asks for it again. Your earlier replies are not tool results: check prices and balances again with the tools before you use them.";
+
 export const SYSTEM_PROMPT = `You are Inti, an investment agent that manages the owner's portfolio on NEAR Intents.
 
 The owner gives you a goal. Each cycle you look at the portfolio and decide what serves the goal: swap, get a quote first, do nothing, or ask the owner.
@@ -16,6 +20,7 @@ How you work:
 - The limits are the owner's rules, and anything they allow is allowed. A per-transaction limit caps each swap, so reaching a larger goal with several swaps is fine as long as each one passes the check and the daily budget holds. The code decides what passes, so you never need to guess around it.
 - Doing nothing is a valid decision when nothing serves the goal right now.
 - Ask the owner only when the goal is unclear or a choice is theirs to make.
+- ${EARLIER_MESSAGES}
 
 Your reply to the owner, in the owner's language:
 - Short and direct, like a chat message: 1 to 3 sentences. Lead with the result (what you bought, sold or found, with the amounts).
@@ -39,6 +44,7 @@ How you work:
 - An asset that is not enabled cannot be bought: tell the owner to tap Enable on that asset's card in their portfolio.
 - Ask the owner only when the request is unclear (which asset, how much, at what price).
 - Never buy more than the owner asked for. One request, at most the orders it describes.
+- ${EARLIER_MESSAGES}
 - Questions are welcome. For any question about cost, fees or how much the owner would get, call get_quote and answer with its numbers: the NEAR paid, the amount received and its value, and the cost (cost_percent). Call that cost "the cost of the trade", never a fee or commission: it is what the route keeps of the value at current prices, so it moves with the market and can be zero. Say the quote is for right now. A quote buys nothing.
 - The only fixed fee you know is 1Click's 0.20% on limit orders. If the owner asks about other fixed fees, say you do not have that information.
 - Every number you give comes from a tool result. If no tool tells you something, say you do not know it rather than guessing.
@@ -59,6 +65,11 @@ export interface CycleOptions {
   now?: () => number;
   /** Tools that act on real funds. Without them the cycle runs on the simulated portfolio. */
   tools?: Toolset;
+  /**
+   * The chat's earlier exchanges, oldest first: what the owner wrote and the reply they got. Only
+   * those texts, never earlier tool results, so no older outside text reaches the model.
+   */
+  earlier?: readonly { user: string; reply: string }[];
 }
 
 /** A set of tools the cycle can offer instead of the simulated ones. */
@@ -91,7 +102,11 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     now: options.now ?? Date.now,
     events,
   };
-  const history: Turn[] = [{ role: "user", text: goal }];
+  const before: Turn[] = (options.earlier ?? []).flatMap((e): Turn[] => [
+    { role: "user", text: e.user },
+    { role: "assistant", text: e.reply, toolCalls: [], stop: "end" },
+  ]);
+  const history: Turn[] = [...before, { role: "user", text: goal }];
 
   for (let step = 0; step < maxSteps; step++) {
     const turn = await brain.step(options.tools ? REAL_SYSTEM_PROMPT : SYSTEM_PROMPT, history, options.tools?.specs ?? toolSpecs);
