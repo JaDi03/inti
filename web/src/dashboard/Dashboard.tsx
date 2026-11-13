@@ -170,7 +170,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
   const nearPrice = data?.prices.near ?? null;
   const inWallet = usd(fromAtomic(status.available.toString(), NEAR_DECIMALS), nearPrice);
   const forOrders = usd(fromAtomic(status.spendable.toString(), NEAR_DECIMALS), nearPrice);
-  // NEAR the network keeps aside for the Spending Limits contract: shown, but not in the total, since it cannot be used.
+  // NEAR the network keeps aside for the account's storage (mostly the Spending Limits contract): shown, but not in the total, since it cannot be used.
   const locked = usd(fromAtomic(status.setAside.toString(), NEAR_DECIMALS), nearPrice);
   const assetValues = (assets ?? []).map((r) => usd(fromAtomic(r.balance.toString(), DECIMALS[r.key]), data?.prices[r.key]) ?? 0);
   const total = inWallet === null || forOrders === null ? null : [inWallet, forOrders, ...assetValues].reduce((a, b) => a + b, 0);
@@ -208,7 +208,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
         <dl className="mt-4 flex flex-col gap-2 text-sm">
           <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
           <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
-          <BalanceRow label="Locked by Spending Limits" near={show(`${nearText(status.setAside)} NEAR`)} value={show(money(locked))} />
+          <BalanceRow label="Kept for account storage" near={show(`${nearText(status.setAside)} NEAR`)} value={show(money(locked))} />
         </dl>
         <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
           <Button variant="outline" className="rounded-full" onClick={() => setReceiving(true)}>
