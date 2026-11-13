@@ -35,6 +35,8 @@ function world(
     quote?: { amountOut: bigint; minAmountOut: bigint } | null;
     bound?: number | null;
     swap?: Settled;
+    /** A swap still reported as processing whose result is already in the balance. */
+    creditedWhileProcessing?: boolean;
     rate?: bigint;
     preview?: { spend: bigint } | { refused: string };
     place?: Settled;
@@ -91,7 +93,7 @@ function world(
       log.push(opts.out ? `swap ${NAME[from]}>${NAME[to]} ${amount}` : `swap ${amount}`);
       minOuts.push(minOut);
       const outcome = opts.failSwap?.includes(`${NAME[from]}>${NAME[to]}`) ? "failed" : (opts.swap ?? "success");
-      if (outcome === "success") {
+      if (outcome === "success" || (outcome === "pending" && opts.creditedWhileProcessing)) {
         agentHeld.set(from, (agentHeld.get(from) ?? 0n) - amount);
         agentHeld.set(to, (agentHeld.get(to) ?? 0n) + (opts.out ? opts.out(amount) : amount / (opts.rate ?? 10n ** 21n)));
       }
@@ -211,6 +213,12 @@ describe("buy", () => {
     expect(await buy(slowSwap.chain, slowSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
     expect(slowSwap.log.some((l) => l.startsWith("withdraw"))).toBe(false);
   });
+
+  it("delivers a swap still reported as processing once its result is in the balance", async () => {
+    const w = world({ swap: "pending", creditedWhileProcessing: true });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "done", spent: ORDER.amount, received: 300n, asset: GOLD });
+    expect(w.log.at(-1)).toBe("withdraw GOLD 300");
+  });
 });
 
 describe("exchange", () => {
@@ -276,6 +284,11 @@ describe("exchange", () => {
   it("says the asset came back only once it did, and leaves a slow return to the sweep", async () => {
     const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], withdraw: "pending" });
     expect(await exchange(slow.chain, slow.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "pending" });
+  });
+
+  it("delivers a sale still reported as processing once its result is in the balance", async () => {
+    const w = world({ held: 1000n, out: double, swap: "pending", creditedWhileProcessing: true });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "done", spent: 1000n, received: 2000n, asset: FUNDING_ASSET });
   });
 
   it("never accepts less than the price protection the user signed, on every step", async () => {

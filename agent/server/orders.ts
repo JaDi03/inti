@@ -199,8 +199,8 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const minOut = protectedMinOut(quote, bound);
   const held = (await agent.available(account.agentId)).get(order.buyAsset) ?? 0n;
   const swapped = await agent.swap(account, FUNDING_ASSET, order.buyAsset, order.amount, minOut);
-  if (swapped === "pending") return { status: "pending" };
   if (swapped === "failed") return giveBack("swap_failed");
+  // A swap can still read as processing minutes after its result is in the balance: the balance decides.
   const received = ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held;
   if (received <= 0n) return { status: "pending" };
   const sent = await agent.withdraw(account, order.buyAsset, received);
@@ -268,7 +268,8 @@ async function swapOnAgent(agent: AgentPort, account: OrderAccount, from: string
   if (quote === null) return "no_route";
   const held = (await agent.available(account.agentId)).get(to) ?? 0n;
   const swapped = await agent.swap(account, from, to, amount, protectedMinOut(quote, bound));
-  if (swapped !== "success") return swapped;
+  if (swapped === "failed") return swapped;
+  // A swap can still read as processing minutes after its result is in the balance: the balance decides.
   const received = ((await agent.available(account.agentId)).get(to) ?? 0n) - held;
   return received > 0n ? received : "pending";
 }
