@@ -564,9 +564,8 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
             </span>
           ) : (
             <Button
-              variant="outline"
               size="sm"
-              className="h-7 rounded-full px-2.5 text-xs"
+              className="h-7 rounded-full bg-sky-200 px-2.5 text-xs text-sky-950 hover:bg-sky-300"
               title="Stop your agent at once: it can do nothing until you unfreeze it"
               disabled={freezing || !policy || !agentAccount || policy.maxDeviationBps === null}
               onClick={() => void freeze()}
@@ -576,7 +575,6 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           )
         }
       >
-        {freezeNote && <p className="mt-2 break-words text-sm">{freezeNote}</p>}
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
         {agentAccount && (
           <div className="mt-3">
@@ -630,6 +628,12 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           <p className="mt-1 text-sm text-muted-foreground">None right now.</p>
         )}
       </FoldCard>
+      {/* Outside the card, so it shows even while the card is folded. */}
+      {freezeNote && (
+        <p role="status" className="-mt-2 break-words px-1 text-sm">
+          {freezeNote}
+        </p>
+      )}
     </div>
   );
 }

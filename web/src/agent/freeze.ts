@@ -64,6 +64,28 @@ function base64(bytes: Uint8Array): string {
   return btoa(text);
 }
 
+/**
+ * Whether the rules a freeze would store are the user's own rules marked frozen. Everything must
+ * match Inti's rules except the list of destinations, which may still hold entries from when the
+ * agent was created; every one of those must send only to the owner's own account. So a freeze can
+ * never open a new place for money to go.
+ */
+export function frozenRulesAreSafe(policy: unknown, owner: string, maxDeviationBps: PriceProtectionBps): boolean {
+  const expected = { ...agentPolicy(owner, maxDeviationBps), frozen: true };
+  if (typeof policy !== "object" || policy === null) return false;
+  const { destinations, ...rest } = policy as { destinations?: unknown };
+  const expectedRest = Object.fromEntries(Object.entries(expected).filter(([k]) => k !== "destinations"));
+  if (policyDifferences(expectedRest, rest).length > 0) return false;
+  const d = destinations as { mode?: unknown; list?: unknown } | undefined;
+  if (d?.mode !== "only" || !Array.isArray(d.list) || d.list.length === 0 || Object.keys(d).length !== 2) return false;
+  return d.list.every((entry: unknown) => {
+    const e = entry as Record<string, unknown>;
+    if (e.address !== owner) return false;
+    if (e.action === "transfer") return Object.keys(e).length === 3 && typeof e.confidential === "boolean";
+    return e.action === "withdraw" && e.chain === "near" && e.memo === null && Object.keys(e).length === 4;
+  });
+}
+
 interface FreezeArgs {
   accessToken: string;
   /** The user's own NEAR account: it owns the agent. */
@@ -90,8 +112,9 @@ export async function freezeAgent({ accessToken, accountId, agentAccount, maxDev
   if (prepared.status === "already_frozen") return "already";
   if (prepared.status !== "pending_signature" || typeof prepared.correlationId !== "string") throw new FreezeError(GENERIC);
   const preview = (prepared.preview ?? {}) as { policy?: unknown };
-  const expected = { ...agentPolicy(accountId, maxDeviationBps as PriceProtectionBps), frozen: true };
-  if (policyDifferences(expected, preview.policy).length > 0) throw new FreezeError("The agent's rules are not the ones Inti expected, so nothing was signed.");
+  if (!frozenRulesAreSafe(preview.policy, accountId, maxDeviationBps as PriceProtectionBps)) {
+    throw new FreezeError("The agent's rules are not the ones Inti expected, so nothing was signed.");
+  }
 
   const payload = freezePayload(prepared.intent);
   const { signedDelegate } = await new Account(accountId, provider, signer).createSignedMetaTransaction({
