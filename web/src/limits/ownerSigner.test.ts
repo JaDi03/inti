@@ -604,6 +604,24 @@ describe("adding NEAR for orders after activation", () => {
   });
 });
 
+describe("moving NEAR for orders back to the wallet", () => {
+  it("unwraps the amount in one transaction to the token with 1 yoctoNEAR, shown in plain words before signing", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    await client.moveToWallet(wallet.accountId, wallet.signer, 2n * 10n ** 23n);
+
+    expect(wallet.signed).toHaveLength(1);
+    expect(wallet.shown).toEqual([["Move 0.2 NEAR from Inti's trading balance back to your main balance."]]);
+  });
+
+  it("signs nothing when the user cancels", async () => {
+    const wallet = userWallet(false);
+    const client = clientSigningThrough(wallet);
+    await expect(client.moveToWallet(wallet.accountId, wallet.signer, 10n ** 23n)).rejects.toThrow(SigningCancelledError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+});
+
 describe("the contract code the app installs", () => {
   it("the pinned hash is the hash of the shipped build", () => {
     expect(wasmSha256(expectedWasm)).toBe(SPENDING_LIMITS_WASM_SHA256);

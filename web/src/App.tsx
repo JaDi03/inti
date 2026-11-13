@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
-import { PortfolioLayout, useHideAmounts } from "./dashboard/Dashboard";
+import { MOBILE_VIEWS, PortfolioLayout, useHideAmounts, type MobileView } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -78,7 +78,7 @@ export function App() {
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
   // On a phone the chat and the portfolio take turns; on a wide screen both show.
-  const [view, setView] = useState<"chat" | "portfolio">("chat");
+  const [view, setView] = useState<MobileView>("chat");
   const hide = useHideAmounts("address");
   const [copied, setCopied] = useState(false);
   // True while the agent works on the user's message.
@@ -270,13 +270,13 @@ export function App() {
 
       {installed && (
         <div className="flex justify-center px-4 pb-2 lg:hidden" role="tablist" aria-label="View">
-          <div className="flex w-full max-w-sm rounded-full bg-muted p-1 text-sm">
-            {(["chat", "portfolio"] as const).map((v) => (
+          <div className="flex w-full max-w-md rounded-full bg-muted p-1 text-[13px]">
+            {MOBILE_VIEWS.map((v) => (
               <button
                 key={v}
                 role="tab"
                 aria-selected={view === v}
-                className={cn("h-9 flex-1 rounded-full font-medium capitalize transition-colors", view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}
+                className={cn("h-9 min-w-0 flex-1 rounded-full px-1 font-medium capitalize transition-colors", view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}
                 onClick={() => setView(v)}
               >
                 {v}
@@ -307,7 +307,7 @@ export function App() {
             : null
         }
       >
-      <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", installed && view === "portfolio" && "hidden lg:flex")}>
+      <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", installed && view !== "chat" && "hidden lg:flex")}>
         <div
           className={cn(
             "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
