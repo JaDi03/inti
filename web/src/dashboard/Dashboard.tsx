@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
 import { fromAtomic } from "../../../agent/policy/units";
+import { anyRose, assetBalances, type Balances } from "../sound/balanceRise";
+import { playCash } from "../sound/cashSound";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DECIMALS } from "../assets/AssetsPanel";
@@ -107,10 +109,19 @@ function useDashboard(
   status: Installed,
   getAccessToken: () => Promise<string | null>,
   grantSigned: boolean,
+  refreshKey: number,
 ): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // "Cha-ching" when any asset card, in the wallet or with the agent, holds more than at the last read.
+  const lastBalances = useRef<Balances | null>(null);
+  useEffect(() => {
+    const now = assetBalances(assets, data?.agent);
+    if (anyRose(lastBalances.current, now)) playCash();
+    lastBalances.current = now;
+  }, [data, assets]);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -135,10 +146,11 @@ function useDashboard(
   useEffect(() => {
     void load(readOnce.current);
     readOnce.current = true;
-  }, [load, balances, grantSigned]);
+  }, [load, balances, grantSigned, refreshKey]);
 
   return { data, assets, loading, load };
 }
+
 
 interface MoneyProps {
   address: string;
@@ -825,6 +837,8 @@ interface LayoutProps {
   view: MobileView;
   /** True once the user signed Inti's first permission, so the dashboard reads it at once. */
   grantSigned: boolean;
+  /** Changes when the app wants the dashboard read again, e.g. after the agent traded. */
+  refreshKey: number;
   children: React.ReactNode;
 }
 
@@ -837,8 +851,8 @@ export type MobileView = (typeof MOBILE_VIEWS)[number];
  * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
  * Phones: one section at a time (chat, wallet, assets, agent, settings), so nothing needs a long scroll.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken, grantSigned);
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
