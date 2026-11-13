@@ -253,6 +253,15 @@ export class LimitsClient {
     return res.transaction.hash;
   }
 
+  /** Turns `amount` of the NEAR set aside for orders back into plain NEAR in the user's wallet. Inti stays on. */
+  async moveToWallet(accountId: string, signer: Signer, amount: bigint): Promise<string> {
+    const res = await this.account(accountId, signer).signAndSendTransaction({
+      receiverId: this.config.token.id,
+      actions: [actions.functionCall("near_withdraw", { amount: amount.toString() }, 30n * TGAS, 1n)],
+    });
+    return res.transaction.hash;
+  }
+
   /** Signs and sends the transactions in order, stopping at the first failure. Returns their hashes. */
   async send(accountId: string, signer: Signer, plan: readonly OwnerTransaction[]): Promise<string[]> {
     const account = this.account(accountId, signer);
