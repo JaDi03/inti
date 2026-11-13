@@ -169,6 +169,14 @@ export const FUNDING_ASSET = `nep141:${FUNDING_TOKEN}`;
 const CREDIT_WAIT_MS = 30_000;
 const CREDIT_POLL_MS = 2_000;
 
+/**
+ * Whether what a trade brings stays on the agent instead of going to the wallet: NEAR, which the
+ * agent spends on the next purchase, and the assets it keeps (gold, the euro, SOL).
+ */
+export function staysOnAgent(assetId: string): boolean {
+  return assetId === FUNDING_ASSET || isHeld(assetId);
+}
+
 /** The NEP-141 contract behind an asset id, or null for assets that are not NEAR tokens. */
 export function tokenContract(assetId: string): string | null {
   const m = /^nep141:([a-z0-9._-]{2,64})$/.exec(assetId);
@@ -303,16 +311,17 @@ const QUOTE_SLACK_DIVISOR = 20n;
 
 /**
  * Sells `amount` of `from` from the user's wallet for `to` (NEAR or another asset): funds the agent
- * with exactly that amount within the user's limits for `from`, swaps, and sends the result home.
- * With no direct route it swaps through NEAR on the agent, so nothing passes through the wallet in
- * between. On a failure what the agent holds goes back to the wallet; a slow step is left to `sweep`.
+ * with exactly that amount within the user's limits for `from` and swaps. NEAR and the assets the
+ * agent keeps stay on the agent; any other result is sent home. With no direct route it swaps
+ * through NEAR on the agent, so nothing passes through the wallet in between. On a failure what the
+ * agent holds goes back to the wallet; a slow step is left to `sweep`.
  */
 export async function exchange(chain: ChainPort, agent: AgentPort, account: OrderAccount, order: ExchangeOrder, wait = sleep): Promise<ExchangeResult> {
   const fromToken = tokenContract(order.from);
   const toToken = tokenContract(order.to);
   if (!fromToken || !toToken || order.from === order.to || order.from === FUNDING_ASSET) return { status: "refused", code: "asset_not_enabled" };
-  // The result can only reach the wallet if the wallet can hold it; NEAR arrives as plain NEAR.
-  if (order.to !== FUNDING_ASSET && !(await chain.registered(toToken, account.owner))) return { status: "refused", code: "asset_not_enabled" };
+  // A result for the wallet can only reach it if the wallet can hold it.
+  if (!staysOnAgent(order.to) && !(await chain.registered(toToken, account.owner))) return { status: "refused", code: "asset_not_enabled" };
   if ((await chain.tokenBalance(fromToken, account.owner)) < order.amount) return { status: "refused", code: "not_enough" };
   const bound = await agent.signedPriceBound(account.agentId);
   if (!(await hasRoute(agent, account.agentId, order.from, order.to, order.amount))) return { status: "refused", code: "no_quote" };
@@ -338,6 +347,7 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   }
   if (received === "pending") return { status: "pending" };
   if (typeof received !== "bigint") return giveBack(failure(received), order.from, order.amount);
+  if (staysOnAgent(order.to)) return { status: "done", spent: order.amount, received, asset: order.to };
   const sent = await agent.withdraw(account, order.to, received);
   if (sent === "undeliverable") {
     return (await homeAsNear(agent, account, order.to, received, bound)) ? { status: "returned", code: "not_deliverable", asset: FUNDING_ASSET } : { status: "pending" };
@@ -376,11 +386,11 @@ export interface SweepResult {
 }
 
 /**
- * Sends everything the agent holds back to the user's wallet, from both balances. While a limit
- * order is open the funding token stays on the confidential balance, since its money may still be
- * resting there. Tokens the wallet cannot hold yet stay until the user enables them. An asset the
- * Agent API cannot send to the wallet is sold for NEAR within the user's price protection. Assets
- * the agent keeps for the owner (gold, the euro, SOL) stay where they are.
+ * Sends what the agent holds for the wallet back to the user's wallet, from both balances. NEAR on
+ * the confidential balance stays: the agent spends it on the next purchase, and the owner sends it
+ * home when they choose. Tokens the wallet cannot hold yet stay until the user enables them. An
+ * asset the Agent API cannot send to the wallet is sold for NEAR within the user's price protection.
+ * Assets the agent keeps for the owner (gold, the euro, SOL) stay where they are.
  */
 export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAccount): Promise<SweepResult> {
   const result: SweepResult = { sent: [], stuck: [] };
@@ -399,9 +409,8 @@ export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAc
     }
     (sent === "success" ? result.sent : result.stuck).push(label);
   };
-  const ordersOpen = (await agent.openLimitOrders(account.agentId)) > 0;
   for (const [asset, free] of await agent.available(account.agentId)) {
-    if (asset === FUNDING_ASSET && ordersOpen) continue;
+    if (asset === FUNDING_ASSET) continue;
     await sendHome(asset, free, "confidential");
   }
   // Nothing trades from the public balance; what is there only arrived and was never shielded.

@@ -12,7 +12,7 @@ import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
 import { FreezeError, setAgentFrozen } from "../agent/freeze";
-import { fetchDashboard, sellHeld, type DashboardData, type HeldSale } from "./dashboardClient";
+import { fetchDashboard, sellHeld, sendCashHome, type CashHome, type DashboardData, type HeldSale } from "./dashboardClient";
 import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
@@ -179,9 +179,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
     }
   };
 
-  // Selling what the agent keeps takes two taps, since it moves real money: the first only asks.
-  const [confirming, setConfirming] = useState<HeldKey | null>(null);
-  const [selling, setSelling] = useState<HeldKey | null>(null);
+  // Selling what the agent keeps, or sending its NEAR home, takes two taps, since it moves real money: the first only asks.
+  const [confirming, setConfirming] = useState<HeldKey | "near" | null>(null);
+  const [selling, setSelling] = useState<HeldKey | "near" | null>(null);
   const [saleNote, setSaleNote] = useState<string | null>(null);
   useEffect(() => {
     if (!confirming) return;
@@ -191,7 +191,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
 
   // When the first tap asked; a second tap sooner than CONFIRM_DELAY_MS is a double click, not a yes.
   const askedAt = useRef(0);
-  const pressSell = async (key: HeldKey) => {
+  const pressSell = async (key: HeldKey | "near") => {
     if (selling) return;
     if (confirming !== key) {
       setSaleNote(null);
@@ -204,6 +204,15 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
     setSelling(key);
     try {
       const token = await getAccessToken();
+      if (key === "near") {
+        const sent: CashHome = token ? await sendCashHome(token) : { status: "error", code: "unauthorized" };
+        setSaleNote(cashMessage(sent));
+        if (sent.status === "done" || sent.status === "pending") {
+          onChanged();
+          await load(true);
+        }
+        return;
+      }
       const sale: HeldSale = token ? await sellHeld(token, key) : { status: "error", code: "unauthorized" };
       setSaleNote(saleMessage(sale, HELD_ASSETS[key].name));
       if (sale.status === "done" || sale.status === "pending") {
@@ -339,15 +348,54 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {part !== "wallet" && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
-          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
+          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. NEAR from sales stays here and pays for the next purchases.</p>
           <ul className="grid auto-rows-fr grid-cols-2 gap-3">
+            {(() => {
+              // Null while the agent's balance cannot be read.
+              const cash = data?.agent ? data.agent.cash : null;
+              return (
+                <li className="flex min-h-36 flex-col justify-between rounded-3xl bg-emerald-200 p-4 text-neutral-950">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <img src="/tokens/near.png" alt="" width={36} height={36} className="size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70" />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold uppercase tracking-wide">NEAR</p>
+                        <p className="text-xs opacity-70">Ready to spend</p>
+                      </div>
+                    </div>
+                    <SellHeldButton
+                      name="NEAR"
+                      action="send"
+                      state={selling === "near" ? "selling" : confirming === "near" ? "confirm" : "idle"}
+                      blockedBy={
+                        cash === null || Number(cash) === 0 ? "Nothing to send" : !data?.agent?.grantUntil ? "Renew Inti's permission to send" : selling !== null ? "Another order is running" : null
+                      }
+                      onPress={() => void pressSell("near")}
+                    />
+                  </div>
+                  <div>
+                    {confirming === "near" ? (
+                      <p className="text-[11px] font-bold uppercase tracking-wide">Tap ✓ again to send to your wallet</p>
+                    ) : (
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    )}
+                    <p className="text-2xl font-semibold tabular-nums">{show(money(cash === null ? null : usd(cash, nearPrice)))}</p>
+                    <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (cash ?? "")}>
+                      {show(`${cash === null ? "--" : shortAmount(cash)} NEAR`)}
+                    </p>
+                    <p className="mt-1 text-[11px] tabular-nums opacity-70">{nearPrice == null ? "No price right now" : `Price: 1 NEAR = ${money(nearPrice)}`}</p>
+                  </div>
+                </li>
+              );
+            })()}
             {HELD_KEYS.map((key, i) => {
               const a = HELD_ASSETS[key];
               const held = data?.agent?.held;
               // Null while the agent's balance cannot be read; an asset it does not hold reads as zero.
               const amount = held ? (held.find((h) => h.asset === key)?.amount ?? "0") : null;
               const price = data?.prices[key];
-              const wide = HELD_KEYS.length % 2 === 1 && i === HELD_KEYS.length - 1;
+              // The NEAR card comes first, so an odd tile out is counted with it.
+              const wide = (HELD_KEYS.length + 1) % 2 === 1 && i === HELD_KEYS.length - 1;
               return (
                 <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", HELD_TILE[key], wide && "col-span-2")}>
                   <div className="flex items-start justify-between gap-2">
@@ -360,6 +408,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     </div>
                     <SellHeldButton
                       name={a.name}
+                      action="sell"
                       state={selling === key ? "selling" : confirming === key ? "confirm" : "idle"}
                       blockedBy={
                         amount === null || Number(amount) === 0 ? "Nothing to sell" : !data?.agent?.grantUntil ? "Renew Inti's permission to sell" : selling !== null ? "Another sale is running" : null
@@ -828,12 +877,36 @@ function saleMessage(sale: HeldSale, name: string): string {
   }
 }
 
+/** What the owner reads after sending the agent's NEAR to their wallet. */
+function cashMessage(sent: CashHome): string {
+  switch (sent.status) {
+    case "done":
+      return `Sent. ${shortAmount(sent.sent)} NEAR is in your wallet.`;
+    case "pending":
+      return "The NEAR is on its way to your wallet. Check back in a minute.";
+    case "failed":
+      return "The NEAR could not be sent right now. It is still with your agent.";
+    case "refused":
+      if (sent.code === "no_grant") return "Inti's permission expired. Renew it in Your agent's rules, then send.";
+      if (sent.code === "busy") return "Another order is still running. Try again in a minute.";
+      if (sent.code === "orders_open") return "This NEAR is waiting for an open price order. It can be sent once the order fills or ends.";
+      if (sent.code === "not_enough") return "There is no NEAR to send right now.";
+      return "The send was refused. Nothing moved.";
+    case "error":
+      if (sent.code === "user_limit" || sent.code === "server_limit") return "Too many sends today. Try again tomorrow.";
+      if (sent.code === "unauthorized") return "Sign in again, then send.";
+      return "Inti's server could not be reached. Nothing moved.";
+  }
+}
+
 /**
- * A round button on an asset's card that sells all of it for NEAR. Its label shows on hover and to
- * screen readers; the first press asks, the second sells.
+ * A round button on a card of what the agent holds: it sells all of an asset for NEAR, or sends all
+ * the NEAR to the wallet. Its label shows on hover and to screen readers; the first press asks, the
+ * second acts.
  */
-function SellHeldButton({ name, state, blockedBy, onPress }: { name: string; state: "idle" | "confirm" | "selling"; blockedBy: string | null; onPress: () => void }) {
-  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR (tap twice)`);
+function SellHeldButton({ name, action, state, blockedBy, onPress }: { name: string; action: "sell" | "send"; state: "idle" | "confirm" | "selling"; blockedBy: string | null; onPress: () => void }) {
+  const what = action === "send" ? `send all your ${name} to your wallet` : `sell all your ${name} for NEAR`;
+  const label = state === "selling" ? (action === "send" ? `Sending your ${name}` : `Selling your ${name}`) : state === "confirm" ? `Confirm: ${what}` : (blockedBy ?? `${what[0]?.toUpperCase() ?? ""}${what.slice(1)} (tap twice)`);
   return (
     <button
       type="button"
@@ -846,7 +919,7 @@ function SellHeldButton({ name, state, blockedBy, onPress }: { name: string; sta
         state === "confirm" ? "bg-primary text-primary-foreground" : "bg-neutral-950 text-white hover:bg-neutral-800",
       )}
     >
-      {state === "selling" ? <Loader2 className="size-4 animate-spin" /> : state === "confirm" ? <Check className="size-4" /> : <HandCoins className="size-4" />}
+      {state === "selling" ? <Loader2 className="size-4 animate-spin" /> : state === "confirm" ? <Check className="size-4" /> : action === "send" ? <ArrowDownToLine className="size-4" /> : <HandCoins className="size-4" />}
     </button>
   );
 }

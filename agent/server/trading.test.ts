@@ -15,13 +15,24 @@ const TOKENS: PricedToken[] = [
 ];
 
 function setup(
-  opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean; tokens?: PricedToken[]; balancesFail?: boolean } = {},
+  opts: {
+    agent?: AgentLookup;
+    grant?: GrantRecord | null;
+    bound?: number | null;
+    spent?: Record<string, bigint>;
+    spentFails?: boolean;
+    tokens?: PricedToken[];
+    balancesFail?: boolean;
+    /** NEAR the agent already holds from earlier sales. */
+    cash?: bigint;
+    swap?: "failed" | "pending";
+  } = {},
 ) {
   const calls: string[] = [];
   let release: () => void = () => undefined;
   // Funding lands on the agent's public balance; a shield moves it to the confidential one.
   let publicBalance = 0n;
-  let confidential = 0n;
+  let confidential = opts.cash ?? 0n;
   const agents = { find: () => Promise.resolve(opts.agent ?? ACTIVE) } as unknown as AgentAccounts;
   const grants: GrantStore = { get: () => (opts.grant === undefined ? GRANT : opts.grant), put: () => Promise.resolve(), users: () => ["did:privy:alice"] };
   const chain: ChainPort = {
@@ -49,7 +60,10 @@ function setup(
       return Promise.resolve("success");
     },
     quote: () => Promise.resolve({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.01", costPercent: "1.05", seconds: 12 }),
-    swap: () => Promise.resolve("failed"),
+    swap: () => {
+      calls.push("swap");
+      return Promise.resolve(opts.swap ?? "failed");
+    },
     withdraw: () => Promise.resolve("success"),
     previewLimit: () => Promise.resolve({ spend: 1n }),
     openLimitOrders: () => Promise.resolve(0),
@@ -130,6 +144,35 @@ describe("trading", () => {
     expect(await s.t.sweepAll(["did:privy:alice"])).toEqual([]);
     s.release();
     expect(await first).toEqual({ status: "returned", code: "swap_failed" });
+  });
+
+  it("pays with the NEAR the agent holds when it covers the order, within the per-order and daily limits", async () => {
+    // 2 NEAR on the agent; the per-order limit is 1 NEAR and the daily one 10 NEAR (35.50 dollars).
+    const s = setup({ cash: 2n * 10n ** 24n, swap: "pending" });
+    expect(await s.t.buyNow("did:privy:alice", ZEC, 15n * 10n ** 23n)).toEqual({ status: "refused", code: "over_order_limit" });
+    expect(s.calls).toEqual([]);
+    expect(await s.t.buyNow("did:privy:alice", ZEC, 10n ** 24n)).toEqual({ status: "pending" });
+    // Nothing came from the wallet, and the 3.55 dollars spent on the agent count against today.
+    expect(s.calls).toEqual(["swap"]);
+    expect(await s.t.roomToday(ACTIVE.ownerAccount)).toBe(31_950_000n);
+  });
+
+  it("gives the daily room back when a trade paid from the agent did not go through", async () => {
+    const s = setup({ cash: 2n * 10n ** 24n, swap: "failed" });
+    expect(await s.t.buyNow("did:privy:alice", ZEC, 10n ** 24n)).toEqual({ status: "kept", code: "swap_failed" });
+    expect(await s.t.roomToday(ACTIVE.ownerAccount)).toBe(35_500_000n);
+  });
+
+  it("counts a swap of what the agent keeps against the daily limit, but not a sale for NEAR", async () => {
+    const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
+    const tokens = [...TOKENS, { asset_id: GOLD, symbol: "XAUT", decimals: 6, blockchain: "eth", price: 4000 }];
+    // 0.035 ZEC (33.47 dollars) was sold today, so 2.03 dollars are left.
+    const s = setup({ tokens, spent: { [ZEC.slice("nep141:".length)]: 3_500_000n } });
+    // 0.00052 gold is 2.08 dollars: within the per-order limit, above what today still allows.
+    expect(await s.t.tradeHeld("did:privy:alice", GOLD, ZEC, 520n)).toEqual({ status: "refused", code: "over_daily_limit" });
+    // Selling it for NEAR buys nothing; the agent holds none, so it stops there.
+    expect(await s.t.tradeHeld("did:privy:alice", GOLD, FUNDING_ASSET, 520n)).toEqual({ status: "refused", code: "not_enough" });
+    expect(s.calls).toEqual([]);
   });
 
   it("starts no order when the daily limit cannot be checked", async () => {

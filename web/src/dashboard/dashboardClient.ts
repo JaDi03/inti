@@ -35,8 +35,36 @@ export interface HeldBalance {
 
 export interface DashboardData {
   prices: Record<"near" | TradableKey, number | null>;
-  /** `held` is what the agent keeps for its owner (gold, the euro, SOL), or null when it cannot be read. */
-  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null } | null;
+  /**
+   * `held` is what the agent keeps for its owner (gold, the euro, SOL) and `cash` the NEAR it holds
+   * to spend next, in whole NEAR; each is null when it cannot be read.
+   */
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null; cash: string | null } | null;
+}
+
+export type CashHome =
+  | { status: "done"; sent: string }
+  | { status: "pending" | "refused" | "failed"; code?: string }
+  | { status: "error"; code: string };
+
+/** Sends all the NEAR the agent holds to the wallet, where it arrives as plain NEAR. */
+export async function sendCashHome(accessToken: string): Promise<CashHome> {
+  if (!API_URL) return { status: "error", code: "unavailable" };
+  try {
+    const res = await fetch(new URL("/api/agent/cash/home", API_URL), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(90_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { status?: string; sent?: string; code?: string; error?: string };
+    if (!res.ok) return { status: "error", code: body.error ?? "unavailable" };
+    if (body.status === "done" && typeof body.sent === "string") return { status: "done", sent: body.sent };
+    if (body.status === "pending" || body.status === "refused" || body.status === "failed") return { status: body.status, ...(body.code ? { code: body.code } : {}) };
+    return { status: "error", code: "unavailable" };
+  } catch (error) {
+    // Only a timeout may still settle on the server; any other failure never reached it.
+    return error instanceof DOMException && error.name === "TimeoutError" ? { status: "pending" } : { status: "error", code: "unreachable" };
+  }
 }
 
 export type HeldSale =

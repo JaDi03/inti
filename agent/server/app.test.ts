@@ -8,6 +8,7 @@ import type { Brain, Turn } from "../core/types.js";
 import { AgentsUnavailableError, type AgentAccounts, type AgentLookup } from "./agents.js";
 import { buildApp, type AppDeps } from "./app.js";
 import { bearerToken, privyVerifier, type TokenVerifier } from "./auth.js";
+import { stepLabel } from "./chatJobs.js";
 import { LIMITS } from "./config.js";
 import type { GrantRecord, GrantStore } from "./grants.js";
 import { DailyQuota } from "./quota.js";
@@ -126,13 +127,21 @@ async function app(overrides: Partial<AppDeps> = {}) {
   });
 }
 
+/** Sends a message and, like the app, follows its job until the reply is there. */
 async function chat(server: Awaited<ReturnType<typeof app>>, auth: string | null, payload: unknown, origin = ORIGIN) {
-  return server.inject({
+  const started = await server.inject({
     method: "POST",
     url: "/api/chat",
     headers: { "content-type": "application/json", origin, ...(auth ? { authorization: auth } : {}) },
     payload: typeof payload === "string" ? payload : JSON.stringify(payload),
   });
+  if (started.statusCode !== 202) return started;
+  const { jobId } = started.json<{ jobId: string }>();
+  for (;;) {
+    const res = await server.inject({ method: "GET", url: `/api/chat/jobs/${jobId}`, headers: { origin, ...(auth ? { authorization: auth } : {}) } });
+    if (res.statusCode !== 200 || res.json<{ status?: string }>().status !== "running") return res;
+    await new Promise((r) => setTimeout(r, 1));
+  }
 }
 
 describe("POST /api/chat", () => {
@@ -146,6 +155,45 @@ describe("POST /api/chat", () => {
     expect(res.headers["x-frame-options"]).toBe("DENY");
     expect(String(res.headers["content-security-policy"])).toContain("frame-ancestors 'none'");
     expect(res.headers["access-control-allow-origin"]).toBe(ORIGIN);
+  });
+
+  it("answers at once and shows each step while the message runs, only to its own user", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    let steps = 0;
+    // The second model step waits for the test, so the message is still running in between.
+    const brain: Brain = {
+      name: "gated",
+      step: async () => {
+        steps += 1;
+        if (steps === 1) return { role: "assistant", text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "get_portfolio", input: {} }] };
+        await gate;
+        return { role: "assistant", text: "All checked.", stop: "end", toolCalls: [] };
+      },
+    };
+    const server = await app({ brain });
+    const alice = `Bearer ${await token()}`;
+    const started = await server.inject({ method: "POST", url: "/api/chat", headers: { "content-type": "application/json", origin: ORIGIN, authorization: alice }, payload: JSON.stringify({ message: "look" }) });
+    expect(started.statusCode).toBe(202);
+    const { jobId } = started.json<{ jobId: string }>();
+    const read = async (auth: string, id = jobId) => server.inject({ method: "GET", url: `/api/chat/jobs/${id}`, headers: { origin: ORIGIN, authorization: auth } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await read(alice)).json()).toEqual({ status: "running", steps: ["Checking your portfolio"] });
+    // A second message waits for the first; another user cannot read this one.
+    expect((await chat(server, alice, { message: "again" })).statusCode).toBe(409);
+    expect((await read(`Bearer ${await token({ sub: "did:privy:bob" })}`)).statusCode).toBe(404);
+    expect((await read(alice, "not-a-job")).statusCode).toBe(400);
+    expect((await server.inject({ method: "GET", url: `/api/chat/jobs/${jobId}`, headers: { origin: ORIGIN } })).statusCode).toBe(401);
+    release();
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await read(alice)).json()).toMatchObject({ report: "All checked.", stopReason: "done" });
+  });
+
+  it("labels steps only from tool names and asset keys Inti knows", () => {
+    expect(stepLabel("sell_now", { asset: "gold", receive: "bitcoin" })).toBe("Swapping Gold for Bitcoin");
+    expect(stepLabel("sell_now", { asset: "gold", receive: "near" })).toBe("Selling Gold for NEAR");
+    expect(stepLabel("buy_now", { asset: "<img src=x>" })).toBe("Buying");
+    expect(stepLabel("transfer", { to: "attacker.near" })).toBeNull();
   });
 
   it("refuses a request without a token", async () => {
@@ -302,6 +350,31 @@ describe("GET /api/dashboard", () => {
     const ok = await server.inject({ method: "GET", url: "/api/dashboard?user=did:privy:bob", headers: { origin: ORIGIN, authorization: `Bearer ${await token()}` } });
     expect(ok.statusCode).toBe(200);
     expect(ok.headers["cache-control"]).toBe("no-store");
+    expect(asked).toEqual(["did:privy:alice"]);
+  });
+});
+
+describe("POST /api/agent/cash/home", () => {
+  it("sends the NEAR of the signed-in user's own agent home, and caps sends per user per day", async () => {
+    const asked: string[] = [];
+    const results = [{ status: "done", sent: 5n * 10n ** 23n }, { status: "refused", code: "not_enough" }];
+    const trading = {
+      sendCashHome: (userId: string) => {
+        asked.push(userId);
+        return Promise.resolve(results.shift());
+      },
+    } as unknown as Trading;
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ trading, dashboard, heldSaleQuota: new DailyQuota(1, 100) });
+    const send = async (auth: string | null) =>
+      server.inject({ method: "POST", url: "/api/agent/cash/home", headers: { origin: ORIGIN, ...(auth ? { authorization: auth } : {}) } });
+    expect((await send(null)).statusCode).toBe(401);
+    expect(asked).toEqual([]);
+    const alice = `Bearer ${await token()}`;
+    expect((await send(alice)).json()).toEqual({ status: "done", sent: "0.5" });
+    expect(forgotten).toEqual(["did:privy:alice"]);
+    // The day's one send is used; a second one is capped before it reaches the agent.
+    expect((await send(alice)).statusCode).toBe(429);
     expect(asked).toEqual(["did:privy:alice"]);
   });
 });

@@ -1,3 +1,4 @@
+import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type Sender = "user" | "inti";
@@ -38,14 +39,33 @@ interface Props {
 }
 
 /** Inti's bubble with three moving dots while the agent works, like mobile chat apps. */
-export function TypingIndicator({ firstOfTurn }: { firstOfTurn: boolean }) {
+/** Steps shown while the agent works: the last few, the newest one still running. */
+const SHOWN_STEPS = 5;
+
+export function TypingIndicator({ firstOfTurn, steps = [] }: { firstOfTurn: boolean; steps?: string[] }) {
+  const shown = steps.slice(-SHOWN_STEPS);
   return (
-    <li className={cn("flex items-start gap-3.5 self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")} role="status" aria-label="Inti is typing">
+    <li className={cn("flex items-start gap-3.5 self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")} role="status" aria-label={shown.at(-1) ?? "Inti is typing"}>
       {firstOfTurn ? <Avatar from="inti" initials="" /> : <span className="w-10 shrink-0" aria-hidden="true" />}
-      <div className={cn("relative flex h-[46px] items-center gap-1.5 rounded-2xl bg-muted px-[18px]", firstOfTurn && "bubble-tail-left rounded-tl-[4px]")}>
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="typing-dot size-2 rounded-full bg-muted-foreground" aria-hidden="true" />
-        ))}
+      <div className={cn("relative flex flex-col gap-1.5 rounded-2xl bg-muted px-[18px] py-3", firstOfTurn && "bubble-tail-left rounded-tl-[4px]")}>
+        {shown.length > 0 && (
+          <ul className="flex flex-col gap-1 text-sm">
+            {shown.map((step, i) => {
+              const current = i === shown.length - 1;
+              return (
+                <li key={`${steps.length - shown.length + i}`} className={cn("flex items-center gap-2", current ? "text-foreground" : "text-muted-foreground")}>
+                  {current ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" /> : <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                  {step}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div className="flex h-[22px] items-center gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <span key={i} className="typing-dot size-2 rounded-full bg-muted-foreground" aria-hidden="true" />
+          ))}
+        </div>
       </div>
     </li>
   );

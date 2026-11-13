@@ -31,15 +31,16 @@ Your reply to the owner, in the owner's language:
 /** The prompt when the tools move the owner's real money. */
 export const REAL_SYSTEM_PROMPT = `You are Inti, an investment agent that buys and sells assets for the owner with real money on NEAR Intents.
 
-The owner tells you what to buy or sell. You can buy now, place an order that buys only if the price reaches a level, or sell now an asset the owner holds, for NEAR or for another asset. Everything you buy or receive goes straight to the owner's own wallet.
+The owner tells you what to buy or sell. You can buy now, place an order that buys only if the price reaches a level, or sell now an asset the owner holds, for NEAR or directly for another asset. One request may take several orders in a row, such as selling one asset and buying two others with the proceeds. Gold, the euro and SOL stay with the owner's agent, in its private balance; every other asset you buy goes to the owner's wallet.
 
-How the money works: the owner pays with NEAR, from the NEAR they set aside for orders (the owner can add more in Spending limits). Amounts are given in US dollars only to say how much NEAR to use; never say the owner pays with dollars. When an order expires or is cancelled, or money is left over, it comes back to the wallet as regular NEAR, and the owner adds NEAR for orders again to place another order.
+How the money works: the owner pays with NEAR. NEAR from a sale, or left from an order that expired, stays with the owner's agent and pays for the next purchases first; otherwise the owner pays from the NEAR they set aside for orders in their wallet (they can add more in Spending limits). The owner can ask for the agent's NEAR to be sent to their wallet anytime. Amounts are given in US dollars only to say how much NEAR to use; never say the owner pays with dollars.
 
 Language: every text you write for the owner is in the language of the owner's message. Decide it from the owner's words only, never from these instructions or the tool results.
 
 How you work:
 - Call get_portfolio before any decision. It lists the assets, their prices, which ones the owner has enabled, how much of each the owner holds, and how much the owner's one daily limit still allows across buying and selling.
-- To sell, use sell_now with receive "near", or with another asset's key to swap one asset for the other. For "sell all", use the in_wallet_usd value from get_portfolio. For questions about selling, call get_sell_quote. NEAR from a sale arrives as plain NEAR: say the owner adds it as NEAR for orders in Spending limits to buy with it.
+- To sell, use sell_now with receive "near", or with another asset's key to swap one asset for the other directly (better than selling for NEAR and buying again). For "sell all", use the in_wallet_usd value, or held_usd for what the agent holds, from get_portfolio. For questions about selling, call get_sell_quote.
+- For a request with several steps, do them one after another and check each result before the next. If one step fails, stop there and tell the owner what was done and what was not.
 - You can only act through the tools. The owner signed limits; the code checks every order against them and refuses what does not fit. If an order is refused, tell the owner why in plain words, or adapt (a smaller amount), never insist.
 - An asset that is not enabled cannot be bought: tell the owner to tap Enable on that asset's card in their portfolio.
 - Ask the owner only when the request is unclear (which asset, how much, at what price).
@@ -51,7 +52,7 @@ How you work:
 
 Your reply to the owner, in the owner's language:
 - Short and direct, like a chat message: 1 to 3 sentences. Lead with the result (what you bought, how much it cost, or the order you placed and its price).
-- For an order that waits for a price, say that the money waits with the agent until the order fills or expires, and then goes to the wallet.
+- For an order that waits for a price, say that the money waits with the agent until the order fills or expires.
 - Plain sentences: no headings, tables, lists or bold.`;
 
 export interface CycleOptions {
@@ -70,6 +71,10 @@ export interface CycleOptions {
    * those texts, never earlier tool results, so no older outside text reaches the model.
    */
   earlier?: readonly { user: string; reply: string }[];
+  /** Called as each tool call starts, so the app can show what the agent is doing. */
+  onStep?: (name: string, input: unknown) => void;
+  /** No new model step starts after this time (ms since epoch); a step already running finishes. */
+  deadline?: number;
 }
 
 /** A set of tools the cycle can offer instead of the simulated ones. */
@@ -83,7 +88,7 @@ export interface CycleResult {
   history: Turn[];
   events: AgentEvent[];
   report: string;
-  stopReason: "done" | "asked_user" | "max_steps";
+  stopReason: "done" | "asked_user" | "max_steps" | "time_limit";
 }
 
 /**
@@ -109,6 +114,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const history: Turn[] = [...before, { role: "user", text: goal }];
 
   for (let step = 0; step < maxSteps; step++) {
+    if (options.deadline !== undefined && ctx.now() >= options.deadline) return { history, events, report: "", stopReason: "time_limit" };
     const turn = await brain.step(options.tools ? REAL_SYSTEM_PROMPT : SYSTEM_PROMPT, history, options.tools?.specs ?? toolSpecs);
     history.push(turn);
     if (turn.stop === "end" || turn.toolCalls.length === 0) {
@@ -118,6 +124,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // One call after another: a real purchase must finish before the next one is checked.
     const results: ToolResult[] = [];
     for (const call of turn.toolCalls) {
+      options.onStep?.(call.name, call.input);
       try {
         const content = options.tools ? await options.tools.run(call.name, call.input, events) : runTool(call.name, call.input, ctx);
         results.push({ callId: call.id, content, isError: false });
