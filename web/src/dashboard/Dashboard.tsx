@@ -20,22 +20,20 @@ type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
 /**
- * One color per asset that matches its brand (Bitcoin orange, Solana purple, Ether's blue, Monerium
- * blue for the euro), in the same light shade with dark text so it reads in both themes.
+ * One color per asset that matches its brand (Bitcoin orange, Ether's blue, Zcash yellow, Meta Pool
+ * purple for staked NEAR), in the same light shade with dark text so it reads in both themes.
  */
 const TILE: Record<AssetKey, string> = {
-  gold: "bg-yellow-300",
-  euro: "bg-sky-300",
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
-  solana: "bg-purple-300",
+  zcash: "bg-yellow-300",
+  stnear: "bg-purple-300",
 };
 
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
-  { title: "Real-world assets", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "real-world") },
-  { title: "Currencies", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "currency") },
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
+  { title: "Staking", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "staking") },
 ];
 
 const NEAR_DECIMALS = 24;
@@ -225,7 +223,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
               <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", TILE[key], wide && "col-span-2")}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70", key === "gold" && "p-1")} />
+                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70")} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
                       <p className="text-xs opacity-70">{a.symbol}</p>

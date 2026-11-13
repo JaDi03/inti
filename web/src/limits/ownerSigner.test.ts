@@ -48,10 +48,10 @@ function userWallet(answer = true, hasPasskey = true) {
 
 type Wallet = ReturnType<typeof userWallet>;
 
-/** Prices of 2026-11-11, from the Agent API token list. */
-const PRICES = { near: 3.55, gold: 4016.03, euro: 1.11, bitcoin: 73948, ethereum: 2056.35, solana: 83.43 };
-const GOLD_SELL_LINE = (perOrder: string, perDay: string) =>
-  `The same limit for selling Gold: at most ${perOrder} XAUT per order and ${perDay} XAUT per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
+/** Prices from the Agent API token list. */
+const PRICES = { near: 3.55, bitcoin: 73948, ethereum: 2056.35, zcash: 956.27, stnear: 5.22 };
+const BTC_SELL_LINE = (perOrder: string, perDay: string) =>
+  `The same limit for selling Bitcoin: at most ${perOrder} BTC per order and ${perDay} BTC per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
 
 function sign(wallet: Wallet, receiverId: string, txActions: Action[]) {
   return wallet.signer.signTransaction(createTransaction(wallet.accountId, wallet.publicKey, receiverId, 1n, txActions, new Uint8Array(32)));
@@ -81,14 +81,14 @@ describe("signing with the user's account key", () => {
 
     expect(wallet.signed).toHaveLength(2);
     expect(wallet.shown).toHaveLength(2);
-    // One NEAR (3.55 dollars) is 0.000883 XAUT at 4016.03 dollars, rounded down.
+    // One NEAR (3.55 dollars) is 0.000048 BTC at 73948 dollars, rounded down.
     expect(wallet.shown[0]?.slice(0, 4)).toEqual([
       `Install the Spending Limits contract on your account (expected build ${SPENDING_LIMITS_WASM_SHA256.slice(0, 12)}).`,
       "Set up Spending Limits so orders can only go to your agent (agent.testnet).",
       "Set your limit: at most 1 NEAR per order and 3 NEAR per day.",
-      GOLD_SELL_LINE("0.000883", "0.002651"),
+      BTC_SELL_LINE("0.000048", "0.00014402"),
     ]);
-    expect(wallet.shown[0]).toHaveLength(10);
+    expect(wallet.shown[0]).toHaveLength(9);
     expect(wallet.shown[0]?.slice(-2)).toEqual([
       "Give Inti a key that can only call fund_agent: it can send to your agent only within the spending limits you set.",
       "That key can also use up to 0.1 NEAR of your balance to pay network fees. This is not a spending limit.",
@@ -107,8 +107,8 @@ describe("signing with the user's account key", () => {
     await client.reconnectInti(wallet.accountId, wallet.signer);
 
     expect(wallet.signed).toHaveLength(3);
-    expect(wallet.shown[0]?.slice(0, 2)).toEqual(["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day.", GOLD_SELL_LINE("0.000441", "0.000883")]);
-    expect(wallet.shown[0]).toHaveLength(6);
+    expect(wallet.shown[0]?.slice(0, 2)).toEqual(["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day.", BTC_SELL_LINE("0.000024", "0.000048")]);
+    expect(wallet.shown[0]).toHaveLength(5);
     expect(wallet.shown.slice(1)).toEqual([
       ["Turn off Inti's access to your account."],
       [
@@ -121,7 +121,7 @@ describe("signing with the user's account key", () => {
   it("saves no limit at all without a fresh price for every asset", async () => {
     const wallet = userWallet();
     const client = clientSigningThrough(wallet);
-    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, { ...PRICES, solana: null })).rejects.toThrow("Prices are not available");
+    await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, { ...PRICES, zcash: null })).rejects.toThrow("Prices are not available");
     expect(wallet.shown).toHaveLength(0);
     expect(wallet.signed).toHaveLength(0);
   });
@@ -155,9 +155,9 @@ describe("signing with the user's account key", () => {
     ["setup with another agent", (w) => [w.accountId, [actions.functionCall("new", { intents: config.intentsAccount, agent: "stranger.testnet" }, 1n, 0n)]]],
     ["a limit with an extra argument", (w) => [w.accountId, [actions.functionCall("set_limit", { token: "wrap.testnet", per_order: "1", per_day: "2", agent: "x" }, 1n, 1n)]]],
     ["a limit on another token", (w) => [w.accountId, [actions.functionCall("set_limit", { token: "usdc.testnet", per_order: "1", per_day: "2" }, 1n, 1n)]]],
-    ["a selling limit with no yoctoNEAR attached", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1", per_day: "2" }, 1n, 0n)]]],
-    ["a selling limit with an extra argument", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1", per_day: "2", to: "x" }, 1n, 1n)]]],
-    ["a selling limit that is not a whole number", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("gold"), per_order: "1.5", per_day: "2" }, 1n, 1n)]]],
+    ["a selling limit with no yoctoNEAR attached", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("zcash"), per_order: "1", per_day: "2" }, 1n, 0n)]]],
+    ["a selling limit with an extra argument", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("zcash"), per_order: "1", per_day: "2", to: "x" }, 1n, 1n)]]],
+    ["a selling limit that is not a whole number", (w) => [w.accountId, [actions.functionCall("set_limit", { token: assetContract("zcash"), per_order: "1.5", per_day: "2" }, 1n, 1n)]]],
     ["a method Inti does not use", (w) => [w.accountId, [actions.functionCall("set_agent", { agent: "stranger.testnet" }, 1n, 1n)]]],
     ["a token transfer out", () => [config.token.id, [actions.functionCall("ft_transfer", { receiver_id: "stranger.testnet", amount: "1" }, 1n, 1n)]]],
     ["registering another account on the token", () => [config.token.id, [actions.functionCall("storage_deposit", { account_id: "stranger.testnet", registration_only: true }, 1n, 1n)]]],
@@ -182,15 +182,15 @@ describe("signing with the user's account key", () => {
 
   it("enables an asset only by registering the user's own account with that asset's token", async () => {
     const wallet = userWallet();
-    const gold = assetContract("gold");
+    const zcash = assetContract("zcash");
     const register = (account: string, deposit = 1_250_000_000_000_000_000_000n) =>
       actions.functionCall("storage_deposit", { account_id: account, registration_only: true }, 10n ** 13n, deposit);
-    await sign(wallet, gold, [register(wallet.accountId)]);
-    expect(wallet.shown[0]).toEqual(["Enable Gold in your wallet so Inti can deliver it to you (one-time fee 0.00125 NEAR)."]);
+    await sign(wallet, zcash, [register(wallet.accountId)]);
+    expect(wallet.shown[0]).toEqual(["Enable Zcash in your wallet so Inti can deliver it to you (one-time fee 0.00125 NEAR)."]);
 
-    await expect(sign(wallet, gold, [register("cd".repeat(32))])).rejects.toThrow(RefusedSigningError);
-    await expect(sign(wallet, gold, [register(wallet.accountId, 10n ** 23n)])).rejects.toThrow(RefusedSigningError);
-    await expect(sign(wallet, gold, [actions.functionCall("ft_transfer", { receiver_id: "attacker.near", amount: "1" }, 10n ** 13n, 1n)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, zcash, [register("cd".repeat(32))])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, zcash, [register(wallet.accountId, 10n ** 23n)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, zcash, [actions.functionCall("ft_transfer", { receiver_id: "attacker.near", amount: "1" }, 10n ** 13n, 1n)])).rejects.toThrow(RefusedSigningError);
     await expect(sign(wallet, "usdt.tether-token.near", [register(wallet.accountId)])).rejects.toThrow(RefusedSigningError);
     expect(wallet.signed).toHaveLength(1);
   });

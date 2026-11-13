@@ -100,7 +100,7 @@ function AssetList({ address, config, client }: { address: string; config: Limit
                       {a.name} <span className="text-muted-foreground">({a.symbol})</span>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {a.kind === "real-world" ? "Real-world asset" : a.kind === "currency" ? "Currency" : "Crypto"}
+                      {a.kind === "staking" ? "Earns staking rewards" : "Crypto"}
                       {row?.enabled ? ` · In your wallet: ${fromAtomic(row.balance.toString(), DECIMALS[key])}` : ""}
                     </p>
                   </div>
