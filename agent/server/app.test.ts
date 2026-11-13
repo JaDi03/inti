@@ -328,6 +328,20 @@ describe("POST /api/held/sell", () => {
     expect((await sell(capped, `Bearer ${await token({ sub: "did:privy:bob" })}`, { asset: "gold" })).statusCode).toBe(200);
   });
 
+  it("does not count a sale that never happened toward the day's sales", async () => {
+    const trading = {
+      held: () => Promise.resolve(new Map([[GOLD, 254n]])),
+      sellHeld: () => Promise.resolve({ status: "refused", code: "busy" }),
+    } as unknown as Trading;
+    const server = await app({ trading, heldSaleQuota: new DailyQuota(1, 100) });
+    const alice = `Bearer ${await token()}`;
+    expect((await sell(server, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "busy" });
+    expect((await sell(server, alice, { asset: "gold" })).json()).toEqual({ status: "refused", code: "busy" });
+    const failing = await app({ trading: { held: () => Promise.reject(new Error("down")) } as unknown as Trading, heldSaleQuota: new DailyQuota(1, 100) });
+    expect((await sell(failing, alice, { asset: "gold" })).statusCode).toBe(502);
+    expect((await sell(failing, alice, { asset: "gold" })).statusCode).toBe(502);
+  });
+
   it("answers a generic error when the agent's balance cannot be read", async () => {
     const trading = { held: () => Promise.reject(new Error("agent api answered 502 at https://upstream")) } as unknown as Trading;
     const res = await sell(await app({ trading }), `Bearer ${await token()}`, { asset: "gold" });

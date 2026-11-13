@@ -221,10 +221,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       }
       const result = await trading.sellHeld(userId, assetId, amount);
       req.log.info({ userId, asset: body.data.asset, status: result.status, ...("code" in result ? { code: result.code } : {}) }, "held_sold");
+      // Only a sale that happened or is still settling counts toward the day's sales.
+      if (result.status !== "done" && result.status !== "pending") heldSaleQuota.giveBack(userId);
       if (result.status === "done" || result.status === "pending") deps.dashboard?.forget(userId);
       if (result.status === "done") return { status: "done", received: fromAtomic(result.received.toString(), 24) };
       return "code" in result ? { status: result.status, code: result.code } : { status: result.status };
     } catch (error) {
+      heldSaleQuota.giveBack(userId);
       req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "held_sale_failed");
       return reply.code(502).send({ error: "agent_unavailable" });
     }
