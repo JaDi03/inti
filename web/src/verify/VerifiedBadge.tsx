@@ -20,13 +20,13 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (fresh = false) => {
     setChecking(true);
     setError(null);
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("Sign in again to run the check.");
-      setResult(await fetchVerification(token));
+      setResult(await fetchVerification(token, fresh));
     } catch (e) {
       setError(e instanceof Error ? e.message : "The check could not run right now.");
     } finally {
@@ -40,7 +40,7 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
   }, [check]);
 
   const verified = result?.ok === true;
-  const label = checking && !result ? "Checking private AI…" : verified ? "Private AI · verified" : "Private AI · not verified";
+  const label = checking && !result ? "Checking AI hardware…" : verified ? "AI hardware verified" : "AI hardware not verified";
   return (
     <>
       <button
@@ -60,17 +60,17 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
         <span className="sr-only sm:hidden">{label}</span>
       </button>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/70 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-label="Private AI">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/70 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-label="AI hardware check">
           <section className="max-h-[90svh] w-full max-w-md overflow-y-auto rounded-t-3xl border bg-card p-5 shadow-xl sm:rounded-3xl">
             <header className="mb-3 flex items-start justify-between gap-3">
-              <h2 className="font-heading text-lg font-semibold">Inti's brain runs in private hardware</h2>
+              <h2 className="font-heading text-lg font-semibold">The AI model behind Inti, checked live</h2>
               <Button variant="ghost" size="icon" aria-label="Close" onClick={() => setOpen(false)}>
                 <X />
               </Button>
             </header>
             <p className="text-sm text-muted-foreground">
-              Inti's AI model runs inside a sealed chip (Intel TDX with an NVIDIA GPU), so the cloud that hosts the model cannot read what it works on. Inti's own server still
-              sees your messages, to pass them to the model. Inti checks the chip with a new challenge each time, against Intel's and NVIDIA's own services.
+              Inti uses an AI model on NEAR AI Cloud. Inti sends NEAR AI a new challenge and gets back that model's hardware report, which Intel's and NVIDIA's own
+              services confirm: a sealed Intel TDX chip with an NVIDIA GPU.
             </p>
             {result && (
               <ul className="mt-4 flex flex-col gap-2 text-sm">
@@ -85,7 +85,7 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
             {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
             <div className="mt-4 flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">{result ? `Checked ${ago(result.checkedAt, now)}` : "Not checked yet"}</p>
-              <Button className="rounded-full" disabled={checking} onClick={() => void check()}>
+              <Button className="rounded-full" disabled={checking} onClick={() => void check(true)}>
                 {checking ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Verify again
               </Button>
             </div>
@@ -107,7 +107,8 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
               </details>
             )}
             <p className="mt-4 text-xs text-muted-foreground">
-              This proves where the model runs. It does not yet prove that each reply came from this chip.
+              What this does not prove: that each chat reply was served by this machine, which software runs inside it beyond its own measurements, or that your messages are
+              hidden. NEAR AI's gateway and Inti's server both see them.
             </p>
           </section>
         </div>

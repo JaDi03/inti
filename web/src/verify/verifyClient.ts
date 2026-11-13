@@ -16,14 +16,14 @@ export interface ModelVerification {
 /** What each check proves, in plain words. */
 export const CHECK_TEXT: Record<CheckId, string> = {
   report: "NEAR AI answered for Inti's model",
-  nonce: "It answered the fresh challenge Inti just sent",
+  nonce: "It answered the new challenge Inti sent",
   intel: "Genuine Intel TDX chip, rated up to date by Intel",
   not_debug: "The chip is sealed, not in debug mode",
   binds_nonce: "The chip itself signed that challenge",
-  binds_key: "The chip holds the key the model signs replies with",
-  software: "It runs the software it measured at start",
-  config: "Its configuration matches what it published",
-  gpu: "Genuine NVIDIA GPU, confirmed by NVIDIA",
+  binds_key: "The chip holds the model's signing key (shared by the model's machines)",
+  software: "Its startup log matches what the chip measured",
+  config: "Its published setup matches what the chip measured",
+  gpu: "Genuine NVIDIA GPU, confirmed by NVIDIA for that challenge",
 };
 
 const MESSAGES: Record<string, string> = {
@@ -33,12 +33,17 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "Too many requests in a minute. Wait a moment and retry.",
 };
 
-/** Asks Inti's server for a fresh check; throws a short sentence the user understands. */
-export async function fetchVerification(accessToken: string): Promise<ModelVerification> {
+/**
+ * Asks Inti's server for the check: the recent one everyone shares, or with `fresh` a new one that
+ * counts against the user's daily checks. Throws a short sentence the user understands.
+ */
+export async function fetchVerification(accessToken: string, fresh = false): Promise<ModelVerification> {
   if (!API_URL) throw new Error("Inti's server is not configured yet.");
   let res: Response;
   try {
-    res = await fetch(new URL("/api/verify", API_URL), { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(60_000) });
+    const url = new URL("/api/verify", API_URL);
+    if (fresh) url.searchParams.set("fresh", "true");
+    res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(60_000) });
   } catch {
     throw new Error("The check could not reach Inti's server. Try again in a minute.");
   }
