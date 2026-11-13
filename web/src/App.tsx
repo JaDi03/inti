@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { Check, Copy, Eye, EyeOff, LogOut } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, LogOut, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { PortfolioLayout, useHideAmounts } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
+import { playCash, setSoundOn, soundOn, unlockSoundOnFirstTouch } from "./sound/cashSound";
 import { SignedReply } from "./verify/SignedReply";
 import { VerifiedBadge } from "./verify/VerifiedBadge";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
@@ -24,6 +25,9 @@ const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. I
 
 /** First messages offered on an empty chat. None of them moves money: a purchase is always typed by the user. */
 const SUGGESTIONS = ["What can you buy for me?", "How much does $5 of bitcoin cost right now?", "How much can you spend today?"];
+
+/** After a reply the dashboard reads again at these delays, for trades that settle a little later. */
+const SETTLE_READS_MS = [20_000, 60_000];
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -81,6 +85,10 @@ export function App() {
   const [thinking, setThinking] = useState(false);
   /** What the agent is doing for the message it is working on, one line per step. */
   const [steps, setSteps] = useState<string[]>([]);
+  // Bumped after each reply so the dashboard reads balances again (a trade may still be settling).
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [sound, setSound] = useState(soundOn);
+  useEffect(() => unlockSoundOnFirstTouch(), []);
   const creating = useRef(false);
   const nextId = useRef(1);
   const chatEnd = useRef<HTMLLIElement>(null);
@@ -158,6 +166,9 @@ export function App() {
     } finally {
       setThinking(false);
       setSteps([]);
+      // Now, and twice more while a trade may still be settling: each read can play the cash sound.
+      setRefreshKey((k) => k + 1);
+      for (const ms of SETTLE_READS_MS) setTimeout(() => setRefreshKey((k) => k + 1), ms);
       // An order may have spent NEAR for orders or brought an asset: the wallet card reads them again.
       void limits.refresh();
     }
@@ -220,6 +231,20 @@ export function App() {
               </Button>
             </div>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={sound ? "Turn off the cash sound" : "Turn on the cash sound"}
+            aria-pressed={sound}
+            onClick={() => {
+              setSoundOn(!sound);
+              setSound(!sound);
+              // Turning it on plays it once, so the user knows what to listen for.
+              if (!sound) playCash();
+            }}
+          >
+            {sound ? <Volume2 /> : <VolumeX />}
+          </Button>
           <ThemeToggle />
           <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
             <LogOut />
@@ -261,6 +286,7 @@ export function App() {
                 onChanged: () => void limits.refresh(),
                 view,
                 grantSigned: grantDone,
+                refreshKey,
               }
             : null
         }

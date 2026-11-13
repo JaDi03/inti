@@ -2,7 +2,9 @@ import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoi
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
-import { fromAtomic } from "../../../agent/policy/units";
+import { fromAtomic, toAtomic } from "../../../agent/policy/units";
+import { anyRose, type Balances } from "../sound/balanceRise";
+import { playCash } from "../sound/cashSound";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DECIMALS } from "../assets/AssetsPanel";
@@ -107,10 +109,19 @@ function useDashboard(
   status: Installed,
   getAccessToken: () => Promise<string | null>,
   grantSigned: boolean,
+  refreshKey: number,
 ): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // "Cha-ching" when any asset card, in the wallet or with the agent, holds more than at the last read.
+  const lastBalances = useRef<Balances | null>(null);
+  useEffect(() => {
+    const now = assetBalances(data, assets);
+    if (anyRose(lastBalances.current, now)) playCash();
+    lastBalances.current = now;
+  }, [data, assets]);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -135,9 +146,27 @@ function useDashboard(
   useEffect(() => {
     void load(readOnce.current);
     readOnce.current = true;
-  }, [load, balances, grantSigned]);
+  }, [load, balances, grantSigned, refreshKey]);
 
   return { data, assets, loading, load };
+}
+
+/**
+ * The atomic balance of every asset card that was read: the wallet's assets and what the agent
+ * holds (its NEAR, gold, the euro, SOL). The wallet's own NEAR is left out, so moving NEAR between
+ * the wallet and orders is quiet.
+ */
+function assetBalances(data: DashboardData | null, assets: AssetRow[] | null): Balances {
+  const out = new Map<string, bigint>();
+  for (const row of assets ?? []) out.set(row.key, row.balance);
+  const agent = data?.agent;
+  if (agent?.cash != null) out.set("agent-near", BigInt(toAtomic(agent.cash, NEAR_DECIMALS)));
+  if (agent?.held) {
+    for (const key of HELD_KEYS) {
+      out.set(`agent-${key}`, BigInt(toAtomic(agent.held.find((h) => h.asset === key)?.amount ?? "0", HELD_ASSETS[key].decimals)));
+    }
+  }
+  return out;
 }
 
 interface MoneyProps {
@@ -819,6 +848,8 @@ interface LayoutProps {
   view: "chat" | "portfolio";
   /** True once the user signed Inti's first permission, so the dashboard reads it at once. */
   grantSigned: boolean;
+  /** Changes when the app wants the dashboard read again, e.g. after the agent traded. */
+  refreshKey: number;
   children: React.ReactNode;
 }
 
@@ -827,8 +858,8 @@ interface LayoutProps {
  * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
  * Phones: the chat or the portfolio, one at a time.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken, grantSigned);
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
