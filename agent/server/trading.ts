@@ -4,6 +4,7 @@ import { ASSET_KEYS, ASSETS } from "../policy/assets.js";
 import type { AgentAccounts } from "./agents.js";
 import { freeCash, sendCashHome, tradeOnAgent, type CashHomeResult, type InsideResult } from "./agentCash.js";
 import { buyHeld, heldBalances, sellHeld, type HeldBuyResult, type HeldSellResult } from "./held.js";
+import { memorySpendLog, type SpendLog } from "./spendLog.js";
 import { usableGrant, type GrantStore } from "./grants.js";
 import {
   AgentApiRefusal,
@@ -43,9 +44,6 @@ export type NotStarted = {
   code: "no_agent" | "no_grant" | "busy" | "unknown_asset" | "price_out_of_band" | "no_price" | "too_small" | "over_daily_limit" | "limit_unchecked" | "over_order_limit" | "token_not_allowed";
 };
 
-/** Trades inside the agent are remembered this long against the daily limit. */
-const DAY_MS = 86_400_000;
-
 /** Every token Inti trades, whose orders count against the one daily limit the user sets. */
 const TRADED_ASSETS = [FUNDING_ASSET, ...ASSET_KEYS.map((k) => ASSETS[k].assetId)];
 
@@ -61,6 +59,8 @@ export interface TradingDeps {
   agent: AgentPort;
   tokens: () => Promise<PricedToken[]>;
   now?: () => number;
+  /** Where trades paid from what the agent holds are kept; in memory when not given. */
+  spendLog?: SpendLog;
 }
 
 /** Longest a limit order may rest; the Agent API allows 7 days. */
@@ -77,12 +77,8 @@ export function trading(deps: TradingDeps) {
    * What each owner's agent spent from what it already holds, in micro-dollars: Spending Limits
    * only sees money leaving the wallet, so these count against the same daily limit here.
    */
-  const spentOnAgent = new Map<string, { at: number; micro: bigint }[]>();
-  const agentSpentToday = (owner: string): bigint => {
-    const recent = (spentOnAgent.get(owner) ?? []).filter((s) => now() - s.at < DAY_MS);
-    spentOnAgent.set(owner, recent);
-    return recent.reduce((a, s) => a + s.micro, 0n);
-  };
+  const spendLog = deps.spendLog ?? memorySpendLog();
+  const agentSpentToday = (owner: string): bigint => spendLog.recent(owner, now()).reduce((a, s) => a + s.micro, 0n);
 
   /** The user's own agent and live grant, or why there is none. */
   const accountOf = async (userId: string): Promise<OrderAccount | NotStarted> => {
@@ -171,10 +167,12 @@ export function trading(deps: TradingDeps) {
     // Selling for NEAR only turns what the agent holds into money it can spend; it buys nothing.
     const value = to === FUNDING_ASSET ? 0n : await checkInside(account.owner, from, amount);
     if (typeof value !== "bigint") return value;
+    // Kept before the trade, so a restart in the middle never forgets it; if the trade did not go
+    // through, a matching negative entry gives the room back.
+    const at = now();
+    if (value > 0n) await spendLog.add(account.owner, { at, micro: value });
     const result = await tradeOnAgent(deps.chain, deps.agent, account, from, to, amount);
-    if (value > 0n && (result.status === "done" || result.status === "pending")) {
-      spentOnAgent.set(account.owner, [...(spentOnAgent.get(account.owner) ?? []), { at: now(), micro: value }]);
-    }
+    if (value > 0n && (result.status === "refused" || result.status === "kept")) await spendLog.add(account.owner, { at, micro: -value });
     return result;
   };
 

@@ -157,6 +157,12 @@ describe("trading", () => {
     expect(await s.t.roomToday(ACTIVE.ownerAccount)).toBe(31_950_000n);
   });
 
+  it("gives the daily room back when a trade paid from the agent did not go through", async () => {
+    const s = setup({ cash: 2n * 10n ** 24n, swap: "failed" });
+    expect(await s.t.buyNow("did:privy:alice", ZEC, 10n ** 24n)).toEqual({ status: "kept", code: "swap_failed" });
+    expect(await s.t.roomToday(ACTIVE.ownerAccount)).toBe(35_500_000n);
+  });
+
   it("counts a swap of what the agent keeps against the daily limit, but not a sale for NEAR", async () => {
     const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
     const tokens = [...TOKENS, { asset_id: GOLD, symbol: "XAUT", decimals: 6, blockchain: "eth", price: 4000 }];

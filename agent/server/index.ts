@@ -3,6 +3,7 @@
  *
  *   pnpm server
  */
+import { dirname, join } from "node:path";
 import { NEAR_AI_MODEL, NearAiBrain } from "../brains/nearai.js";
 import { attestModel, liveAttestationDeps } from "./attestation.js";
 import { proveReply } from "./replyProof.js";
@@ -15,6 +16,7 @@ import { privyVerifier } from "./auth.js";
 import { LIMITS, loadConfig } from "./config.js";
 import { fileGrantStore, grantKey } from "./grants.js";
 import { agentApiPort, loadIntiKey, nearChain } from "./orders.js";
+import { fileSpendLog } from "./spendLog.js";
 import { trading } from "./trading.js";
 
 async function main(): Promise<void> {
@@ -30,7 +32,9 @@ async function main(): Promise<void> {
   const agents = agentApiAccounts(config.agentApiKey, config.agentApiUrl);
   const grants = await fileGrantStore(config.grantFile, grantKey(config.grantKey));
   const chain = nearChain(config.nearRpcUrl, await loadIntiKey(config.intiKeyFile, config.intiPublicKey));
-  const orders = trading({ agents, grants, chain, agent: agentApiPort(config.agentApiKey, config.agentApiUrl), tokens });
+  // Next to the grants, so it lives wherever the server already keeps its state.
+  const spendLog = await fileSpendLog(join(dirname(config.grantFile), "agent-spend.json"));
+  const orders = trading({ agents, grants, chain, agent: agentApiPort(config.agentApiKey, config.agentApiUrl), tokens, spendLog });
 
   // What an agent holds goes back to its owner's wallet: at start, then every few minutes.
   let sweeping = false;
