@@ -29,8 +29,11 @@ export interface AssistantTurn {
   stop: "end" | "tool_use";
   /** Provider-specific content, replayed unchanged on the next request. */
   raw?: unknown;
-  /** Where this step ran, so it can be checked later (NEAR AI signs each response id in its TEE). */
-  audit?: { provider: string; model: string; responseId: string };
+  /**
+   * Where this step ran, so it can be checked later: NEAR AI signs, inside its TEE, the SHA-256 of
+   * the exact request and response bytes of each response id.
+   */
+  audit?: { provider: string; model: string; responseId: string; requestHash?: string; responseHash?: string };
 }
 
 export type Turn =

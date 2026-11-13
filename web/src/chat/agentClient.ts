@@ -7,6 +7,8 @@ export interface AgentReply {
   stopReason: string;
   events: Array<Record<string, string>>;
   responseIds: string[];
+  /** Lets the user check that the AI model calls behind this reply were signed in the verified chip. */
+  proofId?: string | null;
 }
 
 /** Every failure becomes one short sentence the user understands. */

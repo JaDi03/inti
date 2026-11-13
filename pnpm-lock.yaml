@@ -24,6 +24,12 @@ importers:
       '@near-intents-agent-api/sdk':
         specifier: 0.7.3
         version: 0.7.3
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
       '@phala/dcap-qvl':
         specifier: 0.7.0
         version: 0.7.0

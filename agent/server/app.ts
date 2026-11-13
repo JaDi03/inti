@@ -12,6 +12,7 @@ import type { Brain } from "../core/types.js";
 import { PRICE_PROTECTION_BPS } from "../policy/agentPolicy.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import type { ModelAttestation } from "./attestation.js";
+import { ProofStore, type ReplyProof, type SignedCall } from "./replyProof.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
@@ -34,6 +35,8 @@ export interface AppDeps {
   dashboard?: Dashboard;
   /** Checks, with a fresh nonce, that the model behind the chat runs in attested hardware. */
   attest?: () => Promise<ModelAttestation>;
+  /** Checks that the model calls behind one reply were signed by the attested key. */
+  proveReply?: (model: string, calls: SignedCall[], attestedKey: () => Promise<string | null>) => Promise<ReplyProof>;
   now?: () => number;
   policy: () => Policy;
   newPortfolio: (tokens: readonly PricedToken[]) => SimulatedPortfolio;
@@ -121,6 +124,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   let verifying = 0;
   let lastAttestation: { at: number; result: ModelAttestation } | null = null;
   let sharedAttestation: Promise<ModelAttestation> | null = null;
+  const proofs = new ProofStore(LIMITS.proofsInMemory);
+  const proofQuota = new DailyQuota(LIMITS.proofsPerUserPerDay, LIMITS.proofsPerDayTotal);
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -209,16 +214,40 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const attest = deps.attest;
     if (!attest) return reply.code(503).send({ error: "unavailable" });
     const fresh = (req.query as Record<string, unknown> | undefined)?.fresh === "true";
-    if (!fresh) {
-      if (lastAttestation && now() - lastAttestation.at < LIMITS.sharedVerificationMs) return lastAttestation.result;
-      // One shared check at a time; everyone opening the app meanwhile waits for the same answer.
-      sharedAttestation ??= runAttest(req, attest).finally(() => (sharedAttestation = null));
-      return sharedAttestation;
-    }
+    if (!fresh) return sharedAttest(req, attest);
     if (verifying >= LIMITS.verificationsAtOnce) return reply.code(503).send({ error: "busy" });
     const taken = verifyQuota.take(userId);
     if (taken !== "ok") return reply.code(429).send({ error: taken });
     return runAttest(req, attest);
+  });
+  /** The recent check everyone shares; one runs at a time and everyone waits for the same answer. */
+  const sharedAttest = (req: FastifyRequest, attest: () => Promise<ModelAttestation>): Promise<ModelAttestation> => {
+    if (lastAttestation && now() - lastAttestation.at < LIMITS.sharedVerificationMs) return Promise.resolve(lastAttestation.result);
+    sharedAttestation ??= runAttest(req, attest).finally(() => (sharedAttestation = null));
+    return sharedAttestation;
+  };
+
+  // Whether the model calls behind one of the user's own replies were signed by the attested key.
+  app.get("/api/chat/proof/:id", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const id = (req.params as { id?: unknown }).id;
+    const entry = typeof id === "string" && /^[0-9a-f-]{36}$/.test(id) ? proofs.get(id, userId) : null;
+    if (!entry) return reply.code(404).send({ error: "not_found" });
+    if (entry.proof) return entry.proof;
+    const { attest, proveReply } = deps;
+    if (!attest || !proveReply) return reply.code(503).send({ error: "unavailable" });
+    const taken = proofQuota.take(userId);
+    if (taken !== "ok") return reply.code(429).send({ error: taken });
+    const attestedKey = async () => {
+      const result = await sharedAttest(req, attest);
+      return result.ok ? result.signingAddress : null;
+    };
+    const proof = await proveReply(entry.model, entry.calls, attestedKey);
+    // A signature not ready yet may be there on the next try; anything else is final.
+    if (proof.calls.every((c) => c.failure !== "unavailable")) entry.proof = proof;
+    req.log.info({ ok: proof.ok, failures: proof.calls.flatMap((c) => (c.failure ? [c.failure] : [])) }, "reply_proved");
+    return proof;
   });
 
   // The document the user's wallet signs so Inti's server may trade for their agent.
@@ -456,12 +485,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         ...(tools ? { tools } : {}),
       });
       for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
+      // Every model call of this reply, with the hashes NEAR AI signs; the reply can be checked only if all have them.
+      const audits = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit] : []));
+      const calls = audits.flatMap((a) => (a.requestHash && a.responseHash ? [{ responseId: a.responseId, requestHash: a.requestHash, responseHash: a.responseHash }] : []));
+      const model = audits[0]?.model;
+      // Only a reply whose words came from the model can carry its signature: a run cut at max_steps has none.
+      const fromModel = result.stopReason !== "max_steps" && result.report !== "";
+      const proofId = deps.proveReply && fromModel && model && calls.length > 0 && calls.length === audits.length ? proofs.remember(userId, model, calls) : null;
       return {
         simulated: tools === null,
         report: result.report,
         stopReason: result.stopReason,
         events: result.events.map(publicEvent),
-        responseIds: result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit.responseId] : [])),
+        responseIds: audits.map((a) => a.responseId),
+        proofId,
       };
     } catch (error) {
       req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "cycle_failed");

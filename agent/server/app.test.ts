@@ -133,7 +133,7 @@ describe("POST /api/chat", () => {
     const server = await app();
     const res = await chat(server, `Bearer ${await token()}`, { message: "How is my portfolio?" });
     expect(res.statusCode).toBe(200);
-    expect(Object.keys(res.json()).sort()).toEqual(["events", "report", "responseIds", "simulated", "stopReason"]);
+    expect(Object.keys(res.json()).sort()).toEqual(["events", "proofId", "report", "responseIds", "simulated", "stopReason"]);
     expect(res.json()).toMatchObject({ simulated: true, report: "Done.", stopReason: "done" });
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.headers["x-frame-options"]).toBe("DENY");
@@ -319,6 +319,76 @@ describe("GET /api/verify", () => {
     expect(extra.json()).toEqual({ error: "busy" });
     releases.forEach((release) => release());
     expect((await Promise.all(running)).map((r) => r.statusCode)).toEqual(Array(LIMITS.verificationsAtOnce).fill(200));
+  });
+});
+
+describe("GET /api/chat/proof/:id", () => {
+  const KEY = "0x" + "fe".repeat(20);
+  const ATTESTED = { model: "m", ok: true, checks: [], signingAddress: KEY, intelStatus: "UpToDate", checkedAt: "2026-11-13T08:00:00.000Z" };
+  const audit = (n: number) => ({ provider: "nearai", model: "m", responseId: `chatcmpl-${n}`, requestHash: "aa".repeat(32), responseHash: "bb".repeat(32) });
+  // Two model calls behind one reply: a tool call, then the answer.
+  const signedBrain = () =>
+    new ScriptedBrain([
+      () => ({ text: "", stop: "tool_use" as const, toolCalls: [{ id: "1", name: "get_portfolio", input: {} }], audit: audit(1) }),
+      () => ({ text: "Done.", stop: "end" as const, toolCalls: [], audit: audit(2) }),
+    ]);
+  const ask = (server: Awaited<ReturnType<typeof app>>, id: string, auth: string | null) =>
+    server.inject({ method: "GET", url: `/api/chat/proof/${id}`, headers: { origin: ORIGIN, ...(auth ? { authorization: auth } : {}) } });
+
+  it("checks only the user's own reply, every model call of it, against the attested key", async () => {
+    const asked: { model: string; calls: unknown[]; key: string | null }[] = [];
+    const server = await app({
+      brain: signedBrain(),
+      attest: () => Promise.resolve(ATTESTED),
+      proveReply: async (model, calls, attestedKey) => {
+        asked.push({ model, calls, key: await attestedKey() });
+        return { ok: true, calls: calls.map((c) => ({ responseId: c.responseId, ok: true, failure: null })), attestedKey: KEY, checkedAt: "2026-11-13T08:00:00.000Z" };
+      },
+    });
+    const alice = `Bearer ${await token()}`;
+    const proofId = (await chat(server, alice, { message: "how much do I have?" })).json<{ proofId: string }>().proofId;
+    expect(proofId).toMatch(/^[0-9a-f-]{36}$/);
+
+    expect((await ask(server, proofId, null)).statusCode).toBe(401);
+    expect((await ask(server, proofId, `Bearer ${await token({ sub: "did:privy:bob" })}`)).statusCode).toBe(404);
+    expect((await ask(server, "not-an-id", alice)).statusCode).toBe(404);
+    expect(asked).toEqual([]);
+
+    const first = await ask(server, proofId, alice);
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ ok: true, attestedKey: KEY });
+    expect(asked).toEqual([{ model: "m", calls: [audit(1), audit(2)].map(({ responseId, requestHash, responseHash }) => ({ responseId, requestHash, responseHash })), key: KEY }]);
+    // A final answer is kept, so asking again costs nothing.
+    expect((await ask(server, proofId, alice)).json()).toMatchObject({ ok: true });
+    expect(asked).toHaveLength(1);
+  });
+
+  it("asks again when a signature was not ready, and offers no proof for a reply without hashes", async () => {
+    let tries = 0;
+    const server = await app({
+      brain: signedBrain(),
+      attest: () => Promise.resolve(ATTESTED),
+      proveReply: (_model, calls) => {
+        tries++;
+        return Promise.resolve({ ok: false, calls: calls.map((c) => ({ responseId: c.responseId, ok: false, failure: "unavailable" as const })), attestedKey: KEY, checkedAt: "x" });
+      },
+    });
+    const alice = `Bearer ${await token()}`;
+    const proofId = (await chat(server, alice, { message: "hi" })).json<{ proofId: string }>().proofId;
+    await ask(server, proofId, alice);
+    await ask(server, proofId, alice);
+    expect(tries).toBe(2);
+
+    const plain = await app({ attest: () => Promise.resolve(ATTESTED), proveReply: () => Promise.reject(new Error("unused")) });
+    expect((await chat(plain, alice, { message: "hi" })).json()).toMatchObject({ proofId: null });
+  });
+
+  it("offers no proof for a run cut before the model answered, whose words the model never wrote", async () => {
+    // The model keeps asking for tools until the step limit, so the reply has no text of its own.
+    const endless = new ScriptedBrain(Array.from({ length: 50 }, (_, n) => () => ({ text: "", stop: "tool_use" as const, toolCalls: [{ id: `${n}`, name: "get_portfolio", input: {} }], audit: audit(n) })));
+    const server = await app({ brain: endless, attest: () => Promise.resolve(ATTESTED), proveReply: () => Promise.reject(new Error("unused")) });
+    const res = (await chat(server, `Bearer ${await token()}`, { message: "hi" })).json<{ stopReason: string; proofId: string | null }>();
+    expect(res).toMatchObject({ stopReason: "max_steps", proofId: null });
   });
 });
 
