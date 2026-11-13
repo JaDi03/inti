@@ -21,21 +21,19 @@ type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
 
 /**
- * One color per asset that matches its brand (Bitcoin orange, Ether's blue, Zcash yellow, Meta Pool
- * purple for staked NEAR), in the same light shade with dark text so it reads in both themes.
+ * One color per asset that matches its brand (Bitcoin orange, Ether's blue, Zcash yellow), in the
+ * same light shade with dark text so it reads in both themes.
  */
 const TILE: Record<AssetKey, string> = {
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
   zcash: "bg-yellow-300",
-  stnear: "bg-purple-300",
 };
 
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
   { title: "Privacy", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "privacy") },
-  { title: "Staking", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "staking") },
 ];
 
 const NEAR_DECIMALS = 24;

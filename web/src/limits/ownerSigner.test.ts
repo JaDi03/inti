@@ -49,7 +49,7 @@ function userWallet(answer = true, hasPasskey = true) {
 type Wallet = ReturnType<typeof userWallet>;
 
 /** Prices from the Agent API token list. */
-const PRICES = { near: 3.55, bitcoin: 73948, ethereum: 2056.35, zcash: 956.27, stnear: 5.22 };
+const PRICES = { near: 3.55, bitcoin: 73948, ethereum: 2056.35, zcash: 956.27 };
 const BTC_SELL_LINE = (perOrder: string, perDay: string) =>
   `The same limit for selling Bitcoin: at most ${perOrder} BTC per order and ${perDay} BTC per day, checked on chain for this asset. Inti's server also keeps all buying and selling together within your one daily limit. What Inti sells always comes back to your wallet.`;
 
@@ -88,7 +88,7 @@ describe("signing with the user's account key", () => {
       "Set your limit: at most 1 NEAR per order and 3 NEAR per day.",
       BTC_SELL_LINE("0.000048", "0.00014402"),
     ]);
-    expect(wallet.shown[0]).toHaveLength(9);
+    expect(wallet.shown[0]).toHaveLength(8);
     expect(wallet.shown[0]?.slice(-2)).toEqual([
       "Give Inti a key that can only call fund_agent: it can send to your agent only within the spending limits you set.",
       "That key can also use up to 0.1 NEAR of your balance to pay network fees. This is not a spending limit.",
@@ -108,7 +108,7 @@ describe("signing with the user's account key", () => {
 
     expect(wallet.signed).toHaveLength(3);
     expect(wallet.shown[0]?.slice(0, 2)).toEqual(["Set your limit: at most 0.5 NEAR per order and 1 NEAR per day.", BTC_SELL_LINE("0.000024", "0.000048")]);
-    expect(wallet.shown[0]).toHaveLength(5);
+    expect(wallet.shown[0]).toHaveLength(4);
     expect(wallet.shown.slice(1)).toEqual([
       ["Turn off Inti's access to your account."],
       [
