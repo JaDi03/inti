@@ -15,18 +15,5 @@ export const ASSETS = {
   stnear: { name: "Staked NEAR", symbol: "stNEAR", assetId: "nep141:meta-pool.near", decimals: 24, kind: "staking" },
 } as const;
 
-/**
- * Assets Inti traded before the Agent API sent only near-chain assets to a NEAR wallet. Inti no
- * longer trades them; the wallet card still shows what the owner holds of them, at today's price.
- */
-export const RETIRED_ASSETS = {
-  gold: { name: "Gold", symbol: "XAUT", assetId: "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near", decimals: 6 },
-  euro: { name: "Euro", symbol: "EURe", assetId: "nep141:gnosis-0x420ca0f9b9b604ce0fd9c18ef134c705e5fa3430.omft.near", decimals: 18 },
-  solana: { name: "Solana", symbol: "SOL", assetId: "nep141:sol.omft.near", decimals: 9 },
-} as const;
-
-export type RetiredKey = keyof typeof RETIRED_ASSETS;
-export const RETIRED_KEYS = Object.keys(RETIRED_ASSETS) as RetiredKey[];
-
 export type AssetKey = keyof typeof ASSETS;
 export const ASSET_KEYS = Object.keys(ASSETS) as [AssetKey, ...AssetKey[]];
