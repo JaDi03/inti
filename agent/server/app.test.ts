@@ -271,6 +271,57 @@ describe("GET /api/dashboard", () => {
   });
 });
 
+describe("GET /api/verify", () => {
+  const RESULT = { model: "m", ok: true, checks: [{ id: "report" as const, ok: true }], signingAddress: "0x" + "ab".repeat(20), intelStatus: "UpToDate", checkedAt: "2026-11-13T07:00:00.000Z" };
+  const get = async (server: Awaited<ReturnType<typeof app>>, auth: string | null, fresh = false) =>
+    server.inject({ method: "GET", url: `/api/verify${fresh ? "?fresh=true" : ""}`, headers: { origin: ORIGIN, ...(auth ? { authorization: auth } : {}) } });
+
+  it("answers only a signed-in user, and the browser never caches it", async () => {
+    let runs = 0;
+    const server = await app({ attest: () => (runs++, Promise.resolve(RESULT)) });
+    expect((await get(server, null)).statusCode).toBe(401);
+    expect((await get(server, `Bearer ${await token({ key: otherKey })}`, true)).statusCode).toBe(401);
+    expect(runs).toBe(0);
+    const ok = await get(server, `Bearer ${await token()}`);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    expect(ok.json()).toEqual(RESULT);
+  });
+
+  it("shares one recent check among everyone opening the app, without using their checks", async () => {
+    let runs = 0;
+    let clock = Date.parse("2026-11-13T07:00:00Z");
+    const server = await app({ attest: () => (runs++, Promise.resolve(RESULT)), verifyQuota: new DailyQuota(0, 0), now: () => clock });
+    const users = await Promise.all(["did:privy:alice", "did:privy:bob", "did:privy:carol"].map(async (sub) => `Bearer ${await token({ sub })}`));
+    const answers = await Promise.all([...users, ...users].map((auth) => get(server, auth)));
+    expect(answers.map((a) => a.statusCode)).toEqual(Array(6).fill(200));
+    expect(runs).toBe(1);
+    clock += LIMITS.sharedVerificationMs;
+    expect((await get(server, users[0] ?? "")).statusCode).toBe(200);
+    expect(runs).toBe(2);
+  });
+
+  it("caps fresh checks per user per day, and how many run at once", async () => {
+    const server = await app({ attest: () => Promise.resolve(RESULT), verifyQuota: new DailyQuota(2, 100) });
+    const auth = `Bearer ${await token()}`;
+    for (let i = 0; i < 2; i++) expect((await get(server, auth, true)).statusCode).toBe(200);
+    const over = await get(server, auth, true);
+    expect(over.statusCode).toBe(429);
+    expect(over.json()).toEqual({ error: "user_limit" });
+
+    const releases: (() => void)[] = [];
+    const slow = await app({ attest: () => new Promise((r) => releases.push(() => r(RESULT))) });
+    const other = `Bearer ${await token({ sub: "did:privy:bob" })}`;
+    const running = Array.from({ length: LIMITS.verificationsAtOnce }, () => get(slow, other, true));
+    await new Promise((r) => setTimeout(r, 10));
+    const extra = await get(slow, other, true);
+    expect(extra.statusCode).toBe(503);
+    expect(extra.json()).toEqual({ error: "busy" });
+    releases.forEach((release) => release());
+    expect((await Promise.all(running)).map((r) => r.statusCode)).toEqual(Array(LIMITS.verificationsAtOnce).fill(200));
+  });
+});
+
 describe("the user's own agent", () => {
   const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
     server.inject({

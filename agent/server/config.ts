@@ -37,6 +37,14 @@ export const LIMITS = {
   policyChangesPerDayTotal: 500,
   /** Rule changes waiting for the owner's signature that the server remembers; the oldest is dropped first. */
   pendingPolicyChangesInMemory: 2000,
+  /** Model checks one user may run per day; each one asks NEAR AI, Intel and NVIDIA once. */
+  verificationsPerUserPerDay: 30,
+  /** Model checks per day for everyone. */
+  verificationsPerDayTotal: 1000,
+  /** Model checks running at the same time; more wait for the next try. */
+  verificationsAtOnce: 3,
+  /** How long one check's result is shown to everyone before the next visitor triggers a new one. */
+  sharedVerificationMs: 5 * 60_000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
 } as const;
