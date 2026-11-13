@@ -99,6 +99,11 @@ describe("realTools", () => {
     expect(orders).toEqual([{ kind: "sell held", asset: HELD_ASSETS.gold.assetId, amount: 254n }]);
     expect(events[0]).toMatchObject({ type: "swap_executed", from: "XAUT", to: "NEAR" });
     await expect(tools.run("sell_now", { asset: "gold", receive: "zcash", usd: "0.5", reason: "x" }, [])).rejects.toThrow("only be sold for NEAR");
+    // Below the usual 0.10 minimum, what the agent keeps still sells; other assets do not.
+    await tools.run("sell_now", { asset: "gold", receive: "near", usd: "0.09", reason: "sell all" }, []);
+    expect(orders[1]).toMatchObject({ kind: "sell held", asset: HELD_ASSETS.gold.assetId });
+    await expect(tools.run("sell_now", { asset: "zcash", receive: "near", usd: "0.09", reason: "x" }, [])).rejects.toThrow("between");
+    orders.splice(1);
     await expect(tools.run("buy_at_price", { asset: "gold", usd: "1", price_usd: "3000", days: 3 }, [])).rejects.toThrow("invalid input");
     await expect(tools.run("sell_now", { asset: "zcash", receive: "gold", usd: "1", reason: "x" }, [])).rejects.toThrow("invalid input");
     expect(orders).toHaveLength(1);
