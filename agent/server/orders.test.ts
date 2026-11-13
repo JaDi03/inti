@@ -45,6 +45,8 @@ function world(
     held?: bigint;
     /** Pairs "from>to" with no route, and pairs whose swap fails. */
     noRoute?: string[];
+    /** The missing routes (and a null quote) appear only after funding. */
+    routeLostAfterFunding?: boolean;
     failSwap?: string[];
     /** What a swap gives; by default the purchase rate of the buy tests. */
     out?: (amount: bigint) => bigint;
@@ -85,8 +87,10 @@ function world(
       return Promise.resolve(outcome);
     },
     quote: (_id, from, to) => {
-      if (opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
-      const q = opts.quote === undefined ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
+      // A route that disappears once the agent is funded: the quote before funding still finds it.
+      const beforeLoss = opts.routeLostAfterFunding === true && !log.some((l) => l.startsWith("fund"));
+      if (!beforeLoss && opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
+      const q = opts.quote === undefined || (beforeLoss && opts.quote === null) ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
       return Promise.resolve(q && { ...q, costUsd: null, costPercent: null, seconds: null });
     },
     swap: (_a, from, to, amount, minOut) => {
@@ -166,8 +170,14 @@ describe("buy", () => {
     expect(w.log).toEqual([]);
   });
 
-  it("returns the money when there is no route or the swap fails", async () => {
-    const noRoute = world({ quote: null });
+  it("refuses before moving anything when there is no route, often an amount too small for the asset", async () => {
+    const w = world({ quote: null });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    expect(w.log).toEqual([]);
+  });
+
+  it("returns the money when the route is gone by the swap or the swap fails", async () => {
+    const noRoute = world({ quote: null, routeLostAfterFunding: true });
     expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "no_route" });
     expect(noRoute.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
     const failed = world({ swap: "failed" });
@@ -184,7 +194,7 @@ describe("buy", () => {
   });
 
   it("says the money came back only once it did, when the return itself is refused or slow", async () => {
-    const noRoute = world({ quote: null, withdraw: "failed" });
+    const noRoute = world({ quote: null, routeLostAfterFunding: true, withdraw: "failed" });
     expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
     const failedSwap = world({ swap: "failed", withdraw: "failed" });
     expect(await buy(failedSwap.chain, failedSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
@@ -271,8 +281,16 @@ describe("exchange", () => {
     expect([...big.log, ...late.log]).toEqual([]);
   });
 
-  it("sends back the asset sold when there is no route or the swap fails, and the NEAR when only the second step fails", async () => {
-    const noRoute = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"] });
+  it("refuses a sale before moving anything when there is no route, directly or through NEAR", async () => {
+    const w = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"] });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    const swapTo = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC", "wNEAR>BTC"] });
+    expect(await exchange(swapTo.chain, swapTo.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toEqual({ status: "refused", code: "no_quote" });
+    expect([...w.log, ...swapTo.log]).toEqual([]);
+  });
+
+  it("sends back the asset sold when the route is gone by the swap or the swap fails, and the NEAR when only the second step fails", async () => {
+    const noRoute = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], routeLostAfterFunding: true });
     expect(await exchange(noRoute.chain, noRoute.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "returned", code: "no_route", asset: GOLD });
     expect(noRoute.log.at(-1)).toBe("withdraw GOLD 1000");
 
@@ -292,7 +310,7 @@ describe("exchange", () => {
   });
 
   it("says the asset came back only once it did, and leaves a slow return to the sweep", async () => {
-    const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], withdraw: "pending" });
+    const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], routeLostAfterFunding: true, withdraw: "pending" });
     expect(await exchange(slow.chain, slow.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "pending" });
   });
 

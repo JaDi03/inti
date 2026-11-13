@@ -24,7 +24,7 @@ export type BuyResult =
   | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" | "not_deliverable" }
   | { status: "pending" };
 
-export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed" | "not_enough";
+export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed" | "not_enough" | "no_quote";
 
 /** A sale: send `amount` (atomic) of `from` from the user's wallet and receive `to`, NEAR or another asset. */
 export interface ExchangeOrder {
@@ -186,6 +186,7 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   if (!contract || !(await chain.registered(contract, account.owner))) return { status: "refused", code: "asset_not_enabled" };
   // Read before any money moves: the user's own price protection decides the least they accept.
   const bound = await agent.signedPriceBound(account.agentId);
+  if (!(await hasRoute(agent, account.agentId, FUNDING_ASSET, order.buyAsset, order.amount))) return { status: "refused", code: "no_quote" };
   const funded = await fund(chain, agent, account, FUNDING_TOKEN, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
   if (funded === "returned") return { status: "returned", code: "shield_failed" };
@@ -205,6 +206,18 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const sent = await agent.withdraw(account, order.buyAsset, received);
   if (sent === "undeliverable") return (await homeAsNear(agent, account, order.buyAsset, received, bound)) ? { status: "returned", code: "not_deliverable" } : { status: "pending" };
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.buyAsset } : { status: "pending" };
+}
+
+/**
+ * Asks for a quote before any money moves, directly or through NEAR, so an order with no route
+ * (often an amount too small for that asset's market) sends nothing at all. The order quotes again
+ * right before its swap, since the price moves while the agent is funded.
+ */
+async function hasRoute(agent: AgentPort, agentId: string, from: string, to: string, amount: bigint): Promise<boolean> {
+  if ((await agent.quote(agentId, from, to, amount)) !== null) return true;
+  if (from === FUNDING_ASSET || to === FUNDING_ASSET) return false;
+  const near = await agent.quote(agentId, from, FUNDING_ASSET, amount);
+  return near !== null && (await agent.quote(agentId, FUNDING_ASSET, to, near.amountOut)) !== null;
 }
 
 /**
@@ -301,6 +314,7 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   if (order.to !== FUNDING_ASSET && !(await chain.registered(toToken, account.owner))) return { status: "refused", code: "asset_not_enabled" };
   if ((await chain.tokenBalance(fromToken, account.owner)) < order.amount) return { status: "refused", code: "not_enough" };
   const bound = await agent.signedPriceBound(account.agentId);
+  if (!(await hasRoute(agent, account.agentId, order.from, order.to, order.amount))) return { status: "refused", code: "no_quote" };
   const funded = await fund(chain, agent, account, fromToken, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
   if (funded === "returned") return { status: "returned", code: "shield_failed", asset: order.from };

@@ -79,6 +79,7 @@ const REASONS: Record<string, string> = {
   too_small: "the amount is too small for an order",
   order_refused: "the order was refused by the trading service",
   no_route: "there was no way to trade this asset right now; what was sent went back to the wallet",
+  no_quote: "there is no way to trade this right now, often because the amount is too small for this asset's market; nothing was sent, so the owner can try a larger amount",
   swap_failed: "the trade failed; what was sent went back to the wallet",
   placement_failed: "the order could not be placed; the money went back to the wallet",
   not_deliverable: "the trading service cannot send this asset from the agent to the wallet right now, so nothing was bought: the agent sold it back for NEAR, which is in the wallet as plain NEAR",
