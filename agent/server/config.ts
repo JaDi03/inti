@@ -61,6 +61,14 @@ export const LIMITS = {
   heldSalesPerDayTotal: 2000,
   /** How often every agent is swept back to its owner's wallet. */
   sweepEveryMs: 5 * 60_000,
+  /** Model steps one message may take with real money: enough to sell and buy a few assets in a row. */
+  realChatSteps: 12,
+  /** After this long no new step of a message starts; a trade already running finishes. */
+  chatTimeLimitMs: 10 * 60_000,
+  /** How long a finished message's reply waits for the app to pick it up. */
+  chatJobKeepMs: 15 * 60_000,
+  /** Progress reads per IP per minute: the app asks every few seconds while a message runs. */
+  chatPollsPerIpPerMinute: 120,
 } as const;
 
 const envSchema = z.object({

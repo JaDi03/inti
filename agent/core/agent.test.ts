@@ -70,6 +70,21 @@ describe("tool specs", () => {
 });
 
 describe("runCycle", () => {
+  it("tells each step as it starts, and starts no model step after the deadline", async () => {
+    let clock = 0;
+    const brain = new ScriptedBrain([
+      () => {
+        clock = 600_000;
+        return { text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "get_portfolio", input: {} }] };
+      },
+      () => ({ text: "never asked", stop: "end", toolCalls: [] }),
+    ]);
+    const started: string[] = [];
+    const result = await runCycle({ brain, goal: "Look", policy, portfolio: newPortfolio(), mode: "execute", now: () => clock, deadline: 600_000, onStep: (name) => started.push(name) });
+    expect(started).toEqual(["get_portfolio"]);
+    expect(result).toMatchObject({ report: "", stopReason: "time_limit" });
+  });
+
   it("returns a denial to the brain, which adapts and stays inside the limit", async () => {
     const portfolio = newPortfolio();
     const brain = new ScriptedBrain([

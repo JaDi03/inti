@@ -70,6 +70,10 @@ export interface CycleOptions {
    * those texts, never earlier tool results, so no older outside text reaches the model.
    */
   earlier?: readonly { user: string; reply: string }[];
+  /** Called as each tool call starts, so the app can show what the agent is doing. */
+  onStep?: (name: string, input: unknown) => void;
+  /** No new model step starts after this time (ms since epoch); a step already running finishes. */
+  deadline?: number;
 }
 
 /** A set of tools the cycle can offer instead of the simulated ones. */
@@ -83,7 +87,7 @@ export interface CycleResult {
   history: Turn[];
   events: AgentEvent[];
   report: string;
-  stopReason: "done" | "asked_user" | "max_steps";
+  stopReason: "done" | "asked_user" | "max_steps" | "time_limit";
 }
 
 /**
@@ -109,6 +113,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const history: Turn[] = [...before, { role: "user", text: goal }];
 
   for (let step = 0; step < maxSteps; step++) {
+    if (options.deadline !== undefined && ctx.now() >= options.deadline) return { history, events, report: "", stopReason: "time_limit" };
     const turn = await brain.step(options.tools ? REAL_SYSTEM_PROMPT : SYSTEM_PROMPT, history, options.tools?.specs ?? toolSpecs);
     history.push(turn);
     if (turn.stop === "end" || turn.toolCalls.length === 0) {
@@ -118,6 +123,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // One call after another: a real purchase must finish before the next one is checked.
     const results: ToolResult[] = [];
     for (const call of turn.toolCalls) {
+      options.onStep?.(call.name, call.input);
       try {
         const content = options.tools ? await options.tools.run(call.name, call.input, events) : runTool(call.name, call.input, ctx);
         results.push({ callId: call.id, content, isError: false });

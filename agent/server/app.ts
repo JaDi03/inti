@@ -16,6 +16,7 @@ import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import type { ModelAttestation } from "./attestation.js";
 import { ProofStore, type ReplyProof, type SignedCall } from "./replyProof.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
+import { ChatJobs, stepLabel } from "./chatJobs.js";
 import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
 import { GRANT_DAY_CHOICES, GRANT_DAYS, newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
@@ -136,6 +137,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   let lastAttestation: { at: number; result: ModelAttestation } | null = null;
   let sharedAttestation: Promise<ModelAttestation> | null = null;
   const proofs = new ProofStore(LIMITS.proofsInMemory);
+  const chatJobs = new ChatJobs(LIMITS.usersInMemory, LIMITS.chatJobKeepMs, () => now());
   const proofQuota = new DailyQuota(LIMITS.proofsPerUserPerDay, LIMITS.proofsPerDayTotal);
   const heldSaleQuota = deps.heldSaleQuota ?? new DailyQuota(LIMITS.heldSalesPerUserPerDay, LIMITS.heldSalesPerDayTotal);
 
@@ -550,6 +552,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // One cycle at a time per user, marked before any await so two requests cannot both pass.
     if (busy.has(userId)) return reply.code(409).send({ error: "busy" });
     busy.add(userId);
+    // Once the cycle starts in the background, it frees the user when it ends.
+    let started = false;
     try {
       const allowed = quota.take(userId);
       if (allowed !== "ok") {
@@ -574,46 +578,85 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       }
       users.delete(userId);
       users.set(userId, state);
-      // Real money only for a user with their own agent and a live grant for it; everyone else gets the simulation.
-      const tools = await realToolsFor(userId);
-      const result = await runCycle({
-        brain: deps.brain,
-        goal: body.data.message,
-        policy: deps.policy(),
-        portfolio: state.portfolio,
-        spend: state.spend,
-        mode: "execute",
-        ...(tools ? { tools } : {}),
-        earlier: state.recent,
-      });
-      // Only a finished reply joins the chat's memory, cut to a bounded size.
-      if (result.report !== "") {
-        state.recent = [...state.recent, { user: body.data.message, reply: result.report.slice(0, LIMITS.contextReplyChars) }].slice(-LIMITS.contextExchanges);
-      }
-      for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
-      // A real trade changes what the agent holds, so the next dashboard read shows it at once.
-      if (tools && result.events.some((e) => e.type === "swap_executed")) deps.dashboard?.forget(userId);
-      // Every model call of this reply, with the hashes NEAR AI signs; the reply can be checked only if all have them.
-      const audits = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit] : []));
-      const calls = audits.flatMap((a) => (a.requestHash && a.responseHash ? [{ responseId: a.responseId, requestHash: a.requestHash, responseHash: a.responseHash }] : []));
-      const model = audits[0]?.model;
-      // Only a reply whose words came from the model can carry its signature: a run cut at max_steps has none.
-      const fromModel = result.stopReason !== "max_steps" && result.report !== "";
-      const proofId = deps.proveReply && fromModel && model && calls.length > 0 && calls.length === audits.length ? proofs.remember(userId, model, calls) : null;
-      return {
-        simulated: tools === null,
-        report: result.report,
-        stopReason: result.stopReason,
-        events: result.events.map(publicEvent),
-        responseIds: audits.map((a) => a.responseId),
-        proofId,
-      };
+      const chatState = state;
+      const message = body.data.message;
+      const job = chatJobs.start(userId);
+      started = true;
+      // The cycle runs after this answer, so trades that take minutes never hang on one request; the
+      // app follows it with GET /api/chat/jobs/:id.
+      void (async () => {
+        try {
+          // Real money only for a user with their own agent and a live grant for it; everyone else gets the simulation.
+          const tools = await realToolsFor(userId);
+          const result = await runCycle({
+            brain: deps.brain,
+            goal: message,
+            policy: deps.policy(),
+            portfolio: chatState.portfolio,
+            spend: chatState.spend,
+            mode: "execute",
+            ...(tools ? { tools, maxSteps: LIMITS.realChatSteps } : {}),
+            earlier: chatState.recent,
+            deadline: now() + LIMITS.chatTimeLimitMs,
+            onStep: (name, input) => {
+              const label = stepLabel(name, input);
+              if (label) job.steps.push(label);
+            },
+          });
+          // Only a finished reply joins the chat's memory, cut to a bounded size.
+          if (result.report !== "") {
+            chatState.recent = [...chatState.recent, { user: message, reply: result.report.slice(0, LIMITS.contextReplyChars) }].slice(-LIMITS.contextExchanges);
+          }
+          for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
+          // A real trade changes what the agent holds, so the next dashboard read shows it at once.
+          if (tools && result.events.some((e) => e.type === "swap_executed")) deps.dashboard?.forget(userId);
+          // Every model call of this reply, with the hashes NEAR AI signs; the reply can be checked only if all have them.
+          const audits = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit] : []));
+          const calls = audits.flatMap((a) => (a.requestHash && a.responseHash ? [{ responseId: a.responseId, requestHash: a.requestHash, responseHash: a.responseHash }] : []));
+          const model = audits[0]?.model;
+          // Only a reply whose words came from the model can carry its signature: a run cut short has none.
+          const fromModel = result.stopReason !== "max_steps" && result.stopReason !== "time_limit" && result.report !== "";
+          const proofId = deps.proveReply && fromModel && model && calls.length > 0 && calls.length === audits.length ? proofs.remember(userId, model, calls) : null;
+          chatJobs.finish(job, {
+            status: "done",
+            reply: {
+              simulated: tools === null,
+              report: result.report,
+              stopReason: result.stopReason,
+              events: result.events.map(publicEvent),
+              responseIds: audits.map((a) => a.responseId),
+              proofId,
+            },
+          });
+        } catch (error) {
+          req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "cycle_failed");
+          chatJobs.finish(job, { status: "failed" });
+        } finally {
+          busy.delete(userId);
+        }
+      })();
+      return reply.code(202).send({ jobId: job.id });
     } catch (error) {
       req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "cycle_failed");
       return reply.code(502).send({ error: "agent_unavailable" });
     } finally {
-      busy.delete(userId);
+      if (!started) busy.delete(userId);
     }
+  });
+
+  // What the signed-in user's message is doing: its steps while it runs, then the reply POST
+  // /api/chat used to wait for. Only the user's own job is found; it has its own rate limit, since
+  // the app asks every few seconds.
+  app.get("/api/chat/jobs/:id", { config: { rateLimit: { max: LIMITS.chatPollsPerIpPerMinute, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const id = z.uuid().safeParse((req.params as { id?: unknown }).id);
+    if (!id.success) return reply.code(400).send({ error: "bad_request" });
+    const job = chatJobs.get(userId, id.data);
+    if (!job) return reply.code(404).send({ error: "not_found" });
+    if (job.state.status === "running") return { status: "running", steps: job.steps };
+    if (job.state.status === "failed") return reply.code(502).send({ error: "agent_unavailable" });
+    return job.state.reply;
   });
 
   return app;
