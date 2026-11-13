@@ -22,7 +22,9 @@ const realQuote = (): VerifiedQuote => ({
 const jwt = (claims: Record<string, unknown>) => `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
 
 /** NEAR AI and NVIDIA answering as they did when the fixture was recorded, unless told otherwise. */
-function world(opts: { report?: unknown; quote?: Partial<VerifiedQuote>; quoteFails?: boolean; nras?: Record<string, unknown>; nonce?: string } = {}) {
+function world(
+  opts: { report?: unknown; quote?: Partial<VerifiedQuote>; quoteFor?: (quote: Uint8Array) => Partial<VerifiedQuote>; quoteFails?: boolean; nras?: Record<string, unknown>; nonce?: string } = {},
+) {
   const asked: string[] = [];
   const deps: AttestationDeps = {
     fetch: ((input: URL | string) => {
@@ -32,7 +34,7 @@ function world(opts: { report?: unknown; quote?: Partial<VerifiedQuote>; quoteFa
       // NRAS's real shape: the overall verdict, then one token per GPU.
       return Promise.resolve(Response.json([["JWT", jwt(opts.nras ?? fixture.nras)], { "GPU-0": "token", "GPU-1": "token" }]));
     }) as typeof fetch,
-    verifyQuote: () => (opts.quoteFails ? Promise.reject(new Error("bad signature")) : Promise.resolve({ ...realQuote(), ...opts.quote })),
+    verifyQuote: (quote) => (opts.quoteFails ? Promise.reject(new Error("bad signature")) : Promise.resolve({ ...realQuote(), ...opts.quote, ...opts.quoteFor?.(quote) })),
     nonce: () => opts.nonce ?? fixture.nonce,
     now: () => Date.parse("2026-11-13T07:00:00Z"),
   };
@@ -81,12 +83,36 @@ describe("attestModel", () => {
     expect(failed(await attestModel(fixture.model, world({ nras: { ...fixture.nras, "x-nvidia-overall-att-result": false } }).deps))).toEqual(["gpu"]);
   });
 
-  it("fails without exactly one report for this model", async () => {
+  it("fails without a report for this model, or when its machines do not share one signing key", async () => {
     const one = fixture.report.model_attestations[0];
-    for (const report of [{}, { model_attestations: [] }, { model_attestations: [one, one] }, { model_attestations: [{ ...one, model_name: "another/model" }] }]) {
+    const otherKey = { ...one, signing_address: "0x" + "1".repeat(40) };
+    for (const report of [
+      {},
+      { model_attestations: [] },
+      { model_attestations: [{ ...one, model_name: "another/model" }] },
+      { model_attestations: [one, { ...one, model_name: "another/model" }] },
+      { model_attestations: [one, otherKey] },
+      { model_attestations: Array.from({ length: 9 }, () => one) },
+    ]) {
       const result = await attestModel(fixture.model, world({ report }).deps);
       expect(result.ok).toBe(false);
       expect(result.checks.every((c) => !c.ok)).toBe(true);
     }
+  });
+
+  it("passes when the model runs on several machines with one key and every machine passes, and fails if one does not", async () => {
+    const one = fixture.report.model_attestations[0] ?? {};
+    // A second machine: its own quote, the same key and software.
+    const second = { ...one, intel_quote: "00" + String(one.intel_quote).slice(2) };
+    const both = { model_attestations: [one, second] };
+    const ok = world({ report: both });
+    const result = await attestModel(fixture.model, ok.deps);
+    expect(failed(result)).toEqual([]);
+    expect(result).toMatchObject({ ok: true, intelStatus: "UpToDate" });
+    expect(ok.asked.filter((u) => u.includes("nvidia"))).toHaveLength(2);
+    // The second machine runs on a platform Intel does not rate up to date.
+    const stale = await attestModel(fixture.model, world({ report: both, quoteFor: (q) => (q[0] === 0 ? { status: "OutOfDate" } : {}) }).deps);
+    expect(failed(stale)).toEqual(["intel"]);
+    expect(stale.intelStatus).toBe("UpToDate, OutOfDate");
   });
 });
