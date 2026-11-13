@@ -39,11 +39,8 @@ const HELD_TILE: Record<HeldKey, string> = {
   solana: "bg-purple-300",
 };
 
-/**
- * Asset cards: compact on phones, roomier from 640 px wide. On phones a card shows only the name,
- * the dollar value and the amount; the label, the symbol and the price line show from 640 px.
- */
-const CARD = "flex min-h-24 flex-col justify-between gap-2 rounded-2xl p-3 text-neutral-950 sm:min-h-36 sm:gap-0 sm:rounded-3xl sm:p-4";
+/** Asset cards: compact on phones, roomier from 640 px wide. */
+const CARD = "flex min-h-28 flex-col justify-between rounded-2xl p-3 text-neutral-950 sm:min-h-36 sm:rounded-3xl sm:p-4";
 const CARD_ICON = "size-7 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70 sm:size-9";
 const CARD_VALUE = "text-xl font-semibold tabular-nums sm:text-2xl";
 const CARD_GRID = "grid auto-rows-fr grid-cols-2 gap-2 sm:gap-3";
@@ -313,7 +310,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={CARD_ICON} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
-                      <p className="hidden text-xs opacity-70 sm:block">{a.symbol}</p>
+                      <p className="text-xs opacity-70">{a.symbol}</p>
                     </div>
                   </div>
                   {row?.enabled && (
@@ -326,7 +323,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                   {row?.enabled ? (
                     <>
                       {/* What the owner holds, not the asset's price, which is the line below. */}
-                      <p className="hidden text-[11px] font-semibold uppercase tracking-wide opacity-70 sm:block">Your balance</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Your balance</p>
                       <p className={CARD_VALUE}>{show(money(amount === null ? null : usd(amount, price)))}</p>
                       <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                         {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
@@ -342,7 +339,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                       {busy === key ? <Loader2 className="animate-spin" /> : null} Enable
                     </Button>
                   )}
-                  <p className="mt-1 hidden text-[11px] tabular-nums opacity-70 sm:block">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
+                  <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
                 </div>
               </li>
             );
@@ -369,7 +366,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                       <img src="/tokens/near.png" alt="" width={36} height={36} className={CARD_ICON} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold uppercase tracking-wide">NEAR</p>
-                        <p className="hidden text-xs opacity-70 sm:block">Ready to spend</p>
+                        <p className="text-xs opacity-70">Ready to spend</p>
                       </div>
                     </div>
                     <SellHeldButton
@@ -386,13 +383,13 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     {confirming === "near" ? (
                       <p className="text-[11px] font-bold uppercase tracking-wide">Tap ✓ again to send to your wallet</p>
                     ) : (
-                      <p className="hidden text-[11px] font-semibold uppercase tracking-wide opacity-70 sm:block">With your agent</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
                     )}
                     <p className={CARD_VALUE}>{show(money(cash === null ? null : usd(cash, nearPrice)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (cash ?? "")}>
                       {show(`${cash === null ? "--" : shortAmount(cash)} NEAR`)}
                     </p>
-                    <p className="mt-1 hidden text-[11px] tabular-nums opacity-70 sm:block">{nearPrice == null ? "No price right now" : `Price: 1 NEAR = ${money(nearPrice)}`}</p>
+                    <p className="mt-1 text-[11px] tabular-nums opacity-70">{nearPrice == null ? "No price right now" : `Price: 1 NEAR = ${money(nearPrice)}`}</p>
                   </div>
                 </li>
               );
@@ -412,7 +409,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                       <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={CARD_ICON} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
-                        <p className="hidden text-xs opacity-70 sm:block">{a.symbol}</p>
+                        <p className="text-xs opacity-70">{a.symbol}</p>
                       </div>
                     </div>
                     <SellHeldButton
@@ -430,13 +427,13 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     {confirming === key ? (
                       <p className="text-[11px] font-bold uppercase tracking-wide">Tap ✓ again to sell</p>
                     ) : (
-                      <p className="hidden text-[11px] font-semibold uppercase tracking-wide opacity-70 sm:block">With your agent</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
                     )}
                     <p className={CARD_VALUE}>{show(money(amount === null ? null : usd(amount, price)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                       {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
                     </p>
-                    <p className="mt-1 hidden text-[11px] tabular-nums opacity-70 sm:block">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
+                    <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
                   </div>
                 </li>
               );
