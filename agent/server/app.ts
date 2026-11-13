@@ -11,6 +11,7 @@ import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
 import { PRICE_PROTECTION_BPS } from "../policy/agentPolicy.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
+import type { ModelAttestation } from "./attestation.js";
 import { bearerToken, type TokenVerifier } from "./auth.js";
 import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
@@ -31,6 +32,8 @@ export interface AppDeps {
   chain?: ChainPort;
   /** The signed-in user's dashboard: prices, and their own agent's rules and open orders. */
   dashboard?: Dashboard;
+  /** Checks, with a fresh nonce, that the model behind the chat runs in attested hardware. */
+  attest?: () => Promise<ModelAttestation>;
   now?: () => number;
   policy: () => Policy;
   newPortfolio: (tokens: readonly PricedToken[]) => SimulatedPortfolio;
@@ -39,6 +42,7 @@ export interface AppDeps {
   trustedProxy: string | null;
   quota?: DailyQuota;
   agentQuota?: DailyQuota;
+  verifyQuota?: DailyQuota;
   logger?: boolean;
 }
 
@@ -113,6 +117,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const policyQuota = new DailyQuota(LIMITS.policyChangesPerUserPerDay, LIMITS.policyChangesPerDayTotal);
   // Rule changes waiting for a signature, and the user each one belongs to.
   const pendingPolicies = new Map<string, string>();
+  const verifyQuota = deps.verifyQuota ?? new DailyQuota(LIMITS.verificationsPerUserPerDay, LIMITS.verificationsPerDayTotal);
+  let verifying = 0;
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -179,6 +185,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (userId === null) return reply;
     if (!deps.dashboard) return reply.code(503).send({ error: "unavailable" });
     return deps.dashboard(userId);
+  });
+
+  // A fresh check of the hardware the chat's model runs on. Public facts only; nothing is stored.
+  app.get("/api/verify", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    if (!deps.attest) return reply.code(503).send({ error: "unavailable" });
+    if (verifying >= LIMITS.verificationsAtOnce) return reply.code(503).send({ error: "busy" });
+    const taken = verifyQuota.take(userId);
+    if (taken !== "ok") return reply.code(429).send({ error: taken });
+    verifying += 1;
+    try {
+      const result = await deps.attest();
+      req.log.info({ ok: result.ok, failed: result.checks.filter((c) => !c.ok).map((c) => c.id) }, "model_verified");
+      return result;
+    } finally {
+      verifying -= 1;
+    }
   });
 
   // The document the user's wallet signs so Inti's server may trade for their agent.
