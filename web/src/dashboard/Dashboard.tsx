@@ -15,6 +15,7 @@ import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
 import { PriceProtection } from "./PriceProtection";
 import { ReceiveDialog } from "./Receive";
+import { shortAmount } from "./shortAmount";
 
 type Installed = Extract<LimitsStatus, { kind: "installed" }>;
 type AssetRow = { key: AssetKey; enabled: boolean; balance: bigint };
@@ -33,6 +34,7 @@ const TILE: Record<AssetKey, string> = {
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
+  { title: "Privacy", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "privacy") },
   { title: "Staking", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "staking") },
 ];
 
@@ -222,9 +224,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {receiving && <ReceiveDialog address={address} onClose={() => setReceiving(false)} />}
 
+      {part !== "wallet" && <h2 className="px-1 font-heading text-2xl font-semibold text-foreground">Your portfolio</h2>}
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
-        <h2 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h2>
+        <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -252,9 +255,11 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                 <div>
                   {row?.enabled ? (
                     <>
+                      {/* What the owner holds, not the asset's price, which is the line below. */}
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Your balance</p>
                       <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                       <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
-                        {show(`${amount ?? "--"} ${a.symbol}`)}
+                        {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
                       </p>
                     </>
                   ) : (
@@ -267,7 +272,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                       {busy === key ? <Loader2 className="animate-spin" /> : null} Enable
                     </Button>
                   )}
-                  <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `1 ${a.symbol} = ${money(price)}`}</p>
+                  <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
                 </div>
               </li>
             );
