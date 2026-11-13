@@ -47,6 +47,38 @@ describe("preparePolicy", () => {
   });
 });
 
+describe("prepareFreeze", () => {
+  it("asks for a freeze of exactly this agent, and passes the rules preview on for the owner's check", async () => {
+    const { accounts, generated } = api(null);
+    expect(await accounts.prepareFreeze(AGENT, true)).toEqual({ status: "pending_signature", correlationId: "intent_x", intent: { standard: "nep413" }, preview: { policy: {} } });
+    await accounts.prepareFreeze(AGENT, false);
+    expect(generated).toEqual([
+      { type: "agent_freeze", agent_id: AGENT },
+      { type: "agent_unfreeze", agent_id: AGENT },
+    ]);
+  });
+
+  it("asks for no unfreeze while the Agent API still waits after a freeze", async () => {
+    const policyView = (unfreezeAt: string | null) => (input: string | URL | Request) =>
+      new URL(input instanceof Request ? input.url : input).pathname.endsWith("/policy")
+        ? Promise.resolve(Response.json({ revision: 5, cooldowns: { policy_change_available_at: null, unfreeze_available_at: unfreezeAt } }))
+        : Promise.resolve(Response.json({ correlation_id: "intent_y", intent: { standard: "nep366" }, preview: { policy: {} } }));
+    expect(await agentApiAccounts("key", "https://api.example", policyView("2999-01-01T00:00:00.000Z") as typeof fetch).prepareFreeze(AGENT, false)).toEqual({
+      status: "cooldown",
+      availableAt: "2999-01-01T00:00:00.000Z",
+    });
+    expect((await agentApiAccounts("key", "https://api.example", policyView("2000-01-01T00:00:00.000Z") as typeof fetch).prepareFreeze(AGENT, false)).status).toBe("pending_signature");
+  });
+
+  it("says an agent already in that state needs nothing signed, and treats any other refusal as an outage", async () => {
+    // The Agent API's own codes, as it answers them.
+    const answer = (status: number, code: string) => () => Promise.resolve(Response.json({ errors: [{ status: String(status), code }] }, { status }));
+    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_frozen") as typeof fetch).prepareFreeze(AGENT, true)).toEqual({ status: "already_frozen" });
+    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_unfrozen") as typeof fetch).prepareFreeze(AGENT, false)).toEqual({ status: "already_unfrozen" });
+    await expect(agentApiAccounts("key", "https://api.example", answer(409, "something_else") as typeof fetch).prepareFreeze(AGENT, true)).rejects.toThrow("agents_unavailable");
+  });
+});
+
 describe("prepareRevokes", () => {
   it("closes only Inti's own grants that are still live, at most five", async () => {
     const grants = [

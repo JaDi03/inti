@@ -6,7 +6,7 @@ import { agentPolicy } from "../../../agent/policy/agentPolicy";
 import { PrivyNearSigner, type SignRawHash } from "../privySigner";
 import { LimitsClient } from "./client";
 import { SPENDING_LIMITS_WASM_SHA256, type LimitsConfig } from "./config";
-import { agentAccountOf, assetContract, EMPTY_CONTRACT, RefusedSigningError, wasmSha256 } from "./ownerActions";
+import { agentAccountOf, agentFreezeOf, assetContract, EMPTY_CONTRACT, RefusedSigningError, wasmSha256 } from "./ownerActions";
 import { OwnerSigner, SigningCancelledError } from "./ownerSigner";
 
 const expectedWasm = new Uint8Array(readFileSync(new URL("../../public/inti-spending-limits.wasm", import.meta.url)));
@@ -455,6 +455,45 @@ describe("creating the user's own agent", () => {
   ];
 
   it.each(refusedCreations)("refuses %s before asking the user or the wallet", async (_name, build) => {
+    const wallet = userWallet();
+    await expect(wallet.signer.signDelegateAction(build(wallet))).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  // The two calls the Agent API sends to freeze an agent: its rules stored again marked frozen, then the freeze.
+  const frozenRules = Object.fromEntries(Object.entries(rules).filter(([k]) => k !== "storage_refund_to"));
+  const freezeCalls = (store: object = frozenRules, target: object = { wallet_pubkey: rules.wallet_pubkey }, deposit = 0n): Action[] => [
+    actions.functionCall("store_wallet_policy", store, 5n * 10n ** 13n, deposit),
+    actions.functionCall("freeze_wallet", target, 5n * 10n ** 13n, 0n),
+  ];
+
+  it("shows a freeze of the user's own agent in plain words and signs after the user confirms", async () => {
+    const wallet = userWallet();
+    const { signedDelegate } = await wallet.signer.signDelegateAction(creation(wallet, "outlayer.near", freezeCalls()));
+    expect(wallet.shown).toEqual([[`Freeze your agent (${AGENT}): it can do nothing until you unfreeze it.`, "Its money stays with it. Nothing is sent anywhere."]]);
+    expect(agentFreezeOf(signedDelegate.delegateAction, config)).toEqual({ agentAccount: AGENT, frozen: true });
+  });
+
+  it("shows an unfreeze of the user's own agent in plain words, and tells it apart from a freeze", async () => {
+    const wallet = userWallet();
+    const unfreeze = [freezeCalls()[0] as Action, actions.functionCall("unfreeze_wallet", { wallet_pubkey: rules.wallet_pubkey }, 5n * 10n ** 13n, 0n)];
+    const { signedDelegate } = await wallet.signer.signDelegateAction(creation(wallet, "outlayer.near", unfreeze));
+    expect(wallet.shown).toEqual([[`Unfreeze your agent (${AGENT}): Inti can trade for you again, within your rules.`]]);
+    expect(agentFreezeOf(signedDelegate.delegateAction, config)).toEqual({ agentAccount: AGENT, frozen: false });
+  });
+
+  const refusedFreezes: [string, (w: Wallet) => ReturnType<typeof creation>][] = [
+    ["a freeze sent to another contract", (w) => creation(w, "stranger.near", freezeCalls())],
+    ["a freeze of another agent than the rules name", (w) => creation(w, "outlayer.near", freezeCalls(frozenRules, { wallet_pubkey: `ed25519:${"81".repeat(32)}` }))],
+    ["a freeze that costs something", (w) => creation(w, "outlayer.near", freezeCalls(frozenRules, { wallet_pubkey: rules.wallet_pubkey }, 1n))],
+    ["a freeze whose rules would be locked", (w) => creation(w, "outlayer.near", freezeCalls({ ...frozenRules, locked: true }))],
+    ["a freeze with an extra argument", (w) => creation(w, "outlayer.near", freezeCalls(frozenRules, { wallet_pubkey: rules.wallet_pubkey, to: "stranger.near" }))],
+    ["two calls that are not a freeze", (w) => creation(w, "outlayer.near", [call("store_wallet_policy", frozenRules, 0n), call("unlock_wallet", { wallet_pubkey: rules.wallet_pubkey }, 0n)])],
+    ["a freeze in the wrong order", (w) => creation(w, "outlayer.near", [...freezeCalls()].reverse())],
+  ];
+
+  it.each(refusedFreezes)("refuses %s before asking the user or the wallet", async (_name, build) => {
     const wallet = userWallet();
     await expect(wallet.signer.signDelegateAction(build(wallet))).rejects.toThrow(RefusedSigningError);
     expect(wallet.shown).toHaveLength(0);

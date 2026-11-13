@@ -48,13 +48,14 @@ const reportOnly = (): Brain => new ScriptedBrain(Array.from({ length: 50 }, () 
 const OWNER = { accountId: "ab".repeat(32), publicKey: `ed25519:${"1".repeat(44)}` };
 
 /** An Agent API stand-in that records what the server asked it for. */
-function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: string | null = null, earlierGrants = 0) {
-  const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[]; policies: unknown[][] } = {
+function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: string | null = null, earlierGrants = 0, frozen = false) {
+  const calls: { prepared: string[]; submitted: string[]; grantBodies: Record<string, string>[]; submittedTypes: string[]; policies: unknown[][]; freezes: string[] } = {
     prepared: [],
     submitted: [],
     grantBodies: [],
     submittedTypes: [],
     policies: [],
+    freezes: [],
   };
   const agents: AgentAccounts = {
     prepareRevokes: () =>
@@ -69,6 +70,11 @@ function fakeAgents(existing: AgentLookup = { status: "none" }, cooldownUntil: s
       return Promise.resolve({ correlationId: `grant_${calls.grantBodies.length}`, intent: { standard: "nep413", payload: {} }, preview: { summary: "g" } });
     },
     find: () => Promise.resolve(existing),
+    prepareFreeze: (agentId, freeze) => {
+      calls.freezes.push(`${freeze ? "freeze" : "unfreeze"} ${agentId}`);
+      if (frozen === freeze) return Promise.resolve({ status: freeze ? "already_frozen" : "already_unfrozen" });
+      return Promise.resolve({ status: "pending_signature", correlationId: `freeze_${calls.freezes.length}`, intent: { standard: "nep366", payload: {} }, preview: { policy: {} } });
+    },
     prepare: (userId, owner) => {
       calls.prepared.push(userId);
       return Promise.resolve({ correlationId: `intent_${calls.prepared.length}`, intent: { standard: "nep366", owner: owner.accountId }, preview: { summary: "s", policy: {} } });
@@ -543,6 +549,7 @@ describe("the user's own agent", () => {
       prepareGrant: () => Promise.reject(new Error("unused")),
       preparePolicy: () => Promise.reject(new Error("unused")),
       prepareRevokes: () => Promise.reject(new Error("unused")),
+      prepareFreeze: () => Promise.reject(new Error("unused")),
     };
     const server = await app({ agents });
     const res = await post(server, "/api/agent/prepare", `Bearer ${await token()}`, OWNER);
@@ -650,6 +657,58 @@ describe("/api/agent/grant", () => {
     for (let i = 0; i < 5; i++) expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(200);
     expect((await post(server, "/api/agent/grant/prepare", auth, {})).statusCode).toBe(429);
     expect(calls.grantBodies).toHaveLength(5);
+  });
+});
+
+describe("/api/agent/freeze", () => {
+  const ACTIVE: AgentLookup = { status: "active", agentId: "agent_1", agentAccount: "cd".repeat(32), ownerAccount: OWNER.accountId };
+  const post = (server: Awaited<ReturnType<typeof app>>, url: string, auth: string | null, payload: unknown) =>
+    server.inject({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json", origin: ORIGIN, ...(auth ? { authorization: auth } : {}) },
+      payload: JSON.stringify(payload),
+    });
+
+  it("prepares a freeze of the session's own agent, and lets only that user submit it", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE);
+    const { dashboard, forgotten } = forgetfulDashboard();
+    const server = await app({ agents, dashboard });
+    const alice = `Bearer ${await token()}`;
+    const prepared = await post(server, "/api/agent/freeze/prepare", alice, { frozen: true });
+    expect(prepared.json()).toMatchObject({ status: "pending_signature", correlationId: "freeze_1" });
+    expect(calls.freezes).toEqual(["freeze agent_1"]);
+    const mallory = `Bearer ${await token({ sub: "did:privy:mallory" })}`;
+    expect((await post(server, "/api/agent/freeze/submit", mallory, { correlationId: "freeze_1", signedData: {} })).statusCode).toBe(404);
+    expect((await post(server, "/api/agent/freeze/submit", alice, { correlationId: "policy_1", signedData: {} })).statusCode).toBe(404);
+    expect(calls.submitted).toEqual([]);
+    expect((await post(server, "/api/agent/freeze/submit", alice, { correlationId: "freeze_1", signedData: { standard: "nep366" } })).json()).toEqual({ status: "success" });
+    expect(calls.submittedTypes).toEqual(["agent_freeze"]);
+    expect(forgotten).toEqual(["did:privy:alice"]);
+  });
+
+  it("unfreezes a frozen agent and sends it as an unfreeze, whatever the submit says", async () => {
+    const { agents, calls } = fakeAgents(ACTIVE, null, 0, true);
+    const server = await app({ agents });
+    const alice = `Bearer ${await token()}`;
+    expect((await post(server, "/api/agent/freeze/prepare", alice, { frozen: true })).json()).toEqual({ status: "already_frozen" });
+    expect((await post(server, "/api/agent/freeze/prepare", alice, { frozen: false })).json()).toMatchObject({ status: "pending_signature", correlationId: "freeze_2" });
+    await post(server, "/api/agent/freeze/submit", alice, { correlationId: "freeze_2", signedData: { standard: "nep366" } });
+    expect(calls.submittedTypes).toEqual(["agent_unfreeze"]);
+  });
+
+  it("refuses without a session, an agent or a clear choice, says when nothing changes, and stops at the daily cap", async () => {
+    const auth = `Bearer ${await token()}`;
+    expect((await post(await app({ agents: fakeAgents(ACTIVE).agents }), "/api/agent/freeze/prepare", null, { frozen: true })).statusCode).toBe(401);
+    expect((await post(await app({ agents: fakeAgents().agents }), "/api/agent/freeze/prepare", auth, { frozen: true })).statusCode).toBe(409);
+    for (const body of [{}, { frozen: "yes" }, { frozen: true, agentId: "agent_2" }]) {
+      expect((await post(await app({ agents: fakeAgents(ACTIVE).agents }), "/api/agent/freeze/prepare", auth, body)).statusCode).toBe(400);
+    }
+    const frozen = await app({ agents: fakeAgents(ACTIVE, null, 0, true).agents });
+    for (let i = 0; i <= LIMITS.policyChangesPerUserPerDay; i++) expect((await post(frozen, "/api/agent/freeze/prepare", auth, { frozen: true })).json()).toEqual({ status: "already_frozen" });
+    const server = await app({ agents: fakeAgents(ACTIVE).agents });
+    for (let i = 0; i < LIMITS.policyChangesPerUserPerDay; i++) expect((await post(server, "/api/agent/freeze/prepare", auth, { frozen: true })).statusCode).toBe(200);
+    expect((await post(server, "/api/agent/freeze/prepare", auth, { frozen: true })).statusCode).toBe(429);
   });
 });
 

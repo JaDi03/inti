@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoins, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, HandCoins, KeyRound, Snowflake, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
@@ -11,6 +11,7 @@ import { useOwnerSigner } from "../limits/ConfirmSigning";
 import type { LimitsConfig } from "../limits/config";
 import { PasskeyProtection } from "../limits/PasskeyProtection";
 import { display } from "../limits/SpendingLimitsPanel";
+import { FreezeError, setAgentFrozen } from "../agent/freeze";
 import { fetchDashboard, sellHeld, type DashboardData, type HeldSale } from "./dashboardClient";
 import { AddressLine } from "./AddressLine";
 import { GrantRenewal } from "./GrantRenewal";
@@ -367,7 +368,12 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     />
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    {/* The first tap asks here, on the card the owner is looking at. */}
+                    {confirming === key ? (
+                      <p className="text-[11px] font-bold uppercase tracking-wide">Tap ✓ again to sell</p>
+                    ) : (
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    )}
                     <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                       {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
@@ -378,9 +384,9 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
               );
             })}
           </ul>
-          {(confirming || saleNote) && (
+          {saleNote && (
             <p role="status" className="mt-2 px-1 text-sm">
-              {confirming ? `Tap ✓ again to sell all your ${HELD_ASSETS[confirming].name} for NEAR.` : saleNote}
+              {saleNote}
             </p>
           )}
         </section>
@@ -424,6 +430,26 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
   const feesOut = (status.intiConnected && status.intiFeesLeft !== null && status.intiFeesLeft < ONE_ORDER_FEE_YOCTO);
   const orders = data?.agent?.orders;
   const near = (atomic: bigint) => (hidden ? HIDDEN : nearText(atomic));
+
+  const [freezing, setFreezing] = useState(false);
+  const [freezeNote, setFreezeNote] = useState<string | null>(null);
+  const setFrozen = async (frozen: boolean) => {
+    if (!policy || policy.maxDeviationBps === null || !agentAccount) return;
+    setFreezing(true);
+    setFreezeNote(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new FreezeError("Your session expired. Sign in again and retry.");
+      const outcome = await setAgentFrozen({ accessToken: token, accountId: address, agentAccount, maxDeviationBps: policy.maxDeviationBps, config, provider: client.provider, signer, frozen });
+      if (outcome === "processing") setFreezeNote("NEAR Intents is still saving the change. Check again in a minute.");
+      else setFreezeNote(frozen ? "Your agent is frozen. It can do nothing until you unfreeze it." : "Your agent is unfrozen. Inti can trade for you again.");
+      await state.load(true);
+    } catch (e) {
+      setFreezeNote(e instanceof Error ? e.message : "Your agent's state could not be changed.");
+    } finally {
+      setFreezing(false);
+    }
+  };
 
   const pauseOrResume = async () => {
     setBusy(true);
@@ -528,7 +554,42 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
       </FoldCard>
       {confirmDialog}
 
-      <FoldCard id="agent" icon={<Sparkles className="size-4 text-primary" />} title="Your agent's rules">
+      <FoldCard
+        id="agent"
+        icon={<Sparkles className="size-4 text-primary" />}
+        title="Your agent's rules"
+        // Ice blue while frozen, so the state shows at a glance.
+        className={policy?.frozen ? "border-sky-300 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/50" : undefined}
+        extra={
+          policy?.frozen ? (
+            <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-900">
+                <Snowflake className="size-3.5" /> Frozen
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 rounded-full px-2.5 text-xs"
+                title="Let Inti trade for you again, within your rules"
+                disabled={freezing || !agentAccount || policy.maxDeviationBps === null}
+                onClick={() => void setFrozen(false)}
+              >
+                {freezing && <Loader2 className="animate-spin" />} Unfreeze
+              </Button>
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              className="h-7 rounded-full bg-sky-200 px-2.5 text-xs text-sky-950 hover:bg-sky-300"
+              title="Stop your agent at once: it can do nothing until you unfreeze it"
+              disabled={freezing || !policy || !agentAccount || policy.maxDeviationBps === null}
+              onClick={() => void setFrozen(true)}
+            >
+              {freezing ? <Loader2 className="animate-spin" /> : <Snowflake />} Freeze
+            </Button>
+          )
+        }
+      >
         <p className="mt-1 text-xs text-muted-foreground">Signed by you on NEAR Intents. Nobody can change them without your signature, not even Inti.</p>
         {agentAccount && (
           <div className="mt-3">
@@ -582,6 +643,12 @@ export function RulesPanel({ address, config, client, status, state, onManage, o
           <p className="mt-1 text-sm text-muted-foreground">None right now.</p>
         )}
       </FoldCard>
+      {/* Outside the card, so it shows even while the card is folded. */}
+      {freezeNote && (
+        <p role="status" className="-mt-2 break-words px-1 text-sm">
+          {freezeNote}
+        </p>
+      )}
     </div>
   );
 }
@@ -766,7 +833,7 @@ function saleMessage(sale: HeldSale, name: string): string {
  * screen readers; the first press asks, the second sells.
  */
 function SellHeldButton({ name, state, blockedBy, onPress }: { name: string; state: "idle" | "confirm" | "selling"; blockedBy: string | null; onPress: () => void }) {
-  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR`);
+  const label = state === "selling" ? `Selling your ${name}` : state === "confirm" ? `Confirm: sell all your ${name} for NEAR` : (blockedBy ?? `Sell all your ${name} for NEAR (tap twice)`);
   return (
     <button
       type="button"

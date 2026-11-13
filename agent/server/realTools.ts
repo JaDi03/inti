@@ -12,6 +12,8 @@ import type { Trading } from "./trading.js";
 /** Smallest and largest order the model may ask for, in USD; the signed limits still apply on top. */
 const MIN_ORDER_USD = "0.10";
 const MAX_ORDER_USD = "1000";
+/** Smallest sale of an asset the agent keeps: a $0.10 purchase is worth a little less after fees. */
+const MIN_HELD_SALE_USD = "0.01";
 
 const usd = z
   .string()
@@ -154,10 +156,12 @@ export function realTools(deps: { userId: string; owner: string; trading: Tradin
    */
   const toSell = async (key: TradableKey, amountUsd: string, receiveKey: "near" | AssetKey) => {
     if (receiveKey === key) throw new ToolInputError(REASONS.same_asset ?? "same asset");
-    if (usdStringToMicro(amountUsd) < usdStringToMicro(MIN_ORDER_USD) || usdStringToMicro(amountUsd) > usdStringToMicro(MAX_ORDER_USD)) {
-      throw new ToolInputError(`amount must be between ${MIN_ORDER_USD} and ${MAX_ORDER_USD} USD`);
-    }
     const a = tradable(key);
+    // What the agent keeps can always be sold, even when fees left it below the usual minimum.
+    const min = a.held ? MIN_HELD_SALE_USD : MIN_ORDER_USD;
+    if (usdStringToMicro(amountUsd) < usdStringToMicro(min) || usdStringToMicro(amountUsd) > usdStringToMicro(MAX_ORDER_USD)) {
+      throw new ToolInputError(`amount must be between ${min} and ${MAX_ORDER_USD} USD`);
+    }
     if (a.held && receiveKey !== "near") throw new ToolInputError(REASONS.sells_for_near ?? "sells for near only");
     const { byId } = await pricesOf(deps.tokens);
     const token = byId.get(a.assetId);

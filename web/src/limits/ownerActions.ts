@@ -187,6 +187,31 @@ function agentCreation(delegate: OwnerDelegate, config: LimitsConfig): { agentAc
   return { agentAccount: key[1], cost: call.deposit };
 }
 
+/** The rules a freeze stores again, with the agent marked frozen: no refund account, unlike a creation. */
+const FREEZE_RULES_KEYS = ["locked", "version", "valid_until", "wallet_pubkey", "encrypted_data", "wallet_signature", "agent_policy_hash"] as const;
+
+/**
+ * The agent account a freeze or unfreeze is for, and which one it is, or a refusal. Each is
+ * exactly two calls to the agent rules contract, free of charge: store the rules again (marked
+ * frozen or not) and freeze or unfreeze that same agent's wallet. The rules themselves are
+ * encrypted, so the app also checks the Agent API's preview of them before signing (see
+ * agent/freeze.ts).
+ */
+export function agentFreezeOf(delegate: OwnerDelegate, config: LimitsConfig): { agentAccount: string; frozen: boolean } {
+  if (delegate.receiverId !== config.agentRulesContract) refuse(`the request is addressed to ${delegate.receiverId}.`);
+  const [store, freeze] = delegate.actions.map((a) => a.functionCall);
+  if (!store || !freeze || delegate.actions.length !== 2) refuse("freezing the agent is exactly two contract calls.");
+  const kind = freeze.methodName === "freeze_wallet" ? true : freeze.methodName === "unfreeze_wallet" ? false : null;
+  if (store.methodName !== "store_wallet_policy" || kind === null) refuse(`the methods ${store.methodName} and ${freeze.methodName} are not a freeze.`);
+  if (store.deposit !== 0n || freeze.deposit !== 0n) refuse("freezing the agent never costs anything.");
+  const rules = argsOf(store.args, store.methodName, FREEZE_RULES_KEYS);
+  if (rules.locked !== false) refuse("the agent's rules would be locked.");
+  const target = argsOf(freeze.args, freeze.methodName, ["wallet_pubkey"]);
+  const key = /^ed25519:([0-9a-f]{64})$/.exec(typeof rules.wallet_pubkey === "string" ? rules.wallet_pubkey : "");
+  if (!key?.[1] || target.wallet_pubkey !== rules.wallet_pubkey) refuse("the freeze is not for one agent.");
+  return { agentAccount: key[1], frozen: kind };
+}
+
 /** The agent account a creation request is for: the wallet key named in the rules it stores. */
 export function agentAccountOf(delegate: OwnerDelegate, config: LimitsConfig): string {
   return agentCreation(delegate, config).agentAccount;
@@ -197,6 +222,12 @@ export function agentAccountOf(delegate: OwnerDelegate, config: LimitsConfig): s
  * send: creating their own agent. Anything else is refused.
  */
 export function describeOwnerDelegate(delegate: OwnerDelegate, config: LimitsConfig): string[] {
+  if (delegate.actions.length === 2) {
+    const { agentAccount, frozen } = agentFreezeOf(delegate, config);
+    return frozen
+      ? [`Freeze your agent (${agentAccount}): it can do nothing until you unfreeze it.`, "Its money stays with it. Nothing is sent anywhere."]
+      : [`Unfreeze your agent (${agentAccount}): Inti can trade for you again, within your rules.`];
+  }
   const { agentAccount, cost } = agentCreation(delegate, config);
   return [
     `Create your own agent on NEAR Intents (${agentAccount}).`,

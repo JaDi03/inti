@@ -52,7 +52,8 @@ export function useOwnerSigner(address: string, config: LimitsConfig): { signer:
             <ShieldCheck className="size-5 text-primary" /> Confirm with your account
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-muted-foreground">This signature will:</Dialog.Description>
-          <ul className="mt-3 flex list-disc flex-col gap-1.5 pl-5 text-sm">
+          {/* Account ids are 64 characters with no spaces: they wrap anywhere instead of overflowing. */}
+          <ul className="mt-3 flex list-disc flex-col gap-1.5 pl-5 text-sm [overflow-wrap:anywhere]">
             {pending?.lines.map((line) => <li key={line}>{line}</li>)}
           </ul>
           <div className="mt-5 flex justify-end gap-2">
