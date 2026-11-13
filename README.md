@@ -24,10 +24,21 @@ Giving an AI agent money usually means giving it your keys. With Inti your funds
 1. **Sign in** with email or Google. [Privy](https://docs.privy.io) creates a NEAR wallet for you.
 2. **Set your limits**: how much one order may spend, and how much in a day. The app installs the Spending Limits contract on your account and adds Inti's key, which can call only `fund_agent` (`web/src/limits/client.ts`).
 3. **Create your agent** on the NEAR Intents [Agent API](https://docs.agentsonintents.com) and sign a trading permission (a grant) for 7, 30 or 90 days.
-4. **Chat**: "buy $5 of gold", "sell half my bitcoin for euros", "buy Solana if it drops to $150". The agent quotes, buys, sells or places an order that waits for a price.
+4. **Chat**: "buy $5 of bitcoin", "sell half my ether", "buy Zcash if it drops to $900". The agent quotes, buys, sells or places an order that waits for a price.
 5. **Results go to your wallet.** Anything left with the agent is sent back to your wallet every 5 minutes.
 
-The agent buys and sells gold (XAUT), euro (EURe), bitcoin, ether and Solana, and pays with NEAR (`agent/policy/assets.ts`).
+The agent buys and sells bitcoin (BTC), ether (ETH), Zcash (ZEC) and staked NEAR (stNEAR), and pays with NEAR (`agent/policy/assets.ts`). Its trades run on the agent's confidential balance in NEAR Intents.
+
+### Earlier version: gold, euro and Solana
+
+Until 12 November 2026 Inti also bought gold (XAUT), euro (EURe) and Solana and sent them to the user's NEAR wallet. The Agent API now trades only from the agent's confidential balance, and from there it sends to a NEAR wallet only the assets 1Click lists on the NEAR chain. Gold, euro and Solana are not on that list, so Inti no longer offers them. That version is kept in the tag [`gold-euro-sol-final`](https://github.com/JaDi03/inti/tree/gold-euro-sol-final).
+
+One of its trades on mainnet, a sale of gold for Solana on 12 November 2026:
+
+1. [`7BrWbDgR`](https://nearblocks.io/txns/7BrWbDgRiVyknCV2Trr5KrggQvMMRNH1K9XQVvavhnhx): the Spending Limits contract on the user's account sends 0.000062 XAUT to the agent in NEAR Intents.
+2. [`CCAuxeuM`](https://nearblocks.io/txns/CCAuxeuMU2BsLT5ZeMWEcS9jnFrXpvk9R9g46TeAvVRs): the agent gives the gold to a market maker.
+3. [`2S16iWuB`](https://nearblocks.io/txns/2S16iWuBepvzSeoykpxMBV3z5CmfoV8cRvCfPbPRvjZw): the market maker gives 0.002874 SOL to the agent.
+4. [`9N1LZEDu`](https://nearblocks.io/txns/9N1LZEDuh4STZYtx6QLbVtkmnXoGcb8H1U7uupWCbdDV): the SOL leaves NEAR Intents for the user's wallet.
 
 ### The agent
 
