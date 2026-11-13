@@ -39,6 +39,9 @@ const HELD_TILE: Record<HeldKey, string> = {
   solana: "bg-purple-300",
 };
 
+/** The asset cards' grid. On phones the whole grid is drawn smaller, every part in the same proportion. */
+const CARD_GRID = "grid auto-rows-fr grid-cols-2 gap-3 max-sm:[zoom:0.85]";
+
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
@@ -289,7 +292,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
         <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
-        <ul className="grid auto-rows-fr grid-cols-2 gap-3">
+        <ul className={CARD_GRID}>
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
             const row = assets?.find((r) => r.key === key);
@@ -349,7 +352,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
           <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. NEAR from sales stays here and pays for the next purchases.</p>
-          <ul className="grid auto-rows-fr grid-cols-2 gap-3">
+          <ul className={CARD_GRID}>
             {(() => {
               // Null while the agent's balance cannot be read.
               const cash = data?.agent ? data.agent.cash : null;
