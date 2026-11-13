@@ -255,7 +255,7 @@ describe("GET /api/dashboard", () => {
       dashboard: Object.assign(
         (userId: string) => {
           asked.push(userId);
-          return Promise.resolve({ prices: { near: 3.58, bitcoin: null, ethereum: null, zcash: null, stnear: null }, retiredPrices: { gold: null, euro: null, solana: null }, agent: null });
+          return Promise.resolve({ prices: { near: 3.58, bitcoin: null, ethereum: null, zcash: null, stnear: null }, agent: null });
         },
         { forget: () => undefined },
       ),

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { PricedToken } from "../core/portfolio.js";
-import { ASSET_KEYS, ASSETS, RETIRED_ASSETS, RETIRED_KEYS, type AssetKey, type RetiredKey } from "../policy/assets.js";
+import { ASSET_KEYS, ASSETS, type AssetKey } from "../policy/assets.js";
 import { fromAtomic } from "../policy/units.js";
 import type { AgentAccounts } from "./agents.js";
 import { usableGrant, type GrantStore } from "./grants.js";
@@ -36,8 +36,6 @@ export interface OpenOrder {
 export interface DashboardView {
   /** USD price of NEAR and of each asset Inti can buy, or null when there is no fresh price. */
   prices: Record<"near" | AssetKey, number | null>;
-  /** USD price of each asset Inti no longer trades, to value what the owner still holds of it. */
-  retiredPrices: Record<RetiredKey, number | null>;
   /** `account` is the agent's own NEAR account on NEAR Intents, as the Agent API knows it. */
   agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
@@ -150,7 +148,6 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
     const tokens = (await soft(deps.tokens)) ?? [];
     const priceOf = (assetId: string) => tokens.find((t) => t.asset_id === assetId)?.price ?? null;
     const prices = { near: priceOf(FUNDING_ASSET), ...Object.fromEntries(ASSET_KEYS.map((k) => [k, priceOf(ASSETS[k].assetId)])) } as DashboardView["prices"];
-    const retiredPrices = Object.fromEntries(RETIRED_KEYS.map((k) => [k, priceOf(RETIRED_ASSETS[k].assetId)])) as DashboardView["retiredPrices"];
 
     const agent = await soft(() => deps.agents.find(userId));
     let agentPart: DashboardView["agent"] = null;
@@ -165,7 +162,7 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
       };
     }
 
-    const data: DashboardView = { prices, retiredPrices, agent: agentPart };
+    const data: DashboardView = { prices, agent: agentPart };
     if (cache.size >= MAX_CACHED_USERS && !cache.has(userId)) cache.delete(cache.keys().next().value as string);
     cache.set(userId, { at: now(), data });
     return data;
