@@ -1,4 +1,4 @@
-import type { AssetKey, RetiredKey } from "../../../agent/policy/assets";
+import type { AssetKey } from "../../../agent/policy/assets";
 
 /** Public URL of Inti's agent API (INTI_API_URL in the root .env). Not a secret. */
 const API_URL = (import.meta.env as Record<string, string | undefined>).INTI_API_URL;
@@ -28,8 +28,6 @@ export interface OpenOrder {
 
 export interface DashboardData {
   prices: Record<"near" | AssetKey, number | null>;
-  /** Prices of assets Inti no longer trades; missing from a server that does not send them yet. */
-  retiredPrices?: Record<RetiredKey, number | null>;
   agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
 }
 

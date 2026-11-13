@@ -1,7 +1,7 @@
 import { Account, JsonRpcProvider, PublicKey, actions } from "near-api-js";
 import type { Action, Signer } from "near-api-js";
 import { priceToMicro } from "../../../agent/core/money";
-import { ASSET_KEYS, ASSETS, RETIRED_ASSETS, RETIRED_KEYS, type AssetKey, type RetiredKey } from "../../../agent/policy/assets";
+import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import type { LimitsConfig } from "./config";
 import { assetContract, EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
 
@@ -174,18 +174,6 @@ export class LimitsClient {
         return { key, enabled: registration != null, balance: BigInt(balance ?? "0") };
       }),
     );
-  }
-
-  /** What the account still holds of each asset Inti no longer trades; only the ones above zero. */
-  async retiredAssets(accountId: string): Promise<{ key: RetiredKey; balance: bigint }[]> {
-    const rows = await Promise.all(
-      RETIRED_KEYS.map(async (key) => {
-        const contract = RETIRED_ASSETS[key].assetId.slice("nep141:".length);
-        const balance = await this.view<string | null>(contract, "ft_balance_of", { account_id: accountId });
-        return { key, balance: BigInt(balance ?? "0") };
-      }),
-    );
-    return rows.filter((r) => r.balance > 0n);
   }
 
   /** Registers the user's account with an asset's token, for its own one-time fee, so purchases can reach the wallet. */
