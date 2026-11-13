@@ -47,6 +47,20 @@ describe("preparePolicy", () => {
   });
 });
 
+describe("prepareFreeze", () => {
+  it("asks for a freeze of exactly this agent, and passes the rules preview on for the owner's check", async () => {
+    const { accounts, generated } = api(null);
+    expect(await accounts.prepareFreeze(AGENT)).toEqual({ status: "pending_signature", correlationId: "intent_x", intent: { standard: "nep413" }, preview: { policy: {} } });
+    expect(generated).toEqual([{ type: "agent_freeze", agent_id: AGENT }]);
+  });
+
+  it("says an agent already frozen needs nothing signed, and treats any other refusal as an outage", async () => {
+    const answer = (status: number, code: string) => () => Promise.resolve(Response.json({ errors: [{ status: String(status), code }] }, { status }));
+    expect(await agentApiAccounts("key", "https://api.example", answer(409, "wallet_already_frozen") as typeof fetch).prepareFreeze(AGENT)).toEqual({ status: "already_frozen" });
+    await expect(agentApiAccounts("key", "https://api.example", answer(409, "something_else") as typeof fetch).prepareFreeze(AGENT)).rejects.toThrow("agents_unavailable");
+  });
+});
+
 describe("prepareRevokes", () => {
   it("closes only Inti's own grants that are still live, at most five", async () => {
     const grants = [

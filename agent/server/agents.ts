@@ -43,7 +43,14 @@ export interface AgentAccounts {
    * grant replaces them instead of adding to them. Grants with another label are never touched.
    */
   prepareRevokes(agentId: string): Promise<PreparedRevoke[]>;
+  /** Asks for the document the owner signs to freeze their agent. Nothing happens until it is signed and sent. */
+  prepareFreeze(agentId: string): Promise<PreparedFreeze>;
 }
+
+export type PreparedFreeze =
+  | { status: "pending_signature"; correlationId: string; intent: unknown; preview: { policy: unknown } }
+  /** The agent is already frozen: nothing to sign. */
+  | { status: "already_frozen" };
 
 export interface PreparedRevoke {
   correlationId: string;
@@ -61,7 +68,7 @@ export type PreparedPolicy =
   | { status: "cooldown"; availableAt: string };
 
 /** The owner-signed actions Inti sends. */
-export type OwnerIntentType = "agent_create" | "grant_issue" | "policy_update" | "grant_revoke";
+export type OwnerIntentType = "agent_create" | "grant_issue" | "policy_update" | "grant_revoke" | "agent_freeze";
 
 const grantsSchema = z.object({
   data: z.array(z.object({ grant_id: z.string().regex(/^[0-9a-f]{64}$/), label: z.string(), expires_at: z.string(), revoked_at: z.string().nullable() })),
@@ -78,10 +85,16 @@ const STATUS_WAIT_MS = 30_000;
 
 /** An Agent API answer that was not a success, by HTTP status. */
 class UpstreamError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    /** The Agent API's documented error code, when it sent one. */
+    readonly code: string | null = null,
+  ) {
     super(`agent api answered ${status}`);
   }
 }
+
+const errorCodeSchema = z.object({ errors: z.array(z.object({ code: z.string().max(64) })).min(1) });
 
 /** The Agent API refuses new agents past its daily quota; every other failure is an outage to the user. */
 function unavailable(error: unknown): AgentsUnavailableError {
@@ -101,7 +114,10 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) throw new UpstreamError(res.status);
+    if (!res.ok) {
+      const doc = errorCodeSchema.safeParse(await res.json().catch(() => null));
+      throw new UpstreamError(res.status, doc.success ? (doc.data.errors[0]?.code ?? null) : null);
+    }
     return (await res.json()) as T;
   };
   return {
@@ -166,6 +182,15 @@ export function agentApiAccounts(apiKey: string, baseUrl: string, fetcher: typeo
           }),
         );
       } catch (error) {
+        throw unavailable(error);
+      }
+    },
+    async prepareFreeze(agentId) {
+      try {
+        const res = await request<{ correlation_id: string; intent: unknown; preview: { policy: unknown } }>("/v1/generate-intent", { type: "agent_freeze", agent_id: agentId });
+        return { status: "pending_signature", correlationId: res.correlation_id, intent: res.intent, preview: { policy: res.preview.policy } };
+      } catch (error) {
+        if (error instanceof UpstreamError && error.code === "wallet_already_frozen") return { status: "already_frozen" };
         throw unavailable(error);
       }
     },

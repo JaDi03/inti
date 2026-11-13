@@ -125,6 +125,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const policyQuota = new DailyQuota(LIMITS.policyChangesPerUserPerDay, LIMITS.policyChangesPerDayTotal);
   // Rule changes waiting for a signature, and the user each one belongs to.
   const pendingPolicies = new Map<string, string>();
+  // Freezes waiting for the owner's signature, and the user each one belongs to.
+  const pendingFreezes = new Map<string, string>();
   const verifyQuota = deps.verifyQuota ?? new DailyQuota(LIMITS.verificationsPerUserPerDay, LIMITS.verificationsPerDayTotal);
   let verifying = 0;
   let lastAttestation: { at: number; result: ModelAttestation } | null = null;
@@ -409,6 +411,53 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if (outcome === "success") deps.dashboard?.forget(userId);
       if (outcome !== "processing") pendingPolicies.delete(body.data.correlationId);
       req.log.info({ userId, outcome }, "policy_submitted");
+      return { status: outcome };
+    } catch (error) {
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // The document the user's wallet signs to freeze their own agent. Nothing comes from the request:
+  // the agent is the session's own, and nothing happens until the user signs and sends it.
+  app.post("/api/agent/freeze/prepare", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    let taken = false;
+    try {
+      const agent = await deps.agents.find(userId);
+      if (agent.status !== "active") return reply.code(409).send({ error: "no_agent" });
+      const allowed = policyQuota.take(userId);
+      if (allowed !== "ok") {
+        req.log.warn({ userId, cap: allowed }, "freeze_quota_refused");
+        return reply.code(429).send({ error: "rate_limited" });
+      }
+      taken = true;
+      const prepared = await deps.agents.prepareFreeze(agent.agentId);
+      if (prepared.status === "already_frozen") {
+        policyQuota.giveBack(userId);
+        return prepared;
+      }
+      remember(pendingFreezes, prepared.correlationId, userId);
+      req.log.info({ userId }, "freeze_prepared");
+      return prepared;
+    } catch (error) {
+      if (taken) policyQuota.giveBack(userId);
+      return agentFailure(req, reply, error);
+    }
+  });
+
+  // Sends the signed freeze. Only the user who asked for it may send it.
+  app.post("/api/agent/freeze/submit", { bodyLimit: LIMITS.agentBodyBytes }, async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = submitAgentBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (pendingFreezes.get(body.data.correlationId) !== userId) return reply.code(404).send({ error: "not_found" });
+    try {
+      const outcome = await deps.agents.submit(body.data.correlationId, body.data.signedData, "agent_freeze");
+      if (outcome === "success") deps.dashboard?.forget(userId);
+      if (outcome !== "processing") pendingFreezes.delete(body.data.correlationId);
+      req.log.info({ userId, outcome }, "freeze_submitted");
       return { status: outcome };
     } catch (error) {
       return agentFailure(req, reply, error);
