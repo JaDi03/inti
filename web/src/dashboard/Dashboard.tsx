@@ -1,6 +1,7 @@
 import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
+import { HELD_ASSETS, HELD_KEYS, type HeldKey } from "../../../agent/policy/heldAssets";
 import { fromAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,13 @@ const TILE: Record<AssetKey, string> = {
   bitcoin: "bg-orange-300",
   ethereum: "bg-indigo-200",
   zcash: "bg-yellow-300",
+};
+
+/** Gold's yellow, the euro's blue and Solana's purple, in the same light shades. */
+const HELD_TILE: Record<HeldKey, string> = {
+  gold: "bg-amber-200",
+  euro: "bg-sky-300",
+  solana: "bg-purple-300",
 };
 
 /** The areas of the dashboard, by what each asset is. */
@@ -280,6 +288,44 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       ))}
       {part !== "wallet" && (
         <p className="-mt-2 px-1 text-xs text-muted-foreground">Enabling an asset costs a one-time 0.00125 NEAR, paid to its token, so your wallet can receive it.</p>
+      )}
+
+      {part !== "wallet" && (
+        <section>
+          <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
+          <p className="mb-2.5 px-1 text-xs text-muted-foreground">
+            These stay in your agent&apos;s private balance on NEAR Intents, under the rules you signed. Ask Inti to sell them: the NEAR comes to your wallet.
+          </p>
+          <ul className="grid auto-rows-fr grid-cols-2 gap-3">
+            {HELD_KEYS.map((key, i) => {
+              const a = HELD_ASSETS[key];
+              const held = data?.agent?.held;
+              // Null while the agent's balance cannot be read; an asset it does not hold reads as zero.
+              const amount = held ? (held.find((h) => h.asset === key)?.amount ?? "0") : null;
+              const price = data?.prices[key];
+              const wide = HELD_KEYS.length % 2 === 1 && i === HELD_KEYS.length - 1;
+              return (
+                <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", HELD_TILE[key], wide && "col-span-2")}>
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className="size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
+                      <p className="text-xs opacity-70">{a.symbol}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
+                    <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
+                    <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
+                      {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
+                    </p>
+                    <p className="mt-1 text-[11px] tabular-nums opacity-70">{price == null ? "No price right now" : `Price: 1 ${a.symbol} = ${money(price)}`}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {error && <p className="break-words text-sm text-destructive">{error}</p>}

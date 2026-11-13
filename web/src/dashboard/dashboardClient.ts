@@ -1,4 +1,5 @@
 import type { AssetKey } from "../../../agent/policy/assets";
+import type { HeldKey, TradableKey } from "../../../agent/policy/heldAssets";
 
 /** Public URL of Inti's agent API (INTI_API_URL in the root .env). Not a secret. */
 const API_URL = (import.meta.env as Record<string, string | undefined>).INTI_API_URL;
@@ -26,9 +27,16 @@ export interface OpenOrder {
   status: string;
 }
 
+/** How much of one asset the agent keeps for its owner, in whole units. */
+export interface HeldBalance {
+  asset: HeldKey;
+  amount: string;
+}
+
 export interface DashboardData {
-  prices: Record<"near" | AssetKey, number | null>;
-  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
+  prices: Record<"near" | TradableKey, number | null>;
+  /** `held` is what the agent keeps for its owner (gold, the euro, SOL), or null when it cannot be read. */
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null } | null;
 }
 
 /** Today's prices for saving limits; they come with the dashboard, which the server keeps for a few seconds. */
