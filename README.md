@@ -27,7 +27,7 @@ Giving an AI agent money usually means giving it your keys. With Inti your funds
 4. **Chat**: "buy $5 of bitcoin", "sell half my ether", "buy Zcash if it drops to $900". The agent quotes, buys, sells or places an order that waits for a price.
 5. **Results go to your wallet.** Anything left with the agent is sent back to your wallet every 5 minutes.
 
-The agent buys and sells bitcoin (BTC), ether (ETH), Zcash (ZEC) and staked NEAR (stNEAR), and pays with NEAR (`agent/policy/assets.ts`). Its trades run on the agent's confidential balance in NEAR Intents.
+The agent buys and sells bitcoin (BTC), ether (ETH) and Zcash (ZEC), and pays with NEAR (`agent/policy/assets.ts`). Its trades run on the agent's confidential balance in NEAR Intents.
 
 ### Earlier version: gold, euro and Solana
 
