@@ -33,6 +33,39 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "Too many requests in a minute. Wait a moment and retry.",
 };
 
+export type CallFailure = "unavailable" | "not_model" | "other_bytes" | "other_signer" | "not_attested";
+
+/** Whether every model call behind one reply was signed by the key found in the attested chip. */
+export interface ReplyProof {
+  ok: boolean;
+  calls: { responseId: string; ok: boolean; failure: CallFailure | null }[];
+  attestedKey: string | null;
+  checkedAt: string;
+}
+
+/** Why a reply is not proven, in plain words. */
+export const FAILURE_TEXT: Record<CallFailure, string> = {
+  unavailable: "NEAR AI has no signature for it yet",
+  not_model: "it was signed by NEAR AI's gateway, not by the model",
+  other_bytes: "the signature covers other words than the ones Inti got",
+  other_signer: "the signature does not match its signer",
+  not_attested: "the signer is not the key found in the verified chip",
+};
+
+/** Asks Inti's server to check the signatures behind one of the user's replies. */
+export async function fetchReplyProof(accessToken: string, proofId: string): Promise<ReplyProof> {
+  if (!API_URL) throw new Error("Inti's server is not configured yet.");
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/api/chat/proof/${encodeURIComponent(proofId)}`, API_URL), { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(60_000) });
+  } catch {
+    throw new Error("The check could not reach Inti's server.");
+  }
+  const body = (await res.json().catch(() => ({}))) as Partial<ReplyProof> & { error?: string };
+  if (!res.ok || !Array.isArray(body.calls)) throw new Error(MESSAGES[body.error ?? ""] ?? "The check could not run right now.");
+  return body as ReplyProof;
+}
+
 /**
  * Asks Inti's server for the check: the recent one everyone shares, or with `fresh` a new one that
  * counts against the user's daily checks. Throws a short sentence the user understands.

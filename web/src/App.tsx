@@ -13,10 +13,11 @@ import { PortfolioLayout, useHideAmounts } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
+import { SignedReply } from "./verify/SignedReply";
 import { VerifiedBadge } from "./verify/VerifiedBadge";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
-type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean; orderWaiting?: boolean };
+type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean; orderWaiting?: boolean; proofId?: string | null };
 
 /** Inti knows the account is not set up yet and says what to do (first step of the agent knowing the state). */
 const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. It takes 4 steps, right here.";
@@ -136,8 +137,8 @@ export function App() {
   if (!ready) return <main className="flex min-h-svh items-center justify-center text-muted-foreground">Loading...</main>;
   if (!authenticated || !user) return <Welcome onLogin={login} />;
 
-  const addMessage = (from: Message["from"], text: string, simulated = false, orderWaiting = false) =>
-    setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated, orderWaiting }]);
+  const addMessage = (from: Message["from"], text: string, simulated = false, orderWaiting = false, proofId: string | null = null) =>
+    setMessages((prev) => [...prev, { id: nextId.current++, from, text, simulated, orderWaiting, proofId }]);
 
   const send = async (text: string) => {
     addMessage("user", text);
@@ -148,7 +149,7 @@ export function App() {
       const token = await getAccessToken();
       if (!token) throw new AgentError("Your session expired. Sign in again and retry.");
       const reply = await askAgent(token, text);
-      addMessage("inti", reply.report || "Done.", reply.simulated, reply.events.some((e) => e.type === "limit_order_placed"));
+      addMessage("inti", reply.report || "Done.", reply.simulated, reply.events.some((e) => e.type === "limit_order_placed"), reply.proofId ?? null);
     } catch (error) {
       addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
     } finally {
@@ -324,6 +325,7 @@ export function App() {
                 userInitials={userInitials}
                 simulated={m.simulated}
                 orderWaiting={m.orderWaiting}
+                proof={m.proofId ? <SignedReply proofId={m.proofId} getAccessToken={getAccessToken} /> : undefined}
               />
             ))}
             {thinking && <TypingIndicator firstOfTurn={messages.at(-1)?.from !== "inti"} />}

@@ -107,8 +107,8 @@ export function VerifiedBadge({ getAccessToken }: { getAccessToken: () => Promis
               </details>
             )}
             <p className="mt-4 text-xs text-muted-foreground">
-              What this does not prove: that each chat reply was served by this machine, which software runs inside it beyond its own measurements, or that your messages are
-              hidden. NEAR AI's gateway and Inti's server both see them.
+              Each of Inti's replies shows under it whether it was signed by this chip's key. What this does not prove: which of the model's machines served a reply (they
+              share that key), which software runs inside beyond its own measurements, or that your messages are hidden. NEAR AI's gateway and Inti's server both see them.
             </p>
           </section>
         </div>

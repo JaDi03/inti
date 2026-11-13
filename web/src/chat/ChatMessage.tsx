@@ -33,6 +33,8 @@ interface Props {
   simulated?: boolean;
   /** The agent placed an order that waits for a price: its money sits with the agent until then. */
   orderWaiting?: boolean;
+  /** Under Inti's reply: whether its AI model calls were signed by the verified model. */
+  proof?: React.ReactNode;
 }
 
 /** Inti's bubble with three moving dots while the agent works, like mobile chat apps. */
@@ -49,7 +51,7 @@ export function TypingIndicator({ firstOfTurn }: { firstOfTurn: boolean }) {
   );
 }
 
-export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated = false, orderWaiting = false }: Props) {
+export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated = false, orderWaiting = false, proof }: Props) {
   const mine = from === "user";
   return (
     <li className={cn("flex max-w-full items-start gap-3.5", mine ? "flex-row-reverse self-end" : "self-start", firstOfTurn ? "mt-5 first:mt-0" : "mt-1")}>
@@ -65,6 +67,7 @@ export function ChatMessage({ from, text, firstOfTurn, userInitials, simulated =
         >
           {text}
         </div>
+        {proof}
         {simulated && <span className="mt-1 px-2 text-xs text-muted-foreground">Simulated portfolio, no real funds moved</span>}
         {orderWaiting && (
           <span className="mt-1 px-2 text-xs text-muted-foreground">
