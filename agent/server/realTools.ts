@@ -46,7 +46,7 @@ type ToolName = keyof typeof inputs;
 
 const descriptions: Record<ToolName, string> = {
   get_portfolio:
-    "The owner's wallet: each asset with its price, whether it is enabled, how much the owner holds and its value; the assets the owner's agent holds for them (held_by_agent: gold, the euro and SOL, which stay with the agent instead of the wallet); the owner's NEAR set aside for orders; and what the owner's one daily limit still allows today across buying and selling.",
+    "The owner's wallet: each asset with its price, whether it is enabled, how much the owner holds and its value; the assets the owner's agent holds for them (held_by_agent: gold, the euro and SOL, which stay with the agent instead of the wallet); the owner's NEAR set aside for orders; and what the owner's one daily limit still allows today across buying and selling. Selling what the agent holds does not count against it, since that money only goes to the owner's wallet.",
   get_quote:
     "What buying an asset now for an amount in US dollars would cost, without buying: the NEAR it takes, what the owner would receive and its value, and the cost (what the route keeps of the value at current prices). Use it for any question about price, cost or fees of buying now.",
   get_sell_quote:

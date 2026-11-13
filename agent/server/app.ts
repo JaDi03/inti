@@ -10,6 +10,8 @@ import type { PricedToken, SimulatedPortfolio } from "../core/portfolio.js";
 import type { AgentEvent } from "../core/tools.js";
 import type { Brain } from "../core/types.js";
 import { PRICE_PROTECTION_BPS } from "../policy/agentPolicy.js";
+import { HELD_ASSETS, HELD_KEYS } from "../policy/heldAssets.js";
+import { fromAtomic } from "../policy/units.js";
 import { AgentsUnavailableError, type AgentAccounts } from "./agents.js";
 import type { ModelAttestation } from "./attestation.js";
 import { ProofStore, type ReplyProof, type SignedCall } from "./replyProof.js";
@@ -46,6 +48,7 @@ export interface AppDeps {
   quota?: DailyQuota;
   agentQuota?: DailyQuota;
   verifyQuota?: DailyQuota;
+  heldSaleQuota?: DailyQuota;
   logger?: boolean;
 }
 
@@ -65,6 +68,8 @@ const prepareGrantBody = z.strictObject({ days: z.literal(GRANT_DAY_CHOICES).opt
 const preparePolicyBody = z.strictObject({
   maxDeviationBps: z.literal(PRICE_PROTECTION_BPS),
 });
+/** Which asset the agent keeps to sell; always all of it. */
+const sellHeldBody = z.strictObject({ asset: z.enum(HELD_KEYS) });
 const submitAgentBody = z.strictObject({
   correlationId: z.string().min(1).max(128),
   signedData: z.record(z.string(), z.unknown()),
@@ -126,6 +131,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   let sharedAttestation: Promise<ModelAttestation> | null = null;
   const proofs = new ProofStore(LIMITS.proofsInMemory);
   const proofQuota = new DailyQuota(LIMITS.proofsPerUserPerDay, LIMITS.proofsPerDayTotal);
+  const heldSaleQuota = deps.heldSaleQuota ?? new DailyQuota(LIMITS.heldSalesPerUserPerDay, LIMITS.heldSalesPerDayTotal);
 
   // JSON only: nothing may load from or frame these responses.
   await app.register(helmet, {
@@ -192,6 +198,36 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (userId === null) return reply;
     if (!deps.dashboard) return reply.code(503).send({ error: "unavailable" });
     return deps.dashboard(userId);
+  });
+
+  // Sells all of one asset the user's agent keeps, for NEAR sent to the user's wallet. It does not
+  // go through the model, so the owner can always get out, even while the chat is paused. The
+  // agent comes from the session and the amount from the agent's own balance, never the request.
+  app.post("/api/held/sell", async (req, reply) => {
+    const userId = await signedInUser(req, reply);
+    if (userId === null) return reply;
+    const body = sellHeldBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const trading = deps.trading;
+    if (!trading) return reply.code(503).send({ error: "unavailable" });
+    const allowed = heldSaleQuota.take(userId);
+    if (allowed !== "ok") return reply.code(429).send({ error: allowed });
+    const assetId = HELD_ASSETS[body.data.asset].assetId;
+    try {
+      const amount = (await trading.held(userId)).get(assetId) ?? 0n;
+      if (amount === 0n) {
+        heldSaleQuota.giveBack(userId);
+        return { status: "refused", code: "not_enough" };
+      }
+      const result = await trading.sellHeld(userId, assetId, amount);
+      req.log.info({ userId, asset: body.data.asset, status: result.status, ...("code" in result ? { code: result.code } : {}) }, "held_sold");
+      if (result.status === "done" || result.status === "pending") deps.dashboard?.forget(userId);
+      if (result.status === "done") return { status: "done", received: fromAtomic(result.received.toString(), 24) };
+      return "code" in result ? { status: result.status, code: result.code } : { status: result.status };
+    } catch (error) {
+      req.log.error({ userId, err: error instanceof Error ? error.message : "unknown" }, "held_sale_failed");
+      return reply.code(502).send({ error: "agent_unavailable" });
+    }
   });
 
   // A check of the hardware the chat's model runs on. Public facts only; nothing about the user is
