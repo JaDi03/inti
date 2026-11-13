@@ -26,8 +26,8 @@ const ACTIVATE_FIRST = "Before I can act for you, set up your spending limits. I
 /** First messages offered on an empty chat. None of them moves money: a purchase is always typed by the user. */
 const SUGGESTIONS = ["What can you buy for me?", "How much does $5 of bitcoin cost right now?", "How much can you spend today?"];
 
-/** After a reply the dashboard reads again at these delays, for trades that settle a little later. */
-const SETTLE_READS_MS = [20_000, 60_000];
+/** After a reply the dashboard reads again at this delay, for trades that settle a little later. */
+const SETTLE_READS_MS = [30_000];
 
 /** The user's Privy NEAR wallet address (implicit account id), if any. */
 function nearAddress(accounts: readonly unknown[]): string | null {
@@ -87,6 +87,12 @@ export function App() {
   const [steps, setSteps] = useState<string[]>([]);
   // Bumped after each reply so the dashboard reads balances again (a trade may still be settling).
   const [refreshKey, setRefreshKey] = useState(0);
+  const settleReads = useRef<number[]>([]);
+  const clearSettleReads = () => {
+    for (const id of settleReads.current) window.clearTimeout(id);
+    settleReads.current = [];
+  };
+  useEffect(() => () => clearSettleReads(), []);
   const [sound, setSound] = useState(soundOn);
   useEffect(() => unlockSoundOnFirstTouch(), []);
   const creating = useRef(false);
@@ -166,9 +172,11 @@ export function App() {
     } finally {
       setThinking(false);
       setSteps([]);
-      // Now, and twice more while a trade may still be settling: each read can play the cash sound.
+      // Now, and once more while a trade may still be settling: each read can play the cash sound.
+      // A newer reply replaces the pending read, so quick replies never pile reads up.
+      clearSettleReads();
       setRefreshKey((k) => k + 1);
-      for (const ms of SETTLE_READS_MS) setTimeout(() => setRefreshKey((k) => k + 1), ms);
+      settleReads.current = SETTLE_READS_MS.map((ms) => window.setTimeout(() => setRefreshKey((k) => k + 1), ms));
       // An order may have spent NEAR for orders or brought an asset: the wallet card reads them again.
       void limits.refresh();
     }
@@ -246,7 +254,15 @@ export function App() {
             {sound ? <Volume2 /> : <VolumeX />}
           </Button>
           <ThemeToggle />
-          <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => void logout()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Sign out"
+            onClick={() => {
+              clearSettleReads();
+              void logout();
+            }}
+          >
             <LogOut />
           </Button>
         </div>
