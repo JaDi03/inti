@@ -1,0 +1,46 @@
+name: Contract
+
+# Runs only when the contract or this workflow changes.
+on:
+  push:
+    branches: [main]
+    paths: ["contracts/**", ".github/workflows/contract.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["contracts/**", ".github/workflows/contract.yml"]
+
+# A new push to the same branch stops the run it replaces.
+concurrency:
+  group: contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/spending-limits
+    env:
+      PROPTEST_CASES: "64"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt && rustup default 1.99.1
+      # Keeps compiled dependencies between runs.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: contracts/spending-limits
+      - run: cargo fmt --check
+      - run: |
+          for crate in tests/mocks/mock-ft tests/sandbox verification; do
+            cargo fmt --check --manifest-path "$crate/Cargo.toml"
+          done
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      # A prebuilt cargo-audit instead of compiling it on every run.
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-audit@0.22.2
+      # RUSTSEC-2026-0387 (crypto-bigint) only reaches the unit-test runtime that near-sdk's
+      # `unit-testing` feature pulls in; `cargo tree -e normal --target wasm32-unknown-unknown`
+      # shows it is not part of the contract wasm.
+      - run: cargo audit --ignore RUSTSEC-2026-0387
