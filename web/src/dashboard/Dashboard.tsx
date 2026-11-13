@@ -293,9 +293,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {part !== "wallet" && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
-          <p className="mb-2.5 px-1 text-xs text-muted-foreground">
-            These stay in your agent&apos;s private balance on NEAR Intents, under the rules you signed. Ask Inti to sell them: the NEAR comes to your wallet.
-          </p>
+          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
           <ul className="grid auto-rows-fr grid-cols-2 gap-3">
             {HELD_KEYS.map((key, i) => {
               const a = HELD_ASSETS[key];
