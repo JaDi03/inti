@@ -39,6 +39,33 @@ export interface DashboardData {
   agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null } | null;
 }
 
+export type HeldSale =
+  | { status: "done"; received: string }
+  | { status: "pending" | "refused" | "kept"; code?: string }
+  /** The request itself failed: signed out, too many today, or the server could not be reached. */
+  | { status: "error"; code: string };
+
+/** Sells all of one asset the agent keeps, for NEAR sent to the wallet. It can take a minute or two. */
+export async function sellHeld(accessToken: string, asset: HeldKey): Promise<HeldSale> {
+  if (!API_URL) return { status: "error", code: "unavailable" };
+  try {
+    const res = await fetch(new URL("/api/held/sell", API_URL), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ asset }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { status?: string; received?: string; code?: string; error?: string };
+    if (!res.ok) return { status: "error", code: body.error ?? "unavailable" };
+    if (body.status === "done" && typeof body.received === "string") return { status: "done", received: body.received };
+    if (body.status === "pending" || body.status === "refused" || body.status === "kept") return { status: body.status, ...(body.code ? { code: body.code } : {}) };
+    return { status: "error", code: "unavailable" };
+  } catch {
+    // A timeout may still settle on the server: the dashboard shows the result on its next read.
+    return { status: "pending" };
+  }
+}
+
 /** Today's prices for saving limits; they come with the dashboard, which the server keeps for a few seconds. */
 export async function fetchPrices(getAccessToken: () => Promise<string | null>): Promise<DashboardData["prices"]> {
   const token = await getAccessToken();
