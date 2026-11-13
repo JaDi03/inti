@@ -9,6 +9,8 @@ const SPRING = "cubic-bezier(0.175, 0.885, 0.32, 1.275)";
 const SPRING_TRANSITION = `max-width 0.4s ${SPRING}, height 0.4s ${SPRING}`;
 const SMOOTH_HEIGHT_TRANSITION = `max-width 0.4s ${SPRING}, height 0.15s ease-out`;
 const BANDS = 5;
+/** How much the level bars amplify the voice. */
+const LEVEL_GAIN = 3;
 
 // Web Speech API: not in TypeScript's DOM lib, and Chromium ships it prefixed.
 type SpeechAlternative = { transcript: string };
@@ -23,6 +25,8 @@ type SpeechRecognizer = {
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  /** Ends at once and delivers no further results. */
+  abort: () => void;
 };
 type SpeechRecognizerCtor = new () => SpeechRecognizer;
 
@@ -150,7 +154,8 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
       const bands = Array.from({ length: BANDS }, (_, i) => {
         let sum = 0;
         for (let j = 0; j < step; j++) sum += data[i * step + j] ?? 0;
-        return sum / step / 255;
+        // A normal speaking voice fills only a small part of the range: amplified so the bars move with it.
+        return Math.min(1, (sum / step / 255) * LEVEL_GAIN);
       });
       setAudioData(bands);
       rafRef.current = requestAnimationFrame(meter);
@@ -242,22 +247,33 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
 
   const handleSubmit = () => {
     if (!hasValue || disabled) return;
-    if (isRecording) stopRecording();
+    if (isRecording) {
+      // Cut dictation off before sending: a result still in flight would write the sent message
+      // back into the box, where one more tap would send the same order again.
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.abort();
+        recognitionRef.current = null;
+      }
+      stopRecording();
+    }
     setIsSmoothResize(false);
     onSubmit?.(value.trim());
     handleValueChange("");
     setExpanded(false);
   };
 
-  const showStop = isRecording;
+  // While dictating, the main button sends (and stops dictation) in one tap; a stop button sits to its left.
   const showMic = !hasValue && !isRecording && canDictate;
-  const showArrow = !showStop && !showMic;
+  const showArrow = !showMic;
 
   const onActionButtonClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (isRecording) stopRecording();
-    else if (hasValue) handleSubmit();
-    else if (canDictate) void startRecording();
+    if (hasValue) handleSubmit();
+    else if (!isRecording && canDictate) void startRecording();
   };
 
   return (
@@ -351,10 +367,10 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
 
         {micError && expanded && <p className="absolute bottom-3 left-4 z-[10] text-xs text-destructive">{micError}</p>}
 
-        {/* Level bars, left of the stop button while dictating. */}
+        {/* Level bars, left of the stop and send buttons while dictating. */}
         <div
           className={cn(
-            "absolute right-12 bottom-2.5 z-[10] flex h-8 items-center justify-end gap-[3px] transition-all duration-400",
+            "absolute right-[5.25rem] bottom-2.5 z-[10] flex h-8 items-center justify-end gap-[3px] transition-all duration-400",
             isRecording ? "w-16 translate-x-0 opacity-100" : "pointer-events-none w-0 translate-x-4 opacity-0",
           )}
         >
@@ -367,6 +383,26 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
           ))}
         </div>
 
+        {/* Stops dictating and keeps the text, to read or edit it before sending. */}
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={stopRecording}
+          aria-label="Stop dictation"
+          title="Stop dictation"
+          tabIndex={isRecording ? 0 : -1}
+          style={{ borderRadius: 9999 }}
+          className={cn(
+            "absolute right-12 bottom-2.5 z-[10] flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-all duration-300 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+            isRecording ? "scale-100 opacity-100" : "pointer-events-none scale-50 opacity-0",
+          )}
+        >
+          <StopIcon />
+        </button>
+
         <button
           type="button"
           onMouseDown={(e) => {
@@ -375,7 +411,7 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
           }}
           onClick={onActionButtonClick}
           disabled={showArrow && (!hasValue || disabled)}
-          aria-label={showStop ? "Stop dictation" : showMic ? "Dictate with the microphone" : "Send"}
+          aria-label={showMic ? "Dictate with the microphone" : "Send"}
           style={{ borderRadius: 9999 }}
           className="absolute right-2.5 bottom-2.5 z-[10] flex h-8 w-8 items-center justify-center bg-primary text-primary-foreground transition-all duration-300 outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
         >
@@ -385,9 +421,6 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
             </span>
             <span className={cn("absolute inset-0 flex items-center justify-center transition-all duration-300", showMic ? "scale-100 rotate-0 opacity-100" : "pointer-events-none scale-50 -rotate-45 opacity-0")}>
               <MicIcon />
-            </span>
-            <span className={cn("absolute inset-0 flex items-center justify-center transition-all duration-300", showStop ? "scale-100 rotate-0 opacity-100" : "pointer-events-none scale-50 rotate-45 opacity-0")}>
-              <StopIcon />
             </span>
           </span>
         </button>
