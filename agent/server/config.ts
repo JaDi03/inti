@@ -51,6 +51,10 @@ export const LIMITS = {
   proofsPerUserPerDay: 300,
   /** Reply signature checks per day for everyone. */
   proofsPerDayTotal: 5000,
+  /** Earlier exchanges (a message and its reply) the model sees, so it can follow up. */
+  contextExchanges: 10,
+  /** Longest earlier reply kept for that, in characters. */
+  contextReplyChars: 2000,
   /** Sales from the dashboard of what the agent keeps, per user per day; each one trades on the Agent API. */
   heldSalesPerUserPerDay: 20,
   /** Those sales per day for everyone. */

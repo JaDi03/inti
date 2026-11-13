@@ -55,6 +55,8 @@ export interface AppDeps {
 interface UserState {
   portfolio: SimulatedPortfolio;
   spend: SpendState;
+  /** This user's latest exchanges, oldest first, so the model can follow up on them. Kept in memory only. */
+  recent: { user: string; reply: string }[];
 }
 
 const chatBody = z.strictObject({ message: z.string().trim().min(1).max(LIMITS.messageChars) });
@@ -568,7 +570,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
           const oldest = users.keys().next().value;
           if (oldest !== undefined) users.delete(oldest);
         }
-        state = { portfolio: deps.newPortfolio(tokens), spend: emptySpendState() };
+        state = { portfolio: deps.newPortfolio(tokens), spend: emptySpendState(), recent: [] };
       }
       users.delete(userId);
       users.set(userId, state);
@@ -582,7 +584,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         spend: state.spend,
         mode: "execute",
         ...(tools ? { tools } : {}),
+        earlier: state.recent,
       });
+      // Only a finished reply joins the chat's memory, cut to a bounded size.
+      if (result.report !== "") {
+        state.recent = [...state.recent, { user: body.data.message, reply: result.report.slice(0, LIMITS.contextReplyChars) }].slice(-LIMITS.contextExchanges);
+      }
       for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
       // A real trade changes what the agent holds, so the next dashboard read shows it at once.
       if (tools && result.events.some((e) => e.type === "swap_executed")) deps.dashboard?.forget(userId);
