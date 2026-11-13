@@ -25,6 +25,8 @@ type SpeechRecognizer = {
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  /** Ends at once and delivers no further results. */
+  abort: () => void;
 };
 type SpeechRecognizerCtor = new () => SpeechRecognizer;
 
@@ -245,7 +247,19 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
 
   const handleSubmit = () => {
     if (!hasValue || disabled) return;
-    if (isRecording) stopRecording();
+    if (isRecording) {
+      // Cut dictation off before sending: a result still in flight would write the sent message
+      // back into the box, where one more tap would send the same order again.
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.abort();
+        recognitionRef.current = null;
+      }
+      stopRecording();
+    }
     setIsSmoothResize(false);
     onSubmit?.(value.trim());
     handleValueChange("");
