@@ -152,6 +152,8 @@ export function App() {
       addMessage("inti", error instanceof AgentError ? error.message : "Something went wrong. Try again in a minute.");
     } finally {
       setThinking(false);
+      // An order may have spent NEAR for orders or brought an asset: the wallet card reads them again.
+      void limits.refresh();
     }
   };
 

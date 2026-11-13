@@ -1,6 +1,6 @@
 import { ArrowDownToLine, Check, ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, Pause, Play, Plus, Power, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
+import { ASSET_KEYS, ASSETS, RETIRED_ASSETS, type AssetKey, type RetiredKey } from "../../../agent/policy/assets";
 import { fromAtomic } from "../../../agent/policy/units";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -56,6 +56,8 @@ const nearText = (atomic: bigint) => display(atomic, NEAR_DECIMALS);
 export interface DashboardState {
   data: DashboardData | null;
   assets: AssetRow[] | null;
+  /** What the wallet still holds of assets Inti no longer trades. */
+  retired: { key: RetiredKey; balance: bigint }[];
   loading: boolean;
   /** Reads everything again; `quiet` replaces the numbers in place without showing a spinner. */
   load: (quiet?: boolean) => Promise<void>;
@@ -99,6 +101,7 @@ function useDashboard(
 ): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
+  const [retired, setRetired] = useState<{ key: RetiredKey; balance: bigint }[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(
@@ -106,10 +109,15 @@ function useDashboard(
       if (!quiet) setLoading(true);
       try {
         const token = await getAccessToken();
-        const [server, rows] = await Promise.all([token ? fetchDashboard(token) : Promise.resolve(null), client.assets(address).catch(() => null)]);
+        const [server, rows, old] = await Promise.all([
+          token ? fetchDashboard(token) : Promise.resolve(null),
+          client.assets(address).catch(() => null),
+          client.retiredAssets(address).catch(() => null),
+        ]);
         // A failed read keeps what is already on screen instead of blanking it.
         if (server) setData(server);
         if (rows) setAssets(rows);
+        if (old) setRetired(old);
       } finally {
         if (!quiet) setLoading(false);
       }
@@ -126,7 +134,7 @@ function useDashboard(
     readOnce.current = true;
   }, [load, balances, grantSigned]);
 
-  return { data, assets, loading, load };
+  return { data, assets, retired, loading, load };
 }
 
 interface MoneyProps {
@@ -137,15 +145,17 @@ interface MoneyProps {
   state: DashboardState;
   /** Opens the Spending limits window (add NEAR, edit limits, pause or turn off Inti). */
   onManage: () => void;
+  /** Re-reads the account's own balances (NEAR, NEAR for orders), which the dashboard does not read. */
+  onChanged: () => void;
   /** The wallet card, the asset areas, or both. */
   part: "wallet" | "assets" | "both";
   className?: string;
 }
 
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
-export function MoneyPanel({ address, config, client, status, state, onManage, part, className }: MoneyProps) {
+export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, part, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
-  const { data, assets, loading, load } = state;
+  const { data, assets, retired, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
   const [receiving, setReceiving] = useState(false);
   const [busy, setBusy] = useState<AssetKey | null>(null);
@@ -168,8 +178,19 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
   const nearPrice = data?.prices.near ?? null;
   const inWallet = usd(fromAtomic(status.available.toString(), NEAR_DECIMALS), nearPrice);
   const forOrders = usd(fromAtomic(status.spendable.toString(), NEAR_DECIMALS), nearPrice);
+  // NEAR the network keeps aside for the Spending Limits contract: the owner's, but not spendable while it is installed.
+  const locked = usd(fromAtomic(status.setAside.toString(), NEAR_DECIMALS), nearPrice);
   const assetValues = (assets ?? []).map((r) => usd(fromAtomic(r.balance.toString(), DECIMALS[r.key]), data?.prices[r.key]) ?? 0);
-  const total = inWallet === null || forOrders === null ? null : [inWallet, forOrders, ...assetValues].reduce((a, b) => a + b, 0);
+  const retiredRows = retired.map((r) => {
+    const a = RETIRED_ASSETS[r.key];
+    const amount = fromAtomic(r.balance.toString(), a.decimals);
+    return { key: r.key, amount, symbol: a.symbol, value: usd(amount, data?.retiredPrices?.[r.key]) };
+  });
+  // The total matches what the wallet holds, so it counts the locked NEAR and assets no longer traded.
+  const total =
+    inWallet === null || forOrders === null || locked === null
+      ? null
+      : [inWallet, forOrders, locked, ...assetValues, ...retiredRows.map((r) => r.value ?? 0)].reduce((a, b) => a + b, 0);
   const show = (text: string) => (hidden ? HIDDEN : text);
 
   return (
@@ -184,7 +205,16 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
             <Button variant="ghost" size="icon-sm" aria-label={hidden ? "Show amounts" : "Hide amounts"} onClick={toggleHidden}>
               {hidden ? <EyeOff /> : <Eye />}
             </Button>
-            <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={loading} onClick={() => void load()}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Refresh"
+              disabled={loading}
+              onClick={() => {
+                onChanged();
+                void load();
+              }}
+            >
               <RefreshCw className={cn(loading && "animate-spin")} />
             </Button>
           </div>
@@ -195,6 +225,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, p
         <dl className="mt-4 flex flex-col gap-2 text-sm">
           <BalanceRow label="In your wallet" near={show(`${nearText(status.available)} NEAR`)} value={show(money(inWallet))} />
           <BalanceRow label="For orders" near={show(`${nearText(status.spendable)} NEAR`)} value={show(money(forOrders))} highlight />
+          <BalanceRow label="Locked by Spending Limits" near={show(`${nearText(status.setAside)} NEAR`)} value={show(money(locked))} />
+          {retiredRows.map((r) => (
+            <BalanceRow key={r.key} label={`${r.symbol} (no longer traded)`} near={show(`${r.amount} ${r.symbol}`)} value={show(money(r.value))} />
+          ))}
         </dl>
         <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
           <Button variant="outline" className="rounded-full" onClick={() => setReceiving(true)}>
@@ -595,7 +629,7 @@ export function PortfolioLayout({ address, config, client, status, getAccessToke
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
-  const money = { address, config, client, status, state, onManage };
+  const money = { address, config, client, status, state, onManage, onChanged };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>
