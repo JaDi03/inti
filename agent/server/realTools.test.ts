@@ -63,7 +63,7 @@ describe("realTools", () => {
     expect(view.money_for_orders_usd).toBe("0.35");
     expect(view.limits).toEqual({ per_order_usd: "1.06", per_day_usd: "3.55", left_today_usd: "2.00" });
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "zcash", enabled: true, price_usd: 956.27, in_wallet: "0.008", in_wallet_usd: "7.65" }));
-    expect(view.assets).toContainEqual(expect.objectContaining({ key: "stnear", enabled: false, kind: "staking" }));
+    expect(view.assets).toContainEqual(expect.objectContaining({ key: "bitcoin", enabled: false, kind: "crypto" }));
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "ethereum", symbol: "ETH", kind: "crypto" }));
     expect(view.assets).toContainEqual(expect.objectContaining({ key: "bitcoin", symbol: "BTC", kind: "crypto" }));
   });

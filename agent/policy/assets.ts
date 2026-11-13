@@ -10,10 +10,7 @@ export const ASSETS = {
   bitcoin: { name: "Bitcoin", symbol: "BTC", assetId: "nep141:nbtc.bridge.near", decimals: 8, kind: "crypto" },
   ethereum: { name: "Ether", symbol: "ETH", assetId: "nep141:eth.bridge.near", decimals: 18, kind: "crypto" },
   // Zcash keeps its own transfers private: it fits an agent that trades from a confidential balance.
-  zcash: { name: "Zcash", symbol: "ZEC", assetId: "nep141:zec.omft.near", decimals: 8, kind: "privacy" },
-  // Staked NEAR from Meta Pool: its value in NEAR grows with staking rewards.
-  stnear: { name: "Staked NEAR", symbol: "stNEAR", assetId: "nep141:meta-pool.near", decimals: 24, kind: "staking" },
-} as const;
+  zcash: { name: "Zcash", symbol: "ZEC", assetId: "nep141:zec.omft.near", decimals: 8, kind: "privacy" },} as const;
 
 export type AssetKey = keyof typeof ASSETS;
 export const ASSET_KEYS = Object.keys(ASSETS) as [AssetKey, ...AssetKey[]];

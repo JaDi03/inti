@@ -75,7 +75,7 @@ describe("dashboard", () => {
   it("reads only the signed-in user's own agent, and never returns the grant token", async () => {
     const { d, read } = setup({ "did:privy:alice": ALICE });
     const alice = await d("did:privy:alice");
-    expect(alice.prices).toMatchObject({ near: 3.58, zcash: 956.27, stnear: null });
+    expect(alice.prices).toMatchObject({ near: 3.58, zcash: 956.27, bitcoin: null });
     expect(alice.agent).toMatchObject({ account: ALICE.agentAccount, grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
     expect(JSON.stringify(alice)).not.toContain("ngt_secret");
     expect(await d("did:privy:bob")).toMatchObject({ agent: null });
