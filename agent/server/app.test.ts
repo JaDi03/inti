@@ -382,6 +382,14 @@ describe("GET /api/chat/proof/:id", () => {
     const plain = await app({ attest: () => Promise.resolve(ATTESTED), proveReply: () => Promise.reject(new Error("unused")) });
     expect((await chat(plain, alice, { message: "hi" })).json()).toMatchObject({ proofId: null });
   });
+
+  it("offers no proof for a run cut before the model answered, whose words the model never wrote", async () => {
+    // The model keeps asking for tools until the step limit, so the reply has no text of its own.
+    const endless = new ScriptedBrain(Array.from({ length: 50 }, (_, n) => () => ({ text: "", stop: "tool_use" as const, toolCalls: [{ id: `${n}`, name: "get_portfolio", input: {} }], audit: audit(n) })));
+    const server = await app({ brain: endless, attest: () => Promise.resolve(ATTESTED), proveReply: () => Promise.reject(new Error("unused")) });
+    const res = (await chat(server, `Bearer ${await token()}`, { message: "hi" })).json<{ stopReason: string; proofId: string | null }>();
+    expect(res).toMatchObject({ stopReason: "max_steps", proofId: null });
+  });
 });
 
 describe("the user's own agent", () => {

@@ -489,7 +489,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       const audits = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit] : []));
       const calls = audits.flatMap((a) => (a.requestHash && a.responseHash ? [{ responseId: a.responseId, requestHash: a.requestHash, responseHash: a.responseHash }] : []));
       const model = audits[0]?.model;
-      const proofId = deps.proveReply && model && calls.length > 0 && calls.length === audits.length ? proofs.remember(userId, model, calls) : null;
+      // Only a reply whose words came from the model can carry its signature: a run cut at max_steps has none.
+      const fromModel = result.stopReason !== "max_steps" && result.report !== "";
+      const proofId = deps.proveReply && fromModel && model && calls.length > 0 && calls.length === audits.length ? proofs.remember(userId, model, calls) : null;
       return {
         simulated: tools === null,
         report: result.report,
