@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PricedToken } from "../core/portfolio.js";
 import type { AgentAccounts, AgentLookup } from "./agents.js";
 import type { GrantRecord, GrantStore } from "./grants.js";
-import { FUNDING_ASSET, type AgentPort, type ChainPort } from "./orders.js";
+import { AgentApiRefusal, FUNDING_ASSET, type AgentPort, type ChainPort } from "./orders.js";
 import { trading } from "./trading.js";
 
 const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
@@ -14,10 +14,14 @@ const TOKENS: PricedToken[] = [
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.55 },
 ];
 
-function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean; tokens?: PricedToken[] } = {}) {
+function setup(
+  opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: number | null; spent?: Record<string, bigint>; spentFails?: boolean; tokens?: PricedToken[]; balancesFail?: boolean } = {},
+) {
   const calls: string[] = [];
   let release: () => void = () => undefined;
-  let credited = 0n;
+  // Funding lands on the agent's public balance; a shield moves it to the confidential one.
+  let publicBalance = 0n;
+  let confidential = 0n;
   const agents = { find: () => Promise.resolve(opts.agent ?? ACTIVE) } as unknown as AgentAccounts;
   const grants: GrantStore = { get: () => (opts.grant === undefined ? GRANT : opts.grant), put: () => Promise.resolve(), users: () => ["did:privy:alice"] };
   const chain: ChainPort = {
@@ -30,14 +34,20 @@ function setup(opts: { agent?: AgentLookup; grant?: GrantRecord | null; bound?: 
       // Holds the order open until the test lets it go; then the agent holds the funds.
       return new Promise((r) => {
         release = () => {
-          credited = 10n ** 24n;
+          publicBalance = 10n ** 24n;
           r();
         };
       });
     },
   };
   const agent = {
-    available: () => Promise.resolve(new Map([[FUNDING_ASSET, credited]])),
+    available: () => (opts.balancesFail ? Promise.reject(new AgentApiRefusal(401, "invalid_api_key")) : Promise.resolve(new Map([[FUNDING_ASSET, confidential]]))),
+    publicHeld: () => Promise.resolve(new Map([[FUNDING_ASSET, publicBalance]])),
+    shield: (_a: unknown, _asset: string, amount: bigint) => {
+      publicBalance -= amount;
+      confidential += amount;
+      return Promise.resolve("success");
+    },
     quote: () => Promise.resolve({ amountOut: 246n, minAmountOut: 243n, costUsd: "0.01", costPercent: "1.05", seconds: 12 }),
     swap: () => Promise.resolve("failed"),
     withdraw: () => Promise.resolve("success"),
@@ -75,6 +85,12 @@ describe("trading", () => {
     expect(s.calls).toEqual(["fund"]);
     s.release();
     expect(await first).toEqual({ status: "returned", code: "swap_failed" });
+  });
+
+  it("reports a sweep that failed, with the service's code, instead of hiding it", async () => {
+    expect(await setup({ balancesFail: true }).t.sweepAll(["did:privy:alice"])).toEqual([{ userId: "did:privy:alice", sent: [], stuck: [], error: "invalid_api_key" }]);
+    // Nothing held and nothing failed: nothing to report.
+    expect(await setup().t.sweepAll(["did:privy:alice"])).toEqual([]);
   });
 
   it("refuses limit prices outside the band around the market before funding", async () => {

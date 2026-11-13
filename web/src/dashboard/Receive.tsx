@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
  * injected into the page. Always dark on white: phone cameras need that contrast,
  * also in dark mode.
  */
-function QrCode({ value, size = 208, label }: { value: string; size?: number; label: string }) {
+export function QrCode({ value, size = 208, label }: { value: string; size?: number; label: string }) {
   const { path, modules } = useMemo(() => {
     const qr = encode(value, { ecc: "M", border: 2 });
     let d = "";

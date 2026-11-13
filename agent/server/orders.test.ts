@@ -47,9 +47,14 @@ function world(
     /** What a swap gives; by default the purchase rate of the buy tests. */
     out?: (amount: bigint) => bigint;
     withdraw?: Settled;
+    shield?: Settled;
+    /** Assets (by name) the Agent API cannot send from the confidential balance to the wallet. */
+    undeliverable?: string[];
   } = {},
 ) {
+  // The confidential balance trades; the public one only receives funding.
   const agentHeld = new Map<string, bigint>();
+  const agentPublic = new Map<string, bigint>();
   const log: string[] = [];
   const minOuts: bigint[] = [];
   const chain: ChainPort = {
@@ -61,12 +66,22 @@ function world(
       if (opts.fundFails) return Promise.reject(new Error("over the daily limit"));
       log.push(`fund ${token === "wrap.near" ? "" : `${NAME[`nep141:${token}`]} `}${amount}`);
       const asset = `nep141:${token}`;
-      if (opts.credit !== false) agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) + amount);
+      if (opts.credit !== false) agentPublic.set(asset, (agentPublic.get(asset) ?? 0n) + amount);
       return Promise.resolve();
     },
   };
   const agent: AgentPort = {
     available: () => Promise.resolve(new Map(agentHeld)),
+    publicHeld: () => Promise.resolve(new Map(agentPublic)),
+    shield: (_a, asset, amount) => {
+      log.push(`shield ${amount}`);
+      const outcome = opts.shield ?? "success";
+      if (outcome === "success") {
+        agentPublic.set(asset, (agentPublic.get(asset) ?? 0n) - amount);
+        agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) + amount);
+      }
+      return Promise.resolve(outcome);
+    },
     quote: (_id, from, to) => {
       if (opts.noRoute?.includes(`${NAME[from]}>${NAME[to]}`)) return Promise.resolve(null);
       const q = opts.quote === undefined ? { amountOut: 250n, minAmountOut: 240n } : opts.quote;
@@ -82,10 +97,12 @@ function world(
       }
       return Promise.resolve(outcome);
     },
-    withdraw: (_a, asset, amount) => {
-      log.push(`withdraw ${NAME[asset] ?? asset} ${amount}`);
+    withdraw: (_a, asset, amount, from = "confidential") => {
+      log.push(`withdraw ${from === "public" ? "public " : ""}${NAME[asset] ?? asset} ${amount}`);
+      if (from === "confidential" && opts.undeliverable?.includes(NAME[asset] ?? asset)) return Promise.resolve("undeliverable");
       if ((opts.withdraw ?? "success") !== "success") return Promise.resolve(opts.withdraw ?? "pending");
-      agentHeld.set(asset, (agentHeld.get(asset) ?? 0n) - amount);
+      const balance = from === "public" ? agentPublic : agentHeld;
+      balance.set(asset, (balance.get(asset) ?? 0n) - amount);
       return Promise.resolve("success");
     },
     previewLimit: () => Promise.resolve(opts.preview ?? { spend: 275n * 10n ** 21n }),
@@ -98,19 +115,32 @@ function world(
     openLimitOrders: () => Promise.resolve(opts.openOrders ?? 0),
     signedPriceBound: () => Promise.resolve(opts.bound === undefined ? 300 : opts.bound),
   };
-  return { chain, agent, agentHeld, log, minOuts };
+  return { chain, agent, agentHeld, agentPublic, log, minOuts };
 }
 
 const noWait = () => Promise.resolve();
 const ORDER = { buyAsset: GOLD, amount: 3n * 10n ** 23n };
 
 describe("buy", () => {
-  it("funds the agent with exactly the order, buys, sends the gold to the wallet and leaves the agent empty", async () => {
+  it("funds the agent with exactly the order, shields it, buys, sends the gold to the wallet and leaves the agent empty", async () => {
     const w = world();
     const result = await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait);
     expect(result).toEqual({ status: "done", spent: ORDER.amount, received: 300n, asset: GOLD });
-    expect(w.log).toEqual([`fund ${ORDER.amount}`, `swap ${ORDER.amount}`, "withdraw GOLD 300"]);
-    expect([...w.agentHeld.values()].every((v) => v === 0n)).toBe(true);
+    expect(w.log).toEqual([`fund ${ORDER.amount}`, `shield ${ORDER.amount}`, `swap ${ORDER.amount}`, "withdraw GOLD 300"]);
+    expect([...w.agentHeld.values(), ...w.agentPublic.values()].every((v) => v === 0n)).toBe(true);
+  });
+
+  it("sends the money straight back from the public balance when it cannot be shielded", async () => {
+    const w = world({ shield: "failed" });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "shield_failed" });
+    expect(w.log).toEqual([`fund ${ORDER.amount}`, `shield ${ORDER.amount}`, `withdraw public wNEAR ${ORDER.amount}`]);
+    expect(w.agentPublic.get(FUNDING_ASSET)).toBe(0n);
+  });
+
+  it("leaves a slow shield to the sweep and trades nothing", async () => {
+    const w = world({ shield: "pending" });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    expect(w.log.some((l) => l.startsWith("swap"))).toBe(false);
   });
 
   it("refuses before moving anything when the wallet cannot hold the token", async () => {
@@ -141,6 +171,23 @@ describe("buy", () => {
     const failed = world({ swap: "failed" });
     expect(await buy(failed.chain, failed.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "swap_failed" });
     expect(failed.log.at(-1)).toBe(`withdraw wNEAR ${ORDER.amount}`);
+  });
+
+  it("sends NEAR home instead when the bought asset cannot leave the agent, and says nothing was bought", async () => {
+    const w = world({ out: (amount) => amount * 2n, undeliverable: ["GOLD"] });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "returned", code: "not_deliverable" });
+    const bought = ORDER.amount * 2n;
+    expect(w.log.slice(-3)).toEqual([`withdraw GOLD ${bought}`, `swap GOLD>wNEAR ${bought}`, `withdraw wNEAR ${bought * 2n}`]);
+    expect([...w.agentHeld.values()].every((v) => v === 0n)).toBe(true);
+  });
+
+  it("says the money came back only once it did, when the return itself is refused or slow", async () => {
+    const noRoute = world({ quote: null, withdraw: "failed" });
+    expect(await buy(noRoute.chain, noRoute.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    const failedSwap = world({ swap: "failed", withdraw: "failed" });
+    expect(await buy(failedSwap.chain, failedSwap.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    const slowReturn = world({ swap: "failed", withdraw: "pending" });
+    expect(await buy(slowReturn.chain, slowReturn.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
   });
 
   it("never accepts less than the price protection the user signed", async () => {
@@ -174,18 +221,18 @@ describe("exchange", () => {
   it("funds the agent with exactly the gold sold, swaps it for NEAR and sends the NEAR home", async () => {
     const w = world({ held: 1000n, out: double });
     expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "done", spent: 1000n, received: 2000n, asset: FUNDING_ASSET });
-    expect(w.log).toEqual(["fund GOLD 1000", "swap GOLD>wNEAR 1000", "withdraw wNEAR 2000"]);
-    expect([...w.agentHeld.values()].every((v) => v === 0n)).toBe(true);
+    expect(w.log).toEqual(["fund GOLD 1000", "shield 1000", "swap GOLD>wNEAR 1000", "withdraw wNEAR 2000"]);
+    expect([...w.agentHeld.values(), ...w.agentPublic.values()].every((v) => v === 0n)).toBe(true);
   });
 
   it("swaps one asset for another directly, or through NEAR on the agent when there is no direct route", async () => {
     const direct = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""] });
     expect(await exchange(direct.chain, direct.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toMatchObject({ status: "done", received: 2000n, asset: BTC });
-    expect(direct.log).toEqual(["fund GOLD 1000", "swap GOLD>BTC 1000", "withdraw BTC 2000"]);
+    expect(direct.log).toEqual(["fund GOLD 1000", "shield 1000", "swap GOLD>BTC 1000", "withdraw BTC 2000"]);
 
     const through = world({ held: 1000n, out: double, registered: [tokenContract(BTC) ?? ""], noRoute: ["GOLD>BTC"] });
     expect(await exchange(through.chain, through.agent, ACCOUNT, { ...SALE, to: BTC }, noWait)).toMatchObject({ status: "done", received: 4000n, asset: BTC });
-    expect(through.log).toEqual(["fund GOLD 1000", "swap GOLD>wNEAR 1000", "swap wNEAR>BTC 2000", "withdraw BTC 4000"]);
+    expect(through.log).toEqual(["fund GOLD 1000", "shield 1000", "swap GOLD>wNEAR 1000", "swap wNEAR>BTC 2000", "withdraw BTC 4000"]);
   });
 
   it("refuses before moving anything: more than the wallet holds, a result the wallet cannot hold, NEAR itself or the same asset", async () => {
@@ -220,6 +267,12 @@ describe("exchange", () => {
     expect(second.log.at(-1)).toBe("withdraw wNEAR 2000");
   });
 
+  it("sends back the asset sold, from the public balance, when it cannot be shielded", async () => {
+    const w = world({ held: 1000n, out: double, shield: "failed" });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "returned", code: "shield_failed", asset: GOLD });
+    expect(w.log.at(-1)).toBe("withdraw public GOLD 1000");
+  });
+
   it("says the asset came back only once it did, and leaves a slow return to the sweep", async () => {
     const slow = world({ held: 1000n, out: double, noRoute: ["GOLD>wNEAR"], withdraw: "pending" });
     expect(await exchange(slow.chain, slow.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "pending" });
@@ -237,8 +290,29 @@ describe("sweep", () => {
     const w = world({ registered: [] });
     w.agentHeld.set(FUNDING_ASSET, 5n);
     w.agentHeld.set(GOLD, 7n);
-    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual([FUNDING_ASSET]);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [FUNDING_ASSET], stuck: [] });
     expect(w.agentHeld.get(GOLD)).toBe(7n);
+  });
+
+  it("empties the public balance too, since nothing trades from it", async () => {
+    const w = world({ openOrders: 1 });
+    w.agentPublic.set(GOLD, 2826247n);
+    w.agentPublic.set(FUNDING_ASSET, 4n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (public)`, `${FUNDING_ASSET} (public)`], stuck: [] });
+    expect(w.log).toEqual(["withdraw public GOLD 2826247", "withdraw public wNEAR 4"]);
+  });
+
+  it("sells an asset that cannot leave the agent for NEAR and sends the NEAR home", async () => {
+    const w = world({ out: (amount) => amount * 3n, undeliverable: ["GOLD"] });
+    w.agentHeld.set(GOLD, 255n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [`${GOLD} (as NEAR)`], stuck: [] });
+    expect(w.log).toEqual(["withdraw GOLD 255", "swap GOLD>wNEAR 255", "withdraw wNEAR 765"]);
+  });
+
+  it("reports what it could not send instead of staying silent", async () => {
+    const w = world({ withdraw: "failed" });
+    w.agentPublic.set(GOLD, 9n);
+    expect(await sweep(w.chain, w.agent, ACCOUNT)).toEqual({ sent: [], stuck: [`${GOLD} (public)`] });
   });
 
   it("keeps the funding token while a limit order is open, and still sends what it bought", async () => {
@@ -257,7 +331,7 @@ describe("placeLimitBuy", () => {
   it("funds the agent with exactly what the order spends and leaves it resting", async () => {
     const w = world();
     expect(await placeLimitBuy(w.chain, w.agent, ACCOUNT, LIMIT, noWait)).toEqual({ status: "resting", orderId: "ord_1", spend: 275n * 10n ** 21n });
-    expect(w.log).toEqual([`fund ${275n * 10n ** 21n}`, "place 250@1100"]);
+    expect(w.log).toEqual([`fund ${275n * 10n ** 21n}`, `shield ${275n * 10n ** 21n}`, "place 250@1100"]);
   });
 
   it("refuses before moving anything when the Agent API would refuse the price, or the wallet cannot hold the token", async () => {
@@ -274,6 +348,11 @@ describe("placeLimitBuy", () => {
     const w = world({ place: "failed" });
     expect(await placeLimitBuy(w.chain, w.agent, ACCOUNT, LIMIT, noWait)).toEqual({ status: "returned", code: "placement_failed" });
     expect(w.log.at(-1)).toBe(`withdraw wNEAR ${275n * 10n ** 21n}`);
+  });
+
+  it("says the money came back only once it did, when the return after a failed placement is refused", async () => {
+    const w = world({ place: "failed", withdraw: "failed" });
+    expect(await placeLimitBuy(w.chain, w.agent, ACCOUNT, LIMIT, noWait)).toEqual({ status: "pending" });
   });
 });
 
@@ -342,6 +421,62 @@ describe("agentApiPort.quote", () => {
   it("is null when the service refuses or answers something unexpected", async () => {
     expect(await answering(400, { errors: [{ code: "unsupported_token" }] }).port.quote("agent_1", FUNDING_ASSET, GOLD, 1n)).toBeNull();
     expect(await answering(200, { quote: { amount_out: "-1", min_amount_out: "1" } }).port.quote("agent_1", FUNDING_ASSET, GOLD, 1n)).toBeNull();
+  });
+});
+
+describe("agentApiPort executions", () => {
+  /** A fetch that answers every call with `status` and `body`, records each body, or fails like a dropped connection. */
+  const answering = (status: number | "network", body: unknown = {}) => {
+    const asked: { url: string; body: unknown }[] = [];
+    const fetcher = ((url: URL, init?: RequestInit) => {
+      asked.push({ url: url.toString(), body: init?.body === undefined ? null : (JSON.parse(String(init.body)) as unknown) });
+      if (status === "network") return Promise.reject(new Error("socket hang up"));
+      return Promise.resolve(new Response(JSON.stringify(body), { status }));
+    }) as typeof fetch;
+    return { asked, port: agentApiPort("key", "https://api.example", fetcher) };
+  };
+
+  it("treats a refused request as failed, so the order can give the money back", async () => {
+    const refused = answering(400, { errors: [{ code: "public_balance_exit_only" }] });
+    expect(await refused.port.swap(ACCOUNT, GOLD, FUNDING_ASSET, 5n, 4n)).toBe("failed");
+    expect(await refused.port.withdraw(ACCOUNT, GOLD, 5n)).toBe("failed");
+    expect(await refused.port.shield(ACCOUNT, GOLD, 5n)).toBe("failed");
+    expect(await refused.port.placeLimit(ACCOUNT, { buyAsset: GOLD, quantity: 1n, price: "1", deadline: "2026-11-17T12:00:00Z" })).toEqual({ settled: "failed", orderId: null });
+  });
+
+  it("tells an asset that cannot be withdrawn at all from a passing failure", async () => {
+    const unsupported = answering(200, { correlation_id: "op_1", status: "FAILED", failure_code: "unsupported_token" });
+    expect(await unsupported.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("undeliverable");
+    const busy = answering(200, { correlation_id: "op_1", status: "FAILED", failure_code: "wallet_busy" });
+    expect(await busy.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("failed");
+    const refused = answering(400, { errors: [{ code: "unsupported_token" }] });
+    expect(await refused.port.withdraw(ACCOUNT, GOLD, 255n)).toBe("undeliverable");
+  });
+
+  it("leaves a server error or a dropped connection to the sweep, since it may still settle", async () => {
+    expect(await answering(503, { errors: [{ code: "unavailable" }] }).port.swap(ACCOUNT, GOLD, FUNDING_ASSET, 5n, 4n)).toBe("pending");
+    expect(await answering("network").port.withdraw(ACCOUNT, GOLD, 5n)).toBe("pending");
+  });
+
+  it("trades on the confidential balance and withdraws from the balance asked for", async () => {
+    const { asked, port } = answering(200, { correlation_id: "op_1", status: "SUCCESS" });
+    await port.swap(ACCOUNT, GOLD, FUNDING_ASSET, 5n, 4n);
+    await port.withdraw(ACCOUNT, GOLD, 5n);
+    await port.withdraw(ACCOUNT, GOLD, 6n, "public");
+    await port.shield(ACCOUNT, GOLD, 7n);
+    expect(asked).toEqual([
+      { url: "https://api.example/v1/agents/agent_1/swap", body: { origin_asset: GOLD, destination_asset: FUNDING_ASSET, amount: "5", min_amount_out: "4", confidential: true } },
+      { url: "https://api.example/v1/agents/agent_1/withdraw", body: { asset: GOLD, amount: "5", chain: "near", recipient: ACCOUNT.owner, confidential: true } },
+      { url: "https://api.example/v1/agents/agent_1/withdraw", body: { asset: GOLD, amount: "6", chain: "near", recipient: ACCOUNT.owner, confidential: false } },
+      { url: "https://api.example/v1/agents/agent_1/shield", body: { asset: GOLD, amount: "7" } },
+    ]);
+  });
+
+  it("reads each balance from its own source", async () => {
+    const { asked, port } = answering(200, { balances: [{ asset_id: GOLD, available_raw: "2826247" }] });
+    expect(await port.publicHeld("agent_1")).toEqual(new Map([[GOLD, 2826247n]]));
+    expect(await port.available("agent_1")).toEqual(new Map([[GOLD, 2826247n]]));
+    expect(asked.map((a) => a.url)).toEqual(["https://api.example/v1/agents/agent_1/balances?source=public", "https://api.example/v1/agents/agent_1/balances?source=confidential"]);
   });
 });
 

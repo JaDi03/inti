@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { createAgent } from "../agent/createAgent";
 import { fetchPrices } from "../dashboard/dashboardClient";
+import { QrCode } from "../dashboard/Receive";
 import { LimitsClient, type LimitsStatus } from "./client";
 import { useOwnerSigner } from "./ConfirmSigning";
 import { PasskeyProtection, useHasSecondFactor } from "./PasskeyProtection";
@@ -260,8 +261,12 @@ function AddFundsStep({ address, needs, has }: { address: string; needs: string;
       <p className="text-muted-foreground">
         Your account needs <strong className="text-foreground">{needs}</strong>. It has {has}.
       </p>
+      {/* Scanned from the phone wallet or exchange that sends the NEAR. */}
+      <div className="mt-3 flex justify-center">
+        <QrCode value={address} size={176} label="QR code of your NEAR address" />
+      </div>
       <div className="mt-3 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-        <code className="min-w-0 flex-1 truncate text-xs">{address}</code>
+        <code className="min-w-0 flex-1 break-all text-xs">{address}</code>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -271,6 +276,7 @@ function AddFundsStep({ address, needs, has }: { address: string; needs: string;
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">Send NEAR on the NEAR network only. Coins sent from other networks to this address can be lost.</p>
       <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" /> Waiting for funds. This step completes by itself.
       </p>

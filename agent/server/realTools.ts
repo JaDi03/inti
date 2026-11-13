@@ -81,6 +81,8 @@ const REASONS: Record<string, string> = {
   no_route: "there was no way to trade this asset right now; what was sent went back to the wallet",
   swap_failed: "the trade failed; what was sent went back to the wallet",
   placement_failed: "the order could not be placed; the money went back to the wallet",
+  not_deliverable: "the trading service cannot send this asset from the agent to the wallet right now, so nothing was bought: the agent sold it back for NEAR, which is in the wallet as plain NEAR",
+  shield_failed:"the money could not be moved into the agent's private balance, so nothing was traded; it went back to the wallet",
 };
 
 const pricesOf = async (tokens: () => Promise<PricedToken[]>) => {

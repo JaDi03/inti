@@ -21,7 +21,7 @@ export interface BuyOrder {
 export type BuyResult =
   | { status: "done"; spent: bigint; received: bigint; asset: string }
   | { status: "refused"; code: OrderRefusal }
-  | { status: "returned"; code: "no_route" | "swap_failed" }
+  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" | "not_deliverable" }
   | { status: "pending" };
 
 export type OrderRefusal = "asset_not_enabled" | "token_not_allowed" | "over_order_limit" | "over_daily_limit" | "funding_failed" | "not_enough";
@@ -37,7 +37,7 @@ export type ExchangeResult =
   | { status: "done"; spent: bigint; received: bigint; asset: string }
   | { status: "refused"; code: OrderRefusal }
   /** `asset` is what went back to the wallet: the asset sold, or NEAR when only the second step failed. */
-  | { status: "returned"; code: "no_route" | "swap_failed"; asset: string }
+  | { status: "returned"; code: "no_route" | "swap_failed" | "shield_failed" | "not_deliverable"; asset: string }
   | { status: "pending" };
 
 /** Reads and the one write Inti may do on the user's account, through its function-call key. */
@@ -55,14 +55,31 @@ export interface ChainPort {
 
 export type Settled = "success" | "failed" | "pending";
 
+/**
+ * A withdrawal's outcome. "undeliverable" means the Agent API cannot send this asset from the
+ * agent to the wallet at all (not a passing failure), so it has to reach the owner as NEAR.
+ */
+export type Withdrawn = Settled | "undeliverable";
+
+/**
+ * The agent's two balances. Every trade runs on the confidential one, which stays off the public
+ * NEAR chain. Spending Limits delivers to the public one, which can only be shielded or withdrawn.
+ */
+export type BalanceSource = "confidential" | "public";
+
 /** The agent's side, through the Agent API under the user's grant. */
 export interface AgentPort {
+  /** What the agent can trade with: its confidential balance, minus work not yet dispatched. */
   available(agentId: string): Promise<Map<string, bigint>>;
+  /** The agent's public balance, where funding arrives. */
+  publicHeld(agentId: string): Promise<Map<string, bigint>>;
+  /** Moves `amount` of `asset` from the public balance to the confidential one. */
+  shield(account: OrderAccount, asset: string, amount: bigint): Promise<Settled>;
   /** What a swap would give and cost right now, or null when there is no route. Moves nothing. */
   quote(agentId: string, from: string, to: string, amount: bigint): Promise<SwapQuote | null>;
   swap(account: OrderAccount, from: string, to: string, amount: bigint, minOut: bigint): Promise<Settled>;
-  /** Sends `amount` of `asset` from the agent to the owner's NEAR wallet. */
-  withdraw(account: OrderAccount, asset: string, amount: bigint): Promise<Settled>;
+  /** Sends `amount` of `asset` from one of the agent's balances (confidential by default) to the owner's NEAR wallet. */
+  withdraw(account: OrderAccount, asset: string, amount: bigint, from?: BalanceSource): Promise<Withdrawn>;
   /** What a limit order would spend, or why the Agent API would refuse it. Moves nothing. */
   previewLimit(agentId: string, order: LimitBuy): Promise<{ spend: bigint } | { refused: string }>;
   /** Places the order; on success it rests on the agent's balance until it fills, is cancelled or expires. */
@@ -98,7 +115,7 @@ export interface LimitBuy {
 export type LimitResult =
   | { status: "resting"; orderId: string | null; spend: bigint }
   | { status: "refused"; code: OrderRefusal | "order_refused"; detail?: string }
-  | { status: "returned"; code: "placement_failed" }
+  | { status: "returned"; code: "placement_failed" | "shield_failed" }
   | { status: "pending" };
 
 /**
@@ -171,30 +188,39 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const bound = await agent.signedPriceBound(account.agentId);
   const funded = await fund(chain, agent, account, FUNDING_TOKEN, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
+  if (funded === "returned") return { status: "returned", code: "shield_failed" };
   if (funded !== "funded") return { status: "refused", code: funded };
 
+  // Says "returned" only once the money is back; a refused or slow return is left to the sweep.
+  const giveBack = async (code: "no_route" | "swap_failed"): Promise<BuyResult> =>
+    (await agent.withdraw(account, FUNDING_ASSET, order.amount)) === "success" ? { status: "returned", code } : { status: "pending" };
   const quote = await agent.quote(account.agentId, FUNDING_ASSET, order.buyAsset, order.amount);
-  if (quote === null) {
-    await agent.withdraw(account, FUNDING_ASSET, order.amount);
-    return { status: "returned", code: "no_route" };
-  }
+  if (quote === null) return giveBack("no_route");
   const minOut = protectedMinOut(quote, bound);
   const held = (await agent.available(account.agentId)).get(order.buyAsset) ?? 0n;
   const swapped = await agent.swap(account, FUNDING_ASSET, order.buyAsset, order.amount, minOut);
   if (swapped === "pending") return { status: "pending" };
-  if (swapped === "failed") {
-    await agent.withdraw(account, FUNDING_ASSET, order.amount);
-    return { status: "returned", code: "swap_failed" };
-  }
+  if (swapped === "failed") return giveBack("swap_failed");
   const received = ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held;
   if (received <= 0n) return { status: "pending" };
   const sent = await agent.withdraw(account, order.buyAsset, received);
+  if (sent === "undeliverable") return (await homeAsNear(agent, account, order.buyAsset, received, bound)) ? { status: "returned", code: "not_deliverable" } : { status: "pending" };
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.buyAsset } : { status: "pending" };
 }
 
 /**
- * Checks the user's limits for `token` on `amount`, funds the agent with it and waits until the
- * agent holds it.
+ * For an asset the Agent API cannot send to the wallet: sells it for NEAR on the agent, within
+ * the user's price protection, and sends the NEAR home, which always can be. True once it arrived.
+ */
+async function homeAsNear(agent: AgentPort, account: OrderAccount, asset: string, amount: bigint, bound: number | null): Promise<boolean> {
+  const near = await swapOnAgent(agent, account, asset, FUNDING_ASSET, amount, bound);
+  return typeof near === "bigint" && (await agent.withdraw(account, FUNDING_ASSET, near)) === "success";
+}
+
+/**
+ * Checks the user's limits for `token` on `amount`, funds the agent with it, moves it to the
+ * confidential balance and waits until the agent can trade it. "returned" means the money could
+ * not be shielded and is back in the wallet.
  */
 async function fund(
   chain: ChainPort,
@@ -203,23 +229,34 @@ async function fund(
   token: string,
   amount: bigint,
   wait: (ms: number) => Promise<void>,
-): Promise<OrderRefusal | "pending" | "funded"> {
+): Promise<OrderRefusal | "pending" | "funded" | "returned"> {
   const asset = `nep141:${token}`;
   const limit = await chain.limit(account.owner, token);
   if (!limit) return "token_not_allowed";
   if (amount > limit.perOrder) return "over_order_limit";
   if ((await chain.spentLast24h(account.owner, token)) + amount > limit.perDay) return "over_daily_limit";
-  const before = (await agent.available(account.agentId)).get(asset) ?? 0n;
+  const before = (await agent.publicHeld(account.agentId)).get(asset) ?? 0n;
   try {
     await chain.fundAgent(account.owner, token, amount);
   } catch {
     return "funding_failed";
   }
+  // Spending Limits delivers to the public balance; a slow credit is left to the sweep.
+  if (!(await reaches(() => agent.publicHeld(account.agentId), asset, before + amount, wait))) return "pending";
+  const tradable = (await agent.available(account.agentId)).get(asset) ?? 0n;
+  const shielded = await agent.shield(account, asset, amount);
+  if (shielded === "pending") return "pending";
+  if (shielded === "failed") return (await agent.withdraw(account, asset, amount, "public")) === "success" ? "returned" : "pending";
+  return (await reaches(() => agent.available(account.agentId), asset, tradable + amount, wait)) ? "funded" : "pending";
+}
+
+/** Polls a balance until it holds at least `target` of `asset`, for a bounded time. */
+async function reaches(read: () => Promise<Map<string, bigint>>, asset: string, target: bigint, wait: (ms: number) => Promise<void>): Promise<boolean> {
   for (let waited = 0; waited <= CREDIT_WAIT_MS; waited += CREDIT_POLL_MS) {
-    if (((await agent.available(account.agentId)).get(asset) ?? 0n) - before >= amount) return "funded";
+    if (((await read()).get(asset) ?? 0n) >= target) return true;
     await wait(CREDIT_POLL_MS);
   }
-  return "pending";
+  return false;
 }
 
 /**
@@ -252,6 +289,7 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   const bound = await agent.signedPriceBound(account.agentId);
   const funded = await fund(chain, agent, account, fromToken, order.amount, wait);
   if (funded === "pending") return { status: "pending" };
+  if (funded === "returned") return { status: "returned", code: "shield_failed", asset: order.from };
   if (funded !== "funded") return { status: "refused", code: funded };
 
   // Says "returned" only once the money is back; a slow return is left to the sweep.
@@ -272,6 +310,9 @@ export async function exchange(chain: ChainPort, agent: AgentPort, account: Orde
   if (received === "pending") return { status: "pending" };
   if (typeof received !== "bigint") return giveBack(failure(received), order.from, order.amount);
   const sent = await agent.withdraw(account, order.to, received);
+  if (sent === "undeliverable") {
+    return (await homeAsNear(agent, account, order.to, received, bound)) ? { status: "returned", code: "not_deliverable", asset: FUNDING_ASSET } : { status: "pending" };
+  }
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.to } : { status: "pending" };
 }
 
@@ -287,31 +328,55 @@ export async function placeLimitBuy(chain: ChainPort, agent: AgentPort, account:
   if ("refused" in preview) return { status: "refused", code: "order_refused", detail: preview.refused };
   const funded = await fund(chain, agent, account, FUNDING_TOKEN, preview.spend, wait);
   if (funded === "pending") return { status: "pending" };
+  if (funded === "returned") return { status: "returned", code: "shield_failed" };
   if (funded !== "funded") return { status: "refused", code: funded };
   const placed = await agent.placeLimit(account, order);
   if (placed.settled === "success") return { status: "resting", orderId: placed.orderId, spend: preview.spend };
   if (placed.settled === "pending") return { status: "pending" };
-  await agent.withdraw(account, FUNDING_ASSET, preview.spend);
-  return { status: "returned", code: "placement_failed" };
+  // Says "returned" only once the money is back; a refused or slow return is left to the sweep.
+  return (await agent.withdraw(account, FUNDING_ASSET, preview.spend)) === "success" ? { status: "returned", code: "placement_failed" } : { status: "pending" };
 }
 
 /**
- * Sends everything the agent holds back to the user's wallet. While a limit order is open the
- * funding token stays, since its money may still be resting on the balance. Tokens the wallet
- * cannot hold yet stay until the user enables them.
+ * What one sweep sent home (`asset`, `asset (public)`, or `asset (as NEAR)` when it could only
+ * reach the wallet sold for NEAR), and what it tried to send but could not.
  */
-export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAccount): Promise<string[]> {
-  const sent: string[] = [];
-  const ordersOpen = (await agent.openLimitOrders(account.agentId)) > 0;
-  for (const [asset, free] of await agent.available(account.agentId)) {
-    if (free <= 0n) continue;
-    if (asset === FUNDING_ASSET && ordersOpen) continue;
+export interface SweepResult {
+  sent: string[];
+  stuck: string[];
+}
+
+/**
+ * Sends everything the agent holds back to the user's wallet, from both balances. While a limit
+ * order is open the funding token stays on the confidential balance, since its money may still be
+ * resting there. Tokens the wallet cannot hold yet stay until the user enables them. An asset the
+ * Agent API cannot send to the wallet is sold for NEAR within the user's price protection.
+ */
+export async function sweep(chain: ChainPort, agent: AgentPort, account: OrderAccount): Promise<SweepResult> {
+  const result: SweepResult = { sent: [], stuck: [] };
+  const bound = await agent.signedPriceBound(account.agentId);
+  const sendHome = async (asset: string, free: bigint, from: BalanceSource) => {
+    if (free <= 0n) return;
     const contract = tokenContract(asset);
     // NEAR arrives as plain NEAR and needs no registration.
     const deliverable = asset === FUNDING_ASSET || (contract !== null && (await chain.registered(contract, account.owner)));
-    if (deliverable && (await agent.withdraw(account, asset, free)) === "success") sent.push(asset);
+    if (!deliverable) return;
+    const label = from === "public" ? `${asset} (public)` : asset;
+    const sent = await agent.withdraw(account, asset, free, from);
+    if (sent === "undeliverable" && from === "confidential" && asset !== FUNDING_ASSET) {
+      ((await homeAsNear(agent, account, asset, free, bound)) ? result.sent : result.stuck).push(`${asset} (as NEAR)`);
+      return;
+    }
+    (sent === "success" ? result.sent : result.stuck).push(label);
+  };
+  const ordersOpen = (await agent.openLimitOrders(account.agentId)) > 0;
+  for (const [asset, free] of await agent.available(account.agentId)) {
+    if (asset === FUNDING_ASSET && ordersOpen) continue;
+    await sendHome(asset, free, "confidential");
   }
-  return sent;
+  // Nothing trades from the public balance; what is there only arrived and was never shielded.
+  for (const [asset, free] of await agent.publicHeld(account.agentId)) await sendHome(asset, free, "public");
+  return result;
 }
 
 /** A NEAR implicit account: the only kind Inti's users have. */
@@ -374,7 +439,9 @@ function settled(status: StatusResponse["status"]): Settled {
 const REQUEST_TIMEOUT_MS = 150_000;
 const atomic = z.string().regex(/^\d+$/);
 const balancesSchema = z.object({ balances: z.array(z.object({ asset_id: z.string(), available_raw: atomic })) });
-const statusSchema = z.object({ correlation_id: z.string(), status: z.string() });
+const statusSchema = z.object({ correlation_id: z.string(), status: z.string(), failure_code: z.string().nullish() });
+/** Failure codes that mean the asset cannot leave the agent this way at all, not a passing failure. */
+const UNDELIVERABLE = new Set(["unsupported_token", "unsupported_chain"]);
 const decimalString = z.string().regex(/^\d+(\.\d+)?$/);
 const dryQuoteSchema = z.object({
   quote: z.object({ amount_out: atomic, min_amount_out: atomic, time_estimate_seconds: z.number().nonnegative().nullish() }),
@@ -420,12 +487,32 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
     }
     return res.json();
   };
-  const run = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<Settled> => {
-    const started = statusSchema.parse(await call(path, body, { "X-Grant-Token": account.grantToken, "Idempotency-Key": createIdempotencyKey() }));
+  // A request the Agent API refused (4xx) never started, so the order can give the money back at
+  // once. A server error, a timeout or an odd answer may still settle: that is left to the sweep.
+  const notStarted = (error: unknown): Settled => (error instanceof AgentApiRefusal && error.status < 500 ? "failed" : "pending");
+  const followUp = async (correlationId: string) =>
+    placedSchema.parse(await call(`/v1/status?correlation_id=${encodeURIComponent(correlationId)}&wait_ms=${SETTLE_WAIT_MS}`));
+  /** Runs one execution and follows it; `code` is the refusal or failure code when there is one. */
+  const execute = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<{ settled: Settled; code: string | null }> => {
+    let started: z.infer<typeof statusSchema>;
+    try {
+      started = statusSchema.parse(await call(path, body, { "X-Grant-Token": account.grantToken, "Idempotency-Key": createIdempotencyKey() }));
+    } catch (error) {
+      return { settled: notStarted(error), code: error instanceof AgentApiRefusal ? error.code : null };
+    }
     const first = settled(started.status as StatusResponse["status"]);
-    if (first !== "pending") return first;
-    const query = `/v1/status?correlation_id=${encodeURIComponent(started.correlation_id)}&wait_ms=${SETTLE_WAIT_MS}`;
-    return settled(statusSchema.parse(await call(query)).status as StatusResponse["status"]);
+    if (first !== "pending") return { settled: first, code: started.failure_code ?? null };
+    try {
+      const followed = await followUp(started.correlation_id);
+      return { settled: settled(followed.status as StatusResponse["status"]), code: followed.failure_code ?? null };
+    } catch {
+      return { settled: "pending", code: null };
+    }
+  };
+  const run = async (account: OrderAccount, path: string, body: Record<string, unknown>): Promise<Settled> => (await execute(account, path, body)).settled;
+  const balances = async (agentId: string, source: BalanceSource) => {
+    const view = balancesSchema.parse(await call(`${agentPath(agentId, "balances")}?source=${source}`));
+    return new Map(view.balances.map((b) => [b.asset_id, BigInt(b.available_raw)] as const));
   };
   const limitBody = (order: LimitBuy) => ({
     base_asset: order.buyAsset,
@@ -437,10 +524,9 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
   });
   const agentPath = (agentId: string, route: string) => `/v1/agents/${encodeURIComponent(agentId)}/${route}`;
   return {
-    async available(agentId) {
-      const view = balancesSchema.parse(await call(`${agentPath(agentId, "balances")}?source=public`));
-      return new Map(view.balances.map((b) => [b.asset_id, BigInt(b.available_raw)] as const));
-    },
+    available: (agentId) => balances(agentId, "confidential"),
+    publicHeld: (agentId) => balances(agentId, "public"),
+    shield: (account, asset, amount) => run(account, agentPath(account.agentId, "shield"), { asset, amount: amount.toString() }),
     async quote(agentId, from, to, amount) {
       try {
         const dry = dryQuoteSchema.parse(await call(agentPath(agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), dry: true }));
@@ -456,9 +542,12 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
       }
     },
     swap: (account, from, to, amount, minOut) =>
-      run(account, agentPath(account.agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), min_amount_out: minOut.toString() }),
-    withdraw: (account, asset, amount) =>
-      run(account, agentPath(account.agentId, "withdraw"), { asset, amount: amount.toString(), chain: "near", recipient: account.owner }),
+      run(account, agentPath(account.agentId, "swap"), { origin_asset: from, destination_asset: to, amount: amount.toString(), min_amount_out: minOut.toString(), confidential: true }),
+    async withdraw(account, asset, amount, from = "confidential") {
+      const body = { asset, amount: amount.toString(), chain: "near", recipient: account.owner, confidential: from === "confidential" };
+      const done = await execute(account, agentPath(account.agentId, "withdraw"), body);
+      return done.settled === "failed" && done.code !== null && UNDELIVERABLE.has(done.code) ? "undeliverable" : done.settled;
+    },
     async previewLimit(agentId, order) {
       try {
         const preview = limitPreviewSchema.parse(await call(agentPath(agentId, "limit-orders"), { ...limitBody(order), dry: true }));
@@ -469,9 +558,18 @@ export function agentApiPort(apiKey: string, baseUrl: string, fetcher: typeof fe
     },
     async placeLimit(account, order) {
       const headers = { "X-Grant-Token": account.grantToken, "Idempotency-Key": createIdempotencyKey() };
-      let placed = placedSchema.parse(await call(agentPath(account.agentId, "limit-orders"), limitBody(order), headers));
+      let placed: z.infer<typeof placedSchema>;
+      try {
+        placed = placedSchema.parse(await call(agentPath(account.agentId, "limit-orders"), limitBody(order), headers));
+      } catch (error) {
+        return { settled: notStarted(error), orderId: null };
+      }
       if (settled(placed.status as StatusResponse["status"]) === "pending") {
-        placed = placedSchema.parse(await call(`/v1/status?correlation_id=${encodeURIComponent(placed.correlation_id)}&wait_ms=${SETTLE_WAIT_MS}`));
+        try {
+          placed = await followUp(placed.correlation_id);
+        } catch {
+          return { settled: "pending", orderId: null };
+        }
       }
       return { settled: settled(placed.status as StatusResponse["status"]), orderId: placed.details?.order_id ?? null };
     },
