@@ -11,6 +11,7 @@ const OWNER = "91".repeat(32);
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const TOKENS: PricedToken[] = [
   { asset_id: ZEC, symbol: "ZEC", decimals: 8, blockchain: "zec", price: 956.27 },
+  { asset_id: "nep141:sol.omft.near", symbol: "SOL", decimals: 9, blockchain: "sol", price: 83.43 },
   { asset_id: FUNDING_ASSET, symbol: "wNEAR", decimals: 24, blockchain: "near", price: 3.58 },
 ];
 // Shape of a real open order from GET /v1/agents/{id}/limit-orders.
@@ -76,6 +77,8 @@ describe("dashboard", () => {
     const { d, read } = setup({ "did:privy:alice": ALICE });
     const alice = await d("did:privy:alice");
     expect(alice.prices).toMatchObject({ near: 3.58, zcash: 956.27, stnear: null });
+    // An asset Inti no longer trades keeps its price, so what the owner still holds has a value.
+    expect(alice.retiredPrices).toEqual({ gold: null, euro: null, solana: 83.43 });
     expect(alice.agent).toMatchObject({ account: ALICE.agentAccount, grantUntil: "2027-02-09T00:03:07.187Z", policy: { sendsOnlyToOwner: true } });
     expect(JSON.stringify(alice)).not.toContain("ngt_secret");
     expect(await d("did:privy:bob")).toMatchObject({ agent: null });
