@@ -485,6 +485,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         ...(tools ? { tools } : {}),
       });
       for (const e of result.events) req.log.info({ userId, event: e.type, ...("code" in e ? { code: e.code } : {}) }, "agent_event");
+      // A real trade changes what the agent holds, so the next dashboard read shows it at once.
+      if (tools && result.events.some((e) => e.type === "swap_executed")) deps.dashboard?.forget(userId);
       // Every model call of this reply, with the hashes NEAR AI signs; the reply can be checked only if all have them.
       const audits = result.history.flatMap((t) => (t.role === "assistant" && t.audit ? [t.audit] : []));
       const calls = audits.flatMap((a) => (a.requestHash && a.responseHash ? [{ responseId: a.responseId, requestHash: a.requestHash, responseHash: a.responseHash }] : []));

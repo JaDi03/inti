@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PricedToken } from "../core/portfolio.js";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../policy/assets.js";
+import { HELD_ASSETS, HELD_KEYS, tradable, TRADABLE_KEYS, type HeldKey, type TradableKey } from "../policy/heldAssets.js";
 import { fromAtomic } from "../policy/units.js";
 import type { AgentAccounts } from "./agents.js";
 import { usableGrant, type GrantStore } from "./grants.js";
@@ -33,17 +34,28 @@ export interface OpenOrder {
   status: string;
 }
 
+/** How much of one asset the agent keeps for its owner, in whole units. */
+export interface HeldBalance {
+  asset: HeldKey;
+  amount: string;
+}
+
 export interface DashboardView {
   /** USD price of NEAR and of each asset Inti can buy, or null when there is no fresh price. */
-  prices: Record<"near" | AssetKey, number | null>;
-  /** `account` is the agent's own NEAR account on NEAR Intents, as the Agent API knows it. */
-  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null } | null;
+  prices: Record<"near" | TradableKey, number | null>;
+  /**
+   * `account` is the agent's own NEAR account on NEAR Intents, as the Agent API knows it. `held` is
+   * what the agent keeps for its owner (gold, the euro, SOL), or null when it cannot be read.
+   */
+  agent: { account: string; grantUntil: string | null; policy: PolicySummary | null; orders: OpenOrder[] | null; held: HeldBalance[] | null } | null;
 }
 
 /** What the dashboard reads from the Agent API about one agent. Reads only. */
 export interface AgentView {
   policy(agentId: string): Promise<z.infer<typeof policySchema>>;
   openOrders(agentId: string): Promise<z.infer<typeof ordersSchema>["data"]>;
+  /** The agent's confidential balance: atomic amounts by asset id. */
+  balances(agentId: string): Promise<Map<string, bigint>>;
 }
 
 const policySchema = z.object({
@@ -56,6 +68,7 @@ const policySchema = z.object({
   }),
   cooldowns: z.object({ policy_change_available_at: z.string().max(40).nullable() }).nullish(),
 });
+const balancesSchema = z.object({ balances: z.array(z.object({ asset_id: z.string().max(256), available_raw: z.string().regex(/^\d{1,78}$/) })) });
 const ordersSchema = z.object({
   data: z.array(
     z.object({
@@ -82,7 +95,17 @@ export function agentApiView(apiKey: string, baseUrl: string, fetcher: typeof fe
   return {
     policy: async (agentId) => policySchema.parse(await get(agentPath(agentId, "policy"))),
     openOrders: async (agentId) => ordersSchema.parse(await get(`${agentPath(agentId, "limit-orders")}?open=true&limit=20`)).data,
+    balances: async (agentId) =>
+      new Map(balancesSchema.parse(await get(`${agentPath(agentId, "balances")}?source=confidential`)).balances.map((b) => [b.asset_id, BigInt(b.available_raw)] as const)),
   };
+}
+
+/** What the agent keeps for its owner, in whole units, from its confidential balance. */
+export function heldView(balances: ReadonlyMap<string, bigint>): HeldBalance[] {
+  return HELD_KEYS.flatMap((key) => {
+    const amount = balances.get(HELD_ASSETS[key].assetId) ?? 0n;
+    return amount > 0n ? [{ asset: key, amount: fromAtomic(amount.toString(), HELD_ASSETS[key].decimals) }] : [];
+  });
 }
 
 export function summarizePolicy(view: z.infer<typeof policySchema>, owner: string, now: number): PolicySummary {
@@ -147,18 +170,23 @@ export function dashboard(deps: { agents: AgentAccounts; grants: GrantStore; vie
 
     const tokens = (await soft(deps.tokens)) ?? [];
     const priceOf = (assetId: string) => tokens.find((t) => t.asset_id === assetId)?.price ?? null;
-    const prices = { near: priceOf(FUNDING_ASSET), ...Object.fromEntries(ASSET_KEYS.map((k) => [k, priceOf(ASSETS[k].assetId)])) } as DashboardView["prices"];
+    const prices = { near: priceOf(FUNDING_ASSET), ...Object.fromEntries(TRADABLE_KEYS.map((k) => [k, priceOf(tradable(k).assetId)])) } as DashboardView["prices"];
 
     const agent = await soft(() => deps.agents.find(userId));
     let agentPart: DashboardView["agent"] = null;
     if (agent?.status === "active") {
       const grant = usableGrant(deps.grants.get(userId), now());
-      const [policy, orders] = await Promise.all([soft(() => deps.view.policy(agent.agentId)), soft(() => deps.view.openOrders(agent.agentId))]);
+      const [policy, orders, balances] = await Promise.all([
+        soft(() => deps.view.policy(agent.agentId)),
+        soft(() => deps.view.openOrders(agent.agentId)),
+        soft(() => deps.view.balances(agent.agentId)),
+      ]);
       agentPart = {
         account: agent.agentAccount,
         grantUntil: grant?.agentId === agent.agentId ? grant.expiresAt : null,
         policy: policy ? summarizePolicy(policy, agent.ownerAccount, now()) : null,
         orders: orders ? orders.map((o) => orderView(o, tokens)) : null,
+        held: balances ? heldView(balances) : null,
       };
     }
 

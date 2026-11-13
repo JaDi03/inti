@@ -2,6 +2,7 @@ import { priceToMicro } from "../core/money.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { ASSET_KEYS, ASSETS } from "../policy/assets.js";
 import type { AgentAccounts } from "./agents.js";
+import { buyHeld, heldBalances, sellHeld, type HeldBuyResult, type HeldSellResult } from "./held.js";
 import { usableGrant, type GrantStore } from "./grants.js";
 import {
   AgentApiRefusal,
@@ -143,6 +144,33 @@ export function trading(deps: TradingDeps) {
         if (over) return over;
         return buy(deps.chain, deps.agent, account, { buyAsset: asset, amount });
       }),
+
+    /** Spends `amount` (atomic wNEAR) on an asset the agent keeps for the user; it stays on the agent. */
+    buyHeld: (userId: string, asset: string, amount: bigint): Promise<HeldBuyResult | NotStarted> =>
+      exclusive(userId, async () => {
+        const account = await accountOf(userId);
+        if ("status" in account) return account;
+        const over = await checkRoom(account.owner, FUNDING_ASSET, amount);
+        if (over) return over;
+        return buyHeld(deps.chain, deps.agent, account, asset, amount);
+      }),
+
+    /**
+     * Sells `amount` (atomic) of an asset the agent keeps for NEAR, sent to the user's wallet. It
+     * spends nothing from the wallet, so the daily limit does not apply; the money only goes home.
+     */
+    sellHeld: (userId: string, asset: string, amount: bigint): Promise<HeldSellResult | NotStarted> =>
+      exclusive(userId, async () => {
+        const account = await accountOf(userId);
+        if ("status" in account) return account;
+        return sellHeld(deps.agent, account, asset, amount);
+      }),
+
+    /** What the user's agent keeps for them, atomic by asset id; empty when there is no agent. */
+    async held(userId: string): Promise<Map<string, bigint>> {
+      const agent = await deps.agents.find(userId);
+      return agent.status === "active" ? heldBalances(deps.agent, agent.agentId) : new Map();
+    },
 
     /**
      * Sells `amount` (atomic) of `from` from the user's wallet for `to`: NEAR, or another asset. The

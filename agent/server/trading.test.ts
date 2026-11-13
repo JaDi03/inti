@@ -117,6 +117,21 @@ describe("trading", () => {
     await fits;
   });
 
+  it("checks a gold purchase against the same daily limit and grant, and runs it one at a time with the sweep", async () => {
+    const GOLD = "nep141:eth-0x68749665ff8d2d112fa859aa293f07a622782f38.omft.near";
+    const s = setup({ spent: { [ZEC.slice("nep141:".length)]: 3_358_000n } });
+    expect(await s.t.buyHeld("did:privy:alice", GOLD, 10n ** 24n)).toEqual({ status: "refused", code: "over_daily_limit" });
+    expect(await setup({ grant: null }).t.buyHeld("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "no_grant" });
+    expect(await setup({ grant: null }).t.sellHeld("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "no_grant" });
+    expect(s.calls).toEqual([]);
+    const first = s.t.buyHeld("did:privy:alice", GOLD, 9n * 10n ** 23n);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await s.t.sellHeld("did:privy:alice", GOLD, 1n)).toEqual({ status: "refused", code: "busy" });
+    expect(await s.t.sweepAll(["did:privy:alice"])).toEqual([]);
+    s.release();
+    expect(await first).toEqual({ status: "returned", code: "swap_failed" });
+  });
+
   it("starts no order when the daily limit cannot be checked", async () => {
     const down = setup({ spentFails: true });
     expect(await down.t.buyNow("did:privy:alice", ZEC, 1n)).toEqual({ status: "refused", code: "limit_unchecked" });
