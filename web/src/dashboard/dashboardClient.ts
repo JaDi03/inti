@@ -60,9 +60,9 @@ export async function sellHeld(accessToken: string, asset: HeldKey): Promise<Hel
     if (body.status === "done" && typeof body.received === "string") return { status: "done", received: body.received };
     if (body.status === "pending" || body.status === "refused" || body.status === "kept") return { status: body.status, ...(body.code ? { code: body.code } : {}) };
     return { status: "error", code: "unavailable" };
-  } catch {
-    // A timeout may still settle on the server: the dashboard shows the result on its next read.
-    return { status: "pending" };
+  } catch (error) {
+    // Only a timeout may still settle on the server; any other failure never reached it.
+    return error instanceof DOMException && error.name === "TimeoutError" ? { status: "pending" } : { status: "error", code: "unreachable" };
   }
 }
 

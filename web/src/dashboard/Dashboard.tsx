@@ -45,6 +45,8 @@ const GROUPS: { title: string; keys: AssetKey[] }[] = [
 ];
 
 const NEAR_DECIMALS = 24;
+/** Shortest time between the tap that asks and the tap that sells. */
+const CONFIRM_DELAY_MS = 500;
 const HIDDEN = "••••";
 /**
  * What one order reserves from Inti's fee allowance: 100 TGas at NEAR's lowest gas price
@@ -186,13 +188,17 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
     return () => clearTimeout(timer);
   }, [confirming]);
 
+  // When the first tap asked; a second tap sooner than CONFIRM_DELAY_MS is a double click, not a yes.
+  const askedAt = useRef(0);
   const pressSell = async (key: HeldKey) => {
     if (selling) return;
     if (confirming !== key) {
       setSaleNote(null);
       setConfirming(key);
+      askedAt.current = Date.now();
       return;
     }
+    if (Date.now() - askedAt.current < CONFIRM_DELAY_MS) return;
     setConfirming(null);
     setSelling(key);
     try {
@@ -739,7 +745,7 @@ function saleMessage(sale: HeldSale, name: string): string {
     case "done":
       return `Sold. ${shortAmount(sale.received)} NEAR is in your wallet.`;
     case "pending":
-      return "The sale is still settling. The NEAR reaches your wallet on its own.";
+      return "The sale is still settling. Check back in a minute.";
     case "kept":
       return `The sale did not go through. Your ${name} is still with your agent.`;
     case "refused":
