@@ -13,6 +13,7 @@ import { PortfolioLayout, useHideAmounts } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
+import { VerifiedBadge } from "./verify/VerifiedBadge";
 import { logoSrc, ThemeToggle, useTheme } from "./theme";
 
 type Message = { id: number; from: "user" | "inti"; text: string; simulated?: boolean; orderWaiting?: boolean };
@@ -184,7 +185,10 @@ export function App() {
   return (
     <div className="flex h-svh flex-col">
       <header className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
+        <div className="flex items-center gap-2">
+          <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
+          {address && <VerifiedBadge getAccessToken={getAccessToken} />}
+        </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {address && (
             <div className="flex items-center rounded-full bg-muted pl-3 text-xs">
