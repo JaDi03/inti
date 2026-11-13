@@ -39,12 +39,6 @@ const HELD_TILE: Record<HeldKey, string> = {
   solana: "bg-purple-300",
 };
 
-/** Asset cards: compact on phones, roomier from 640 px wide. */
-const CARD = "flex min-h-28 flex-col justify-between rounded-2xl p-3 text-neutral-950 sm:min-h-36 sm:rounded-3xl sm:p-4";
-const CARD_ICON = "size-7 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70 sm:size-9";
-const CARD_VALUE = "text-xl font-semibold tabular-nums sm:text-2xl";
-const CARD_GRID = "grid auto-rows-fr grid-cols-2 gap-2 sm:gap-3";
-
 /** The areas of the dashboard, by what each asset is. */
 const GROUPS: { title: string; keys: AssetKey[] }[] = [
   { title: "Crypto", keys: ASSET_KEYS.filter((k) => ASSETS[k].kind === "crypto") },
@@ -295,7 +289,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {part !== "wallet" && GROUPS.map((group) => (
       <section key={group.title}>
         <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
-        <ul className={CARD_GRID}>
+        <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
             const row = assets?.find((r) => r.key === key);
@@ -304,10 +298,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
             // An odd tile out takes the whole row, so no area ends with a gap.
             const wide = group.keys.length % 2 === 1 && i === group.keys.length - 1;
             return (
-              <li key={key} className={cn(CARD, TILE[key], wide && "col-span-2")}>
+              <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", TILE[key], wide && "col-span-2")}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={CARD_ICON} />
+                    <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={cn("size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70")} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
                       <p className="text-xs opacity-70">{a.symbol}</p>
@@ -324,7 +318,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     <>
                       {/* What the owner holds, not the asset's price, which is the line below. */}
                       <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Your balance</p>
-                      <p className={CARD_VALUE}>{show(money(amount === null ? null : usd(amount, price)))}</p>
+                      <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                       <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                         {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
                       </p>
@@ -355,15 +349,15 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
           <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. NEAR from sales stays here and pays for the next purchases.</p>
-          <ul className={CARD_GRID}>
+          <ul className="grid auto-rows-fr grid-cols-2 gap-3">
             {(() => {
               // Null while the agent's balance cannot be read.
               const cash = data?.agent ? data.agent.cash : null;
               return (
-                <li className={cn(CARD, "bg-emerald-200")}>
+                <li className="flex min-h-36 flex-col justify-between rounded-3xl bg-emerald-200 p-4 text-neutral-950">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
-                      <img src="/tokens/near.png" alt="" width={36} height={36} className={CARD_ICON} />
+                      <img src="/tokens/near.png" alt="" width={36} height={36} className="size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold uppercase tracking-wide">NEAR</p>
                         <p className="text-xs opacity-70">Ready to spend</p>
@@ -385,7 +379,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     ) : (
                       <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
                     )}
-                    <p className={CARD_VALUE}>{show(money(cash === null ? null : usd(cash, nearPrice)))}</p>
+                    <p className="text-2xl font-semibold tabular-nums">{show(money(cash === null ? null : usd(cash, nearPrice)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (cash ?? "")}>
                       {show(`${cash === null ? "--" : shortAmount(cash)} NEAR`)}
                     </p>
@@ -403,10 +397,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
               // The NEAR card comes first, so an odd tile out is counted with it.
               const wide = (HELD_KEYS.length + 1) % 2 === 1 && i === HELD_KEYS.length - 1;
               return (
-                <li key={key} className={cn(CARD, HELD_TILE[key], wide && "col-span-2")}>
+                <li key={key} className={cn("flex min-h-36 flex-col justify-between rounded-3xl p-4 text-neutral-950", HELD_TILE[key], wide && "col-span-2")}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
-                      <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className={CARD_ICON} />
+                      <img src={`/tokens/${key}.png`} alt="" width={36} height={36} className="size-9 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/70" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold uppercase tracking-wide">{a.name}</p>
                         <p className="text-xs opacity-70">{a.symbol}</p>
@@ -429,7 +423,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     ) : (
                       <p className="text-[11px] font-semibold uppercase tracking-wide opacity-70">With your agent</p>
                     )}
-                    <p className={CARD_VALUE}>{show(money(amount === null ? null : usd(amount, price)))}</p>
+                    <p className="text-2xl font-semibold tabular-nums">{show(money(amount === null ? null : usd(amount, price)))}</p>
                     <p className="truncate text-xs tabular-nums opacity-70" title={hidden ? "" : (amount ?? "")}>
                       {show(`${amount === null ? "--" : shortAmount(amount)} ${a.symbol}`)}
                     </p>
