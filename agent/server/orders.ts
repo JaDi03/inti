@@ -200,9 +200,8 @@ export async function buy(chain: ChainPort, agent: AgentPort, account: OrderAcco
   const held = (await agent.available(account.agentId)).get(order.buyAsset) ?? 0n;
   const swapped = await agent.swap(account, FUNDING_ASSET, order.buyAsset, order.amount, minOut);
   if (swapped === "failed") return giveBack("swap_failed");
-  // A swap can still read as processing minutes after its result is in the balance: the balance decides.
-  const received = ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held;
-  if (received <= 0n) return { status: "pending" };
+  const received = ownResult(swapped, ((await agent.available(account.agentId)).get(order.buyAsset) ?? 0n) - held, quote, minOut);
+  if (received === "pending") return { status: "pending" };
   const sent = await agent.withdraw(account, order.buyAsset, received);
   if (sent === "undeliverable") return (await homeAsNear(agent, account, order.buyAsset, received, bound)) ? { status: "returned", code: "not_deliverable" } : { status: "pending" };
   return sent === "success" ? { status: "done", spent: order.amount, received, asset: order.buyAsset } : { status: "pending" };
@@ -267,12 +266,26 @@ async function swapOnAgent(agent: AgentPort, account: OrderAccount, from: string
   const quote = await agent.quote(account.agentId, from, to, amount);
   if (quote === null) return "no_route";
   const held = (await agent.available(account.agentId)).get(to) ?? 0n;
-  const swapped = await agent.swap(account, from, to, amount, protectedMinOut(quote, bound));
+  const minOut = protectedMinOut(quote, bound);
+  const swapped = await agent.swap(account, from, to, amount, minOut);
   if (swapped === "failed") return swapped;
-  // A swap can still read as processing minutes after its result is in the balance: the balance decides.
-  const received = ((await agent.available(account.agentId)).get(to) ?? 0n) - held;
-  return received > 0n ? received : "pending";
+  return ownResult(swapped, ((await agent.available(account.agentId)).get(to) ?? 0n) - held, quote, minOut);
 }
+
+/**
+ * What this swap brought, from the change in the agent's balance. A swap can still read as
+ * processing minutes after its result is in the balance; then only a change this swap's own quote
+ * explains counts, since another credit (a late order, a limit order filling or refunded) may land
+ * in the same balance meanwhile.
+ */
+function ownResult(swapped: Settled, change: bigint, quote: SwapQuote, minOut: bigint): bigint | "pending" {
+  if (change <= 0n) return "pending";
+  if (swapped === "success") return change;
+  return change >= minOut && change <= quote.amountOut + quote.amountOut / QUOTE_SLACK_DIVISOR ? change : "pending";
+}
+
+/** A result may beat its quote a little (1/20, 5%); far more is someone else's credit. */
+const QUOTE_SLACK_DIVISOR = 20n;
 
 /**
  * Sells `amount` of `from` from the user's wallet for `to` (NEAR or another asset): funds the agent

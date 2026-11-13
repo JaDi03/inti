@@ -215,9 +215,19 @@ describe("buy", () => {
   });
 
   it("delivers a swap still reported as processing once its result is in the balance", async () => {
-    const w = world({ swap: "pending", creditedWhileProcessing: true });
+    const w = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 300n, minAmountOut: 290n } });
     expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "done", spent: ORDER.amount, received: 300n, asset: GOLD });
     expect(w.log.at(-1)).toBe("withdraw GOLD 300");
+  });
+
+  it("takes no credit its own quote cannot explain as the result of a swap still processing", async () => {
+    // 300 arrives where the quote said 100: another credit, so the swap is left to the sweep.
+    const w = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 100n, minAmountOut: 95n } });
+    expect(await buy(w.chain, w.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
+    expect(w.log.some((l) => l.startsWith("withdraw"))).toBe(false);
+    // Less than the minimum this swap accepts is not its result either.
+    const short = world({ swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 1000n, minAmountOut: 990n }, bound: null });
+    expect(await buy(short.chain, short.agent, ACCOUNT, ORDER, noWait)).toEqual({ status: "pending" });
   });
 });
 
@@ -287,8 +297,15 @@ describe("exchange", () => {
   });
 
   it("delivers a sale still reported as processing once its result is in the balance", async () => {
-    const w = world({ held: 1000n, out: double, swap: "pending", creditedWhileProcessing: true });
+    const w = world({ held: 1000n, out: double, swap: "pending", creditedWhileProcessing: true, quote: { amountOut: 2000n, minAmountOut: 1950n } });
     expect(await exchange(w.chain, w.agent, ACCOUNT, SALE, noWait)).toEqual({ status: "done", spent: 1000n, received: 2000n, asset: FUNDING_ASSET });
+  });
+
+  it("does not chain the second step on a credit the first step's quote cannot explain", async () => {
+    // GOLD>BTC has no route; the first step to NEAR still processes and 2000 lands where 250 was quoted.
+    const w = world({ held: 1000n, out: double, noRoute: ["GOLD>BTC"], swap: "pending", creditedWhileProcessing: true, registered: [tokenContract(BTC) ?? ""] });
+    expect(await exchange(w.chain, w.agent, ACCOUNT, { from: GOLD, to: BTC, amount: 1000n }, noWait)).toEqual({ status: "pending" });
+    expect(w.log.filter((l) => l.startsWith("swap"))).toEqual(["swap GOLD>wNEAR 1000"]);
   });
 
   it("never accepts less than the price protection the user signed, on every step", async () => {
