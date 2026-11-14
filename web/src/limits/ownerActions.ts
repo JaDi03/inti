@@ -69,8 +69,18 @@ function atomicArg(value: unknown, method: string): bigint {
   return BigInt(value);
 }
 
+/**
+ * Whether an access key, as the chain shows it, has the shape of an Inti key: it may only call
+ * fund_agent on the account itself. Such a key can never move money anywhere but the owner's agent.
+ */
+export function isIntiShapedKey(permission: unknown, accountId: string): boolean {
+  if (typeof permission !== "object" || permission === null || !("FunctionCall" in permission)) return false;
+  const call = (permission as { FunctionCall: { receiver_id?: unknown; method_names?: unknown } }).FunctionCall;
+  return call.receiver_id === accountId && Array.isArray(call.method_names) && call.method_names.length === 1 && call.method_names[0] === "fund_agent";
+}
+
 /** One action on the user's own account, described in one or more lines; anything else is refused. */
-function describeOwnAccountAction(action: Action, config: LimitsConfig, accountId: string): string | string[] {
+function describeOwnAccountAction(action: Action, config: LimitsConfig, accountId: string, earlierIntiKeys: ReadonlySet<string>): string | string[] {
   const { token } = config;
   if (action.deployContract) {
     if (isEmptyContract(action.deployContract.code)) {
@@ -124,8 +134,11 @@ function describeOwnAccountAction(action: Action, config: LimitsConfig, accountI
     ];
   }
   if (action.deleteKey) {
-    if (action.deleteKey.publicKey.toString() !== config.intiPublicKey) refuse("the key to remove is not Inti's key.");
-    return "Turn off Inti's access to your account.";
+    const key = action.deleteKey.publicKey.toString();
+    if (key === config.intiPublicKey) return "Turn off Inti's access to your account.";
+    // An earlier Inti key, checked on chain by the signer: it may only call fund_agent on this account.
+    if (earlierIntiKeys.has(key)) return `Remove an earlier Inti key (${key.slice(0, 16)}...) from your account. It could only call fund_agent.`;
+    refuse("the key to remove is not Inti's key.");
   }
   refuse(`the action ${action.enum} is not one Inti uses.`);
 }
@@ -356,12 +369,13 @@ export function describeOwnerMessage(message: GrantMessage, accountId: string, p
 
 /**
  * Plain-language lines for a transaction the app may sign with the user's full-access
- * key, or a RefusedSigningError when any part of it is not an action Inti uses.
+ * key, or a RefusedSigningError when any part of it is not an action Inti uses. `earlierIntiKeys`
+ * are keys the signer read on chain and found to have Inti's shape (see isIntiShapedKey).
  */
-export function describeOwnerTransaction(tx: OwnerTransaction, config: LimitsConfig): string[] {
+export function describeOwnerTransaction(tx: OwnerTransaction, config: LimitsConfig, earlierIntiKeys: ReadonlySet<string> = new Set()): string[] {
   const accountId = tx.signerId;
   if (tx.actions.length === 0) refuse("the transaction is empty.");
-  if (tx.receiverId === accountId) return tx.actions.flatMap((action) => describeOwnAccountAction(action, config, accountId));
+  if (tx.receiverId === accountId) return tx.actions.flatMap((action) => describeOwnAccountAction(action, config, accountId, earlierIntiKeys));
   if (tx.receiverId === config.token.id) return tx.actions.map((action) => describeTokenAction(action, config, accountId));
   const asset = assetByContract(tx.receiverId);
   if (asset) return tx.actions.map((action) => describeAssetEnable(action, asset.name, accountId));

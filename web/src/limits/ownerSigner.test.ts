@@ -63,10 +63,21 @@ function clientSigningThrough(wallet: Wallet) {
     await sign(wallet, params.receiverId, params.actions);
     return { transaction: { hash: "tx" } } as never;
   });
+  vi.spyOn(Account.prototype, "getAccessKeyList").mockResolvedValue({ keys: [] } as never);
   const client = new LimitsClient(config);
   vi.spyOn(client.provider, "callFunction").mockResolvedValue({ min: "1250000000000000000000" } as never);
   return client;
 }
+
+/** The chain shows these keys on the account: each one answers with its permission. */
+function keysOnChain(keys: Record<string, unknown>) {
+  vi.spyOn(Account.prototype, "getAccessKeyList").mockResolvedValue({ keys: Object.entries(keys).map(([public_key, permission]) => ({ public_key, access_key: { nonce: 1, permission } })) } as never);
+  vi.spyOn(Account.prototype, "getAccessKey").mockImplementation((key) => {
+    const permission = keys[key.toString()];
+    return permission === undefined ? Promise.reject(new Error("no key")) : Promise.resolve({ nonce: 1, permission } as never);
+  });
+}
+const fundAgentOnly = (accountId: string) => ({ FunctionCall: { allowance: "1", receiver_id: accountId, method_names: ["fund_agent"] } });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -138,6 +149,37 @@ describe("signing with the user's account key", () => {
     const wallet = userWallet(true, false);
     const client = clientSigningThrough(wallet);
     await expect(client.setLimit(wallet.accountId, wallet.signer, { perOrder: 1n, perDay: 2n }, PRICES)).rejects.toThrow("protect your account");
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("pausing and resuming also remove an earlier Inti key that the chain shows", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    const earlier = KeyPair.fromRandom("ed25519").getPublicKey().toString();
+    keysOnChain({ [intiKey.toString()]: fundAgentOnly(wallet.accountId), [earlier]: fundAgentOnly(wallet.accountId), [wallet.publicKey.toString()]: "FullAccess" });
+    await client.disconnectInti(wallet.accountId, wallet.signer);
+    await client.reconnectInti(wallet.accountId, wallet.signer);
+    const removed = `Remove an earlier Inti key (${earlier.slice(0, 16)}...) from your account. It could only call fund_agent.`;
+    expect(wallet.shown[0]).toEqual(["Turn off Inti's access to your account.", removed]);
+    expect(wallet.shown[1]?.[0]).toBe(removed);
+    expect(wallet.shown[1]).toHaveLength(3);
+    expect(wallet.signed).toHaveLength(2);
+  });
+
+  const notInti: [string, (w: Wallet) => unknown][] = [
+    ["the user's own full-access key", () => "FullAccess"],
+    ["a key for another contract", () => ({ FunctionCall: { allowance: "1", receiver_id: "other.near", method_names: ["fund_agent"] } })],
+    ["a key with more methods", (w) => ({ FunctionCall: { allowance: "1", receiver_id: w.accountId, method_names: ["fund_agent", "set_limit"] } })],
+    ["a key with any method", (w) => ({ FunctionCall: { allowance: "1", receiver_id: w.accountId, method_names: [] } })],
+  ];
+
+  it.each(notInti)("refuses to remove %s, whatever the app asks", async (_name, permission) => {
+    const wallet = userWallet();
+    const key = KeyPair.fromRandom("ed25519").getPublicKey();
+    keysOnChain({ [key.toString()]: permission(wallet), [wallet.publicKey.toString()]: "FullAccess" });
+    await expect(sign(wallet, wallet.accountId, [actions.deleteKey(key)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, wallet.accountId, [actions.deleteKey(wallet.publicKey)])).rejects.toThrow(RefusedSigningError);
     expect(wallet.shown).toHaveLength(0);
     expect(wallet.signed).toHaveLength(0);
   });
@@ -526,6 +568,24 @@ describe("turning Inti off", () => {
       ],
     ]);
     expect(wallet.signed).toHaveLength(2);
+  });
+
+  it("removes an earlier Inti key in the same confirmation", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    const earlier = KeyPair.fromRandom("ed25519").getPublicKey().toString();
+    keysOnChain({ [intiKey.toString()]: fundAgentOnly(wallet.accountId), [earlier]: fundAgentOnly(wallet.accountId) });
+    const plan = client.releasePlan(wallet.accountId, 0n, true, await client.earlierIntiKeys(wallet.accountId));
+    await wallet.signer.approveAll(plan);
+    await client.send(wallet.accountId, wallet.signer, plan);
+    expect(wallet.shown).toEqual([
+      [
+        "Turn off Inti's access to your account.",
+        `Remove an earlier Inti key (${earlier.slice(0, 16)}...) from your account. It could only call fund_agent.`,
+        "Remove Inti's setup from your account. The NEAR set aside for it goes back to your main balance.",
+      ],
+    ]);
+    expect(wallet.signed).toHaveLength(1);
   });
 
   it("leaves out the steps that are not needed", () => {

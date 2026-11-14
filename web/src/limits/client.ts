@@ -3,7 +3,7 @@ import type { Action, Signer } from "near-api-js";
 import { priceToMicro } from "../../../agent/core/money";
 import { ASSET_KEYS, ASSETS, type AssetKey } from "../../../agent/policy/assets";
 import type { LimitsConfig } from "./config";
-import { assetContract, EMPTY_CONTRACT, wasmSha256, type OwnerTransaction } from "./ownerActions";
+import { assetContract, EMPTY_CONTRACT, isIntiShapedKey, wasmSha256, type OwnerTransaction } from "./ownerActions";
 
 const TGAS = 10n ** 12n;
 /** Storage staking rate: 1E19 yoctoNEAR per byte (docs.near.org/protocol/storage/storage-staking). */
@@ -153,6 +153,17 @@ export class LimitsClient {
     return new Account(accountId, this.provider, signer);
   }
 
+  /**
+   * Inti keys from before the server's key changed: keys that may only call fund_agent on the
+   * account, other than the current one. Pausing, resuming and turning off remove them too.
+   */
+  async earlierIntiKeys(accountId: string): Promise<string[]> {
+    const list = await new Account(accountId, this.provider).getAccessKeyList();
+    return list.keys
+      .filter((k) => k.public_key !== this.config.intiPublicKey && isIntiShapedKey(k.access_key.permission, accountId))
+      .map((k) => k.public_key);
+  }
+
   private intiKeyAction(accountId: string) {
     return actions.addFunctionCallAccessKey(
       PublicKey.fromString(this.config.intiPublicKey),
@@ -222,7 +233,7 @@ export class LimitsClient {
    * Spending Limits with an empty contract, which frees the code's storage. Everything stays as
    * plain NEAR in the user's account.
    */
-  releasePlan(accountId: string, wrapped: bigint, intiConnected: boolean): OwnerTransaction[] {
+  releasePlan(accountId: string, wrapped: bigint, intiConnected: boolean, earlierKeys: readonly string[] = []): OwnerTransaction[] {
     const plan: OwnerTransaction[] = [];
     if (wrapped > 0n) {
       plan.push({
@@ -234,7 +245,11 @@ export class LimitsClient {
     plan.push({
       signerId: accountId,
       receiverId: accountId,
-      actions: [...(intiConnected ? [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey))] : []), actions.deployContract(EMPTY_CONTRACT)],
+      actions: [
+        ...(intiConnected ? [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey))] : []),
+        ...earlierKeys.map((k) => actions.deleteKey(PublicKey.fromString(k))),
+        actions.deployContract(EMPTY_CONTRACT),
+      ],
     });
     return plan;
   }
@@ -286,17 +301,19 @@ export class LimitsClient {
   }
 
   async disconnectInti(accountId: string, signer: Signer): Promise<string> {
+    const earlier = await this.earlierIntiKeys(accountId);
     const res = await this.account(accountId, signer).signAndSendTransaction({
       receiverId: accountId,
-      actions: [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey))],
+      actions: [actions.deleteKey(PublicKey.fromString(this.config.intiPublicKey)), ...earlier.map((k) => actions.deleteKey(PublicKey.fromString(k)))],
     });
     return res.transaction.hash;
   }
 
   async reconnectInti(accountId: string, signer: Signer): Promise<string> {
+    const earlier = await this.earlierIntiKeys(accountId);
     const res = await this.account(accountId, signer).signAndSendTransaction({
       receiverId: accountId,
-      actions: [this.intiKeyAction(accountId)],
+      actions: [...earlier.map((k) => actions.deleteKey(PublicKey.fromString(k))), this.intiKeyAction(accountId)],
     });
     return res.transaction.hash;
   }

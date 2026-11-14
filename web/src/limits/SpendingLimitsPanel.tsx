@@ -259,7 +259,7 @@ function LimitsBody({ address, config, client }: { address: string; config: Limi
               disabled={busy !== null}
               onClick={() =>
                 void run("Turning off Inti: confirm once...", async () => {
-                  const plan = client.releasePlan(address, status.spendable, status.intiConnected);
+                  const plan = client.releasePlan(address, status.spendable, status.intiConnected, await client.earlierIntiKeys(address));
                   await signer.approveAll(plan);
                   return client.send(address, signer, plan);
                 })
