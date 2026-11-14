@@ -154,12 +154,14 @@ export function dryRunTools(deps: DryRunDeps, record: DryRunRecord): Toolset & {
         case "get_portfolio": {
           const { byId, nearMicro } = await prices();
           const wnear = usdToWnear(PRACTICE_USD, nearMicro);
+          // Six decimals, as the app shows NEAR.
+          const nearShown = fromAtomic((wnear / 10n ** 18n).toString(), 6);
           const priced = (assetId: string) => byId.get(assetId)?.price ?? null;
-          record.log.push({ tool: name, asked: {}, request: null, answer: { practice_usd: PRACTICE_USD, near_for_orders: fromAtomic(wnear.toString(), 24) } });
+          record.log.push({ tool: name, asked: {}, request: null, answer: { practice_usd: PRACTICE_USD, near_for_orders: nearShown } });
           return JSON.stringify({
             dry_run: true,
             paid_with: "NEAR",
-            near_for_orders: fromAtomic(wnear.toString(), 24),
+            near_for_orders: nearShown,
             money_for_orders_usd: PRACTICE_USD,
             limits: { per_order_usd: PRACTICE_PER_ORDER_USD, per_day_usd: PRACTICE_PER_DAY_USD },
             assets: ASSET_KEYS.map((key) => ({ key, name: ASSETS[key].name, symbol: ASSETS[key].symbol, price_usd: priced(ASSETS[key].assetId), goes_to: "wallet" })),
