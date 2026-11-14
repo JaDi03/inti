@@ -47,7 +47,7 @@ Every year there are fewer barriers to using a blockchain. The ones left are the
 - **A mistake you cannot undo.** One wrong network or address and the money is gone.
 - **Handing an AI the keys to your money.** An agent that can trade for you can usually also empty your account.
 
-Inti works on all three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
+You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
 
 ## Try it
 
@@ -94,7 +94,7 @@ An intent is a signed statement of what you want ("I want $5 of bitcoin, and I a
 
 That idea came with a promise: people would say what they want and the chain would stay out of sight. NEAR's co-founder Illia Polosukhin [wrote in 2023](https://www.coindesk.com/opinion/2023/12/20/the-rise-of-chain-abstraction-and-end-of-blockchain-factionalism): "hopefully, users won't have to manage or even know about the technical layers."
 
-Inti takes that promise literally. The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
+The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
 
 ## How it works
 
@@ -196,7 +196,7 @@ We tried this on mainnet on 14 November 2026, with Inti's real key on a real use
 2. Send a tenth of the user's bitcoin to the same wallet. NEAR refused it before it ran, because the key can call no other contract and attach no deposit: `Deposit is not allowed with function call`.
 3. Call `fund_agent`, the one call the key allows, for 1 yoctoNEAR over the per-order limit. The Spending Limits contract refused it on chain: `Smart contract panicked: over the per-order limit` ([`Hum36XqT`](https://nearblocks.io/txns/Hum36XqT8zcF9fQHFvDxHDuocZ58Nb1GAPUPZJqsR3Qb)).
 
-The other wallet received nothing. The first two cost no fee; the third cost 0.00016 NEAR of gas from Inti's allowance.
+The other wallet received nothing. The first two cost no fee and leave no transaction, because NEAR refuses them before they run; the third cost 0.00016 NEAR of gas from Inti's allowance. The check ran once from Inti's server with its real key; its script is not part of this repository.
 
 <p align="center">
   <img alt="Terminal output of the three tries, each one stopped, next to the user's portfolio in Inti, which still shows the same bitcoin." src="docs/images/key-check-mainnet.png" width="720">
@@ -221,7 +221,7 @@ The contract has its own tests, property runs and formal proofs: see [Spending L
 
 ### The contract on mainnet is this code
 
-The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (tested with 0.23.0; the build itself runs inside the pinned Docker image). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
+The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (the CLI was tested with 0.23.0; the build itself runs inside the pinned Docker image `sourcescan/cargo-near:0.22.0-rust-1.99.1`). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
 
 ```bash
 git clone https://github.com/JaDi03/inti.git
