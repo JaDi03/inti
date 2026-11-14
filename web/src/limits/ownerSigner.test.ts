@@ -176,6 +176,38 @@ describe("signing with the user's account key", () => {
     expect(wallet.signed).toHaveLength(1);
   });
 
+  it("never removes the user's own key, even when the chain claims it can only call fund_agent", async () => {
+    const wallet = userWallet();
+    keysOnChain({ [wallet.publicKey.toString()]: fundAgentOnly(wallet.accountId) });
+    await expect(sign(wallet, wallet.accountId, [actions.deleteKey(wallet.publicKey)])).rejects.toThrow(RefusedSigningError);
+    expect(wallet.shown).toHaveLength(0);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("refuses to remove a key it cannot read on chain, or one sent to another account", async () => {
+    const wallet = userWallet();
+    const missing = KeyPair.fromRandom("ed25519").getPublicKey();
+    const earlier = KeyPair.fromRandom("ed25519").getPublicKey();
+    keysOnChain({ [earlier.toString()]: fundAgentOnly(wallet.accountId) });
+    await expect(sign(wallet, wallet.accountId, [actions.deleteKey(missing)])).rejects.toThrow(RefusedSigningError);
+    await expect(sign(wallet, "other.near", [actions.deleteKey(earlier)])).rejects.toThrow(RefusedSigningError);
+    vi.spyOn(Account.prototype, "getAccessKey").mockRejectedValue(new Error("rpc down"));
+    await expect(sign(wallet, wallet.accountId, [actions.deleteKey(earlier)])).rejects.toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
+  it("refuses when an earlier key changed on chain between the approval and the signature", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    const earlier = KeyPair.fromRandom("ed25519").getPublicKey().toString();
+    keysOnChain({ [intiKey.toString()]: fundAgentOnly(wallet.accountId), [earlier]: fundAgentOnly(wallet.accountId) });
+    const plan = client.releasePlan(wallet.accountId, 0n, true, [earlier]);
+    await wallet.signer.approveAll(plan);
+    keysOnChain({ [intiKey.toString()]: fundAgentOnly(wallet.accountId) });
+    await expect(client.send(wallet.accountId, wallet.signer, plan)).rejects.toThrow(RefusedSigningError);
+    expect(wallet.signed).toHaveLength(0);
+  });
+
   const notInti: [string, (w: Wallet) => unknown][] = [
     ["the user's own full-access key", () => "FullAccess"],
     ["a key for another contract", () => ({ FunctionCall: { allowance: "1", receiver_id: "other.near", method_names: ["fund_agent"] } })],

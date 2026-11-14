@@ -44,7 +44,12 @@ export class OwnerSigner extends Signer {
    */
   private async earlierIntiKeys(tx: OwnerTransaction): Promise<Set<string>> {
     const current = this.config.intiPublicKey;
-    const asked = tx.actions.flatMap((a) => (a.deleteKey && a.deleteKey.publicKey.toString() !== current ? [a.deleteKey.publicKey.toString()] : []));
+    // The signing key itself is never an earlier Inti key, whatever the chain answers.
+    const own = (await this.inner.getPublicKey()).toString();
+    const asked = tx.actions.flatMap((a) => {
+      const key = a.deleteKey?.publicKey.toString();
+      return key !== undefined && key !== current && key !== own ? [key] : [];
+    });
     const found = new Set<string>();
     if (asked.length === 0 || tx.receiverId !== tx.signerId) return found;
     const account = new Account(tx.signerId, new JsonRpcProvider({ url: this.config.rpcUrl }));
