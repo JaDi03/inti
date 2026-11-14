@@ -5,16 +5,18 @@
   </picture>
 </p>
 
-![network](https://img.shields.io/badge/NEAR-mainnet-00EC97?style=for-the-badge)
-![intents](https://img.shields.io/badge/NEAR_Intents-cross--chain-00EC97?style=for-the-badge)
-![tee](https://img.shields.io/badge/NEAR_AI_Cloud-TEE_Attestation-111827?style=for-the-badge)
-![security](https://img.shields.io/badge/Security-Function_Call_Keys-111827?style=for-the-badge)
-![node](https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white)
-![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
+<p align="center">
+  <img alt="network" src="https://img.shields.io/badge/NEAR-mainnet-00EC97?style=for-the-badge">
+  <img alt="intents" src="https://img.shields.io/badge/NEAR_Intents-cross--chain-00EC97?style=for-the-badge">
+  <img alt="tee" src="https://img.shields.io/badge/NEAR_AI_Cloud-TEE_Attestation-111827?style=for-the-badge">
+  <img alt="security" src="https://img.shields.io/badge/Security-Function_Call_Keys-111827?style=for-the-badge">
+  <img alt="node" src="https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge">
+</p>
 
 Inti is an investment agent on NEAR. You type `buy $5 of bitcoin`, and your own agent on NEAR Intents buys it with NEAR from your wallet, within limits you set.
 
-Live app: **https://getinti.xyz** (NEAR mainnet, real funds).
+Live app: **https://getinti.xyz** (NEAR mainnet, real funds). To try it without an account or funds, open the dry run at **https://getinti.xyz/try**.
 
 Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
 
@@ -47,9 +49,20 @@ Inti works on all three. You sign in with email or Google, you type "buy $5 of b
 
 ## Try it
 
-Open **https://getinti.xyz** on a phone or a computer.
+**Dry run** (no account, no wallet, nothing moves):
 
-**Without funds** (nothing moves):
+Open **https://getinti.xyz/try**, or tap **Dry run, no funds** on the landing page. You get a practice wallet with $100 of NEAR set aside for orders, a limit of $25 per order and $50 per day, and the same portfolio, limits and rules panels as the real app.
+
+- Type `buy $5 of bitcoin`. The agent asks NEAR Intents for a real quote (`dry: true`, so nothing is bought) and answers with what you would get.
+- Under the reply, **Where your money would sit** shows the four steps the money would take: it waits in your wallet under your limits, goes to your own agent on NEAR Intents, is swapped with a minimum you accept, and the bitcoin comes back to your wallet.
+- **Agent log** shows every request the agent sent to the NEAR Intents Agent API and the exact answer.
+- Type `buy $30 of gold`. The order is over the practice limit of $25, so it is refused before any quote.
+
+The dry run code is in `agent/server/dryRun.ts` (server) and `web/src/dryrun/` (page). Its tools can only read prices and ask for quotes; none of them can move money.
+
+**Signed in, without funds** (nothing moves):
+
+Open **https://getinti.xyz** on a phone or a computer.
 
 1. Sign in with email or Google. You see your dashboard and an empty NEAR wallet that [Privy](https://docs.privy.io) made for you. You never see a seed phrase.
 2. Next to the logo, a shield says **AI hardware verified**. Tap it to see each check on the AI model's hardware and run them again.
@@ -83,10 +96,12 @@ Inti takes that promise literally. The words you type become an intent on [NEAR 
 
 ## How it works
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/buy-flow-dark.svg">
   <img alt="A purchase: you ask to buy $5 of bitcoin, the AI picks a tool, Inti checks your limits, then the money comes from your wallet through your Spending Limits contract or from your agent's balance. Your agent on NEAR Intents trades under your signed policy. BTC, ETH and ZEC go to your wallet; XAUT, EURe, SOL and NEAR stay in your agent's balance." src="docs/diagrams/buy-flow.svg" width="560">
 </picture>
+</p>
 
 1. **You write** what you want. The app sends it to Inti's server, which checks your Privy sign-in on every request.
 2. **The model decides.** It runs on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart) inside a TEE (private hardware) and picks one of eight tools. It names an asset and an amount in dollars; it never writes an address.
@@ -137,10 +152,12 @@ Until 12 November 2026 Inti sent gold, euro and Solana to the user's NEAR wallet
 
 ## Your limits and Inti's key
 
+<p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/who-decides-dark.svg">
   <img alt="Who decides what: you set the funding limits in the contract on your account, authorize or remove Inti's key that can only call fund_agent, and sign your agent's policy, which sends only to you and which you can freeze or unfreeze. Inti's server requests trades with a valid grant and checks the combined spending. Your NEAR Intents agent receives only limited funding." src="docs/diagrams/who-decides.svg" width="640">
 </picture>
+</p>
 
 You keep your full-access key, in your Privy wallet. Inti gets a NEAR function-call key that is scoped to one contract (your own account) and one method (`fund_agent`), with no deposit allowed.
 
