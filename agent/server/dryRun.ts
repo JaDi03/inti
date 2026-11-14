@@ -118,6 +118,8 @@ const answerOf = (q: SwapQuote): Record<string, string> => ({
 
 /** The tools of one dry-run message; every call is written to `record` for the app to show. */
 export function dryRunTools(deps: DryRunDeps, record: DryRunRecord): Toolset & { prompt: string } {
+  // Each message starts a fresh practice day: its buys together stay within the daily limit.
+  let spentMicro = 0n;
   const prices = async () => {
     const list = await deps.tokens();
     const byId = new Map(list.map((t) => [t.asset_id, t]));
@@ -194,10 +196,16 @@ export function dryRunTools(deps: DryRunDeps, record: DryRunRecord): Toolset & {
             events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: "over_order_limit", reason: "above the practice limit per order" });
             return JSON.stringify({ status: "refused", reason: `the amount is above the practice limit of ${PRACTICE_PER_ORDER_USD} USD per order` });
           }
+          if (name === "buy_now" && spentMicro + usdStringToMicro(input.usd) > usdStringToMicro(PRACTICE_PER_DAY_USD)) {
+            record.log.push({ tool: name, asked, request: null, answer: { status: "refused", code: "over_day_limit" } });
+            events.push({ type: "swap_denied", from: "NEAR", amountIn: input.usd, code: "over_day_limit", reason: "above the practice limit per day" });
+            return JSON.stringify({ status: "refused", reason: `together with the earlier buys this is above the practice limit of ${PRACTICE_PER_DAY_USD} USD per day` });
+          }
           const q = await quote(name, asked, a.assetId, wnear, token, nearMicro);
           if (!q) return JSON.stringify({ status: "refused", reason: "there is no way to trade this right now, often because the amount is too small for this asset's market" });
           const view = quoteView(input.usd, wnear, q, token.decimals, priceToMicro(token.price ?? 0));
           if (name === "get_quote") return JSON.stringify({ status: "quoted", asset: a.name, ...view });
+          spentMicro += usdStringToMicro(input.usd);
           const kept = staysOnAgent(a.assetId);
           record.steps = [
             { place: "wallet", text: `${view.pay_near} NEAR (${input.usd} USD) waits in your wallet, set aside for orders. Your Spending Limits contract caps each order and each day.` },

@@ -80,6 +80,17 @@ describe("dry-run tools", () => {
     expect(quotes).toEqual([]);
   });
 
+  it("the buys of one message together stay within the practice limit per day", async () => {
+    const { tools, quotes, record } = setup();
+    const buy = async (usd: string) => (JSON.parse(await tools.run("buy_now", { asset: "bitcoin", usd, reason: "asked" }, [])) as { status: string }).status;
+    expect(await buy("20")).toBe("dry_run");
+    expect(await buy("20")).toBe("dry_run");
+    expect(await buy("20")).toBe("refused");
+    expect(quotes).toHaveLength(2);
+    expect(record.log.at(-1)?.answer).toEqual({ status: "refused", code: "over_day_limit" });
+    expect(await buy("10")).toBe("dry_run");
+  });
+
   it("asks the trading service for at most a few quotes per message", async () => {
     const { tools, quotes } = setup();
     for (let i = 0; i < QUOTES_PER_MESSAGE; i++) await tools.run("get_quote", { asset: "bitcoin", usd: "5" }, []);
