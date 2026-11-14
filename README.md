@@ -73,26 +73,10 @@ Inti takes that promise literally. The words you type become an intent on [NEAR 
 
 ## How it works
 
-```mermaid
-sequenceDiagram
-    actor You
-    participant App as Inti app
-    participant Server as Inti server
-    participant Model as AI model (NEAR AI, TEE)
-    participant Limits as Spending Limits contract (your account)
-    participant Agent as Your agent (NEAR Intents)
-
-    You->>App: "buy $5 of bitcoin"
-    App->>Server: POST /api/chat
-    Server->>Model: your words and the 8 tools
-    Model-->>Server: buy_now(bitcoin, $5)
-    Server->>Limits: fund_agent(wNEAR, amount) with Inti's key
-    Limits->>Limits: within per-order and per-day limits?
-    Limits->>Agent: ft_transfer_call to intents.near, only to your agent
-    Agent->>Agent: swap NEAR for BTC, never below your minimum
-    Agent-->>You: BTC sent to your wallet
-    Server-->>App: reply, signed inside the TEE
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/buy-flow-dark.svg">
+  <img alt="A purchase: you ask to buy $5 of bitcoin, the AI picks a tool, Inti checks your limits, then the money comes from your wallet through your Spending Limits contract or from your agent's balance. Your agent on NEAR Intents trades under your signed policy. BTC, ETH and ZEC go to your wallet; XAUT, EURe, SOL and NEAR stay in your agent's balance." src="docs/diagrams/buy-flow.svg" width="560">
+</picture>
 
 1. **You write** what you want. The app sends it to Inti's server, which checks your Privy sign-in on every request.
 2. **The model decides.** It runs on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart) inside a TEE (private hardware) and picks one of eight tools. It names an asset and an amount in dollars; it never writes an address.
@@ -143,16 +127,10 @@ Until 12 November 2026 Inti sent gold, euro and Solana to the user's NEAR wallet
 
 ## Your limits and Inti's key
 
-```mermaid
-flowchart LR
-    You["You<br/>full-access key"] -->|set limits, remove Inti's key, freeze the agent| Account
-    Inti["Inti's server<br/>function-call key"] -->|fund_agent only| Account
-    subgraph Account["Your NEAR account"]
-        Contract["Spending Limits contract<br/>per order, per day, 24 orders a day"]
-    end
-    Contract -->|one order, only to your agent| Agent["Your agent<br/>NEAR Intents"]
-    Agent -->|results| Wallet["Your wallet"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/who-decides-dark.svg">
+  <img alt="Who decides what: you set the funding limits in the contract on your account, authorize or remove Inti's key that can only call fund_agent, and sign your agent's policy, which sends only to you and which you can freeze or unfreeze. Inti's server requests trades with a valid grant and checks the combined spending. Your NEAR Intents agent receives only limited funding." src="docs/diagrams/who-decides.svg" width="640">
+</picture>
 
 You keep your full-access key, in your Privy wallet. Inti gets a NEAR function-call key that is scoped to one contract (your own account) and one method (`fund_agent`), with no deposit allowed.
 
