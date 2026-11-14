@@ -1,39 +1,121 @@
-# Inti
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/inti-logo-horizontal-dark.svg">
+    <img alt="Inti" src="web/public/inti-logo-horizontal.svg" height="48">
+  </picture>
+</p>
 
-![status](https://img.shields.io/badge/status-early%20development-orange?style=for-the-badge)
+![network](https://img.shields.io/badge/NEAR-mainnet-00EC97?style=for-the-badge)
+![intents](https://img.shields.io/badge/NEAR_Intents-cross--chain-00EC97?style=for-the-badge)
+![tee](https://img.shields.io/badge/NEAR_AI_Cloud-TEE_Attestation-111827?style=for-the-badge)
+![security](https://img.shields.io/badge/Security-Function_Call_Keys-111827?style=for-the-badge)
 ![node](https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white)
-![typescript](https://img.shields.io/badge/typescript-6-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
-Inti is an investment agent on NEAR. You say in plain words what to buy or sell, and it does it from your own wallet, within limits you sign.
+Inti is an investment agent on NEAR. You type `buy $5 of bitcoin`, and your own agent on NEAR Intents buys it with NEAR from your wallet, within limits you set.
 
-Giving an AI agent money usually means giving it your keys. With Inti your funds stay in your wallet. Inti gets a key that can only send orders, and a contract on your own account refuses any order above your limits.
+Live app: **https://getinti.xyz** (NEAR mainnet, real funds).
+
+Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
+
+You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
 
 ---
 
 ## Table of Contents
 
-- [How It Works](#how-it-works)
-- [Run Your Own Server](#run-your-own-server)
-- [Project Structure](#project-structure)
-- [Tech Stack](#tech-stack)
-- [Contributing](#contributing)
-- [License](#license)
+1. [Why Inti exists](#why-inti-exists)
+2. [Try it](#try-it)
+3. [What an intent is, and why it matters here](#what-an-intent-is-and-why-it-matters-here)
+4. [How it works](#how-it-works)
+5. [Your limits and Inti's key](#your-limits-and-intis-key)
+6. [Check it yourself](#check-it-yourself)
+7. [Run your own server](#run-your-own-server)
+8. [Project structure](#project-structure)
+9. [Tech stack](#tech-stack)
+10. [Built during the NEAR hackathon](#built-during-the-near-hackathon)
 
-## How It Works
+## Why Inti exists
 
-1. **Sign in** with email or Google. [Privy](https://docs.privy.io) creates a NEAR wallet for you.
-2. **Set your limits**: how much one order may spend, and how much in a day. The app installs the Spending Limits contract on your account and adds Inti's key, which can call only `fund_agent` (`web/src/limits/client.ts`).
-3. **Create your agent** on the NEAR Intents [Agent API](https://docs.agentsonintents.com) and sign a trading permission (a grant) for 7, 30 or 90 days.
-4. **Chat**: "buy $5 of bitcoin", "sell half my ether", "buy Zcash if it drops to $900". The agent quotes, buys, sells or places an order that waits for a price.
-5. **Results go to your wallet**, except gold, euro and Solana, which your agent keeps (see below). Anything else left with the agent is sent back to your wallet every 5 minutes.
+Every year there are fewer barriers to using a blockchain. The ones left are the ones that stop careful people:
 
-The agent buys and sells bitcoin (BTC), ether (ETH) and Zcash (ZEC), and pays with NEAR (`agent/policy/assets.ts`). Its trades run on the agent's confidential balance in NEAR Intents.
+- **Signing what you cannot read.** A wallet asks you to approve a string of code.
+- **A mistake you cannot undo.** One wrong network or address and the money is gone.
+- **Handing an AI the keys to your money.** An agent that can trade for you can usually also empty your account.
 
-### Gold, euro and Solana: kept by your agent
+Inti works on all three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
 
-The agent also buys gold (XAUT), euro (EURe) and Solana (SOL) (`agent/policy/heldAssets.ts`). These stay in your agent's confidential balance on NEAR Intents instead of going to your wallet. The dashboard shows how much your agent holds of each, with its price. When you ask Inti to sell, the agent sells for NEAR and sends the NEAR to your wallet.
+## Try it
 
-Why they stay with the agent: since 12 November 2026 the Agent API trades only from the agent's confidential balance. From there it can send to a NEAR wallet only tokens that live on NEAR, and these three live on Ethereum, Gnosis and Solana.
+Open **https://getinti.xyz** on a phone or a computer.
+
+**Without funds** (nothing moves):
+
+1. Sign in with email or Google. You see your dashboard and an empty NEAR wallet that [Privy](https://docs.privy.io) made for you. You never see a seed phrase.
+2. Next to the logo, a shield says **AI hardware verified**. Tap it to see each check on the AI model's hardware and run them again.
+3. In the chat, type `buy $5 of bitcoin`. Inti answers in plain words. Under the reply you see **Simulated portfolio, no real funds moved**: until you have an agent and a signed permission, every order runs on a practice portfolio.
+4. Under the same reply, tap **Signed by the verified AI model** to see the signature over that exact answer.
+
+**With real funds** (NEAR mainnet):
+
+5. Open **Spending limits** and follow its four steps in order:
+   - **Protect your account** with a passkey.
+   - **Add funds**: send NEAR to the address shown. The step tells you how much is needed (about 1.9 NEAR with 0.1 NEAR set aside for orders; it grows with what you set aside). About 1.7 NEAR of it pays for the contract's storage on your account and comes back when you **Turn off Inti**.
+   - **Create your agent**: your own agent on NEAR Intents, which can send only to you.
+   - **Set your spending limits** and tap **Activate Inti**. You sign two transactions. The first installs the Spending Limits contract on your account, sets your limits and gives Inti a key that can only call `fund_agent`. The second wraps the NEAR you set aside for orders.
+6. Sign a trading permission (a grant) for your agent, for 7, 30 or 90 days.
+7. Type `buy $5 of gold`, `buy Zcash if it drops to $900`, or `sell half my bitcoin and buy euro with it`. The agent places each order, one after another, and tells you what it got and what it cost. The result appears in your portfolio. To ask the price without buying, type `how much bitcoin do I get for $5?`.
+   A real use on mainnet, 14 November 2026: `buy $5 of gold`, then `sell it, half for bitcoin and half for euro`. On chain you see only two transactions:
+   - [`C68paMYv`](https://nearblocks.io/txns/C68paMYvQmm9AWrfvErLXuEMNrcFQEsy4wmBRugaWhJh): the Spending Limits contract on the user's account sends 1.488 wNEAR to the user's agent in NEAR Intents, after checking the limits.
+   - [`5cr7nwxz`](https://nearblocks.io/txns/5cr7nwxzMiqmBeEHgN73v3vWs52E5HJ6Ad83SZAYhTLB): NEAR Intents sends 0.00003638 BTC to the user's wallet.
+
+   The gold purchase, its sale and the euro happened inside the agent's confidential balance, so no public transaction shows them. The euro stays with the agent (see [Where your assets sit](#where-your-assets-sit)).
+8. Type an order above your limit. Inti tells you it is over your limit and sends no transaction, so you pay no fee. If Inti's check were ever wrong, the contract would refuse the order on chain (see [Your limits and Inti's key](#your-limits-and-intis-key)).
+9. To stop Inti you have two switches, both signed by you. **Pause Inti** deletes Inti's key from your account, so no more money leaves your wallet; your agent can still trade what it already holds while your grant lasts. Freezing your agent stops everything it does until you unfreeze it.
+
+## What an intent is, and why it matters here
+
+An intent is a signed statement of what you want ("I want $5 of bitcoin, and I accept no less than this much"), not the steps to get it. Solvers compete to fill it, and the network checks that the result matches what you signed.
+
+That idea came with a promise: people would say what they want and the chain would stay out of sight. NEAR's co-founder Illia Polosukhin [wrote in 2023](https://www.coindesk.com/opinion/2023/12/20/the-rise-of-chain-abstraction-and-end-of-blockchain-factionalism): "hopefully, users won't have to manage or even know about the technical layers."
+
+Inti takes that promise literally. The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/buy-flow-dark.svg">
+  <img alt="A purchase: you ask to buy $5 of bitcoin, the AI picks a tool, Inti checks your limits, then the money comes from your wallet through your Spending Limits contract or from your agent's balance. Your agent on NEAR Intents trades under your signed policy. BTC, ETH and ZEC go to your wallet; XAUT, EURe, SOL and NEAR stay in your agent's balance." src="docs/diagrams/buy-flow.svg" width="560">
+</picture>
+
+1. **You write** what you want. The app sends it to Inti's server, which checks your Privy sign-in on every request.
+2. **The model decides.** It runs on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart) inside a TEE (private hardware) and picks one of eight tools. It names an asset and an amount in dollars; it never writes an address.
+3. **The contract checks.** Inti's key calls `fund_agent` on your account. The contract adds the order to what the last 24 hours already spent and refuses it if a limit would be passed.
+4. **Your agent trades.** The NEAR goes to your own agent on NEAR Intents, which swaps it with a minimum you accept, from its confidential balance.
+5. **The result comes home.** Bitcoin, ether and Zcash go to your wallet; if one could not be sent right away, Inti tries again every 5 minutes. Gold, euro, Solana and the NEAR from a sale stay with your agent (see [Where your assets sit](#where-your-assets-sit)).
+
+### The agent
+
+The model decides; the code and the contract enforce the limits.
+
+- `agent/core/loop.ts`: the loop. A brain is any object with a `step()` method.
+- `agent/brains/nearai.ts`: the brain, model `deepseek-ai/DeepSeek-V4.1-Flash-1017` on NEAR AI Cloud, which runs inside NEAR AI's TEE.
+- `agent/server/realTools.ts`: the eight tools the model can call: `get_portfolio`, `get_quote`, `buy_now`, `buy_at_price`, `get_sell_quote`, `sell_now`, `send_near_to_wallet` and `ask_user`.
+
+```ts
+export const ASSETS = {
+  bitcoin: { name: "Bitcoin", symbol: "BTC", assetId: "nep141:nbtc.bridge.near", decimals: 8, kind: "crypto" },
+```
+
+`agent/policy/assets.ts`: the model chooses from a fixed list by name. The token address comes from this file, so a prompt hidden in a message cannot make the agent pay somewhere else.
+
+### Where your assets sit
+
+The agent buys and sells bitcoin (BTC), ether (ETH) and Zcash (ZEC), and pays with NEAR. These go to your wallet.
+
+It also buys gold (XAUT), euro (EURe) and Solana (SOL) (`agent/policy/heldAssets.ts`). These stay in your agent's confidential balance on NEAR Intents, and the dashboard shows how much your agent holds of each, with its price. When you ask Inti to sell, the agent sells for NEAR and keeps that NEAR to pay for your next purchase. To bring it to your wallet, type `send my NEAR to my wallet` or use the send button next to your agent's NEAR on the dashboard.
+
+Why they stay with the agent: since 12 November 2026 the Agent API trades only from the agent's confidential balance; the public balance can only send funds out (the API answers `public_balance_exit_only`). From the confidential balance it sends to a NEAR wallet only tokens that live on NEAR. Gold, euro and Solana live on Ethereum, Gnosis and Solana, so a withdrawal of them answers `unsupported_token` (`agent/server/orders.ts`).
 
 What this means for you:
 
@@ -47,19 +129,82 @@ Until 12 November 2026 Inti sent gold, euro and Solana to the user's NEAR wallet
 3. [`2S16iWuB`](https://nearblocks.io/txns/2S16iWuBepvzSeoykpxMBV3z5CmfoV8cRvCfPbPRvjZw): the market maker gives 0.002874 SOL to the agent.
 4. [`9N1LZEDu`](https://nearblocks.io/txns/9N1LZEDuh4STZYtx6QLbVtkmnXoGcb8H1U7uupWCbdDV): the SOL leaves NEAR Intents for the user's wallet.
 
-### The agent
+### Server and web app
 
-The model decides; the code and the contract enforce the limits.
+`agent/server/` is the API the web app calls: `POST /api/chat` runs the agent for the signed-in user, and the `/api/agent/*` routes create the user's agent and the grant the user signs. It checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret.
 
-- `agent/core/loop.ts`: the loop. A brain is any object with a `step()` method.
-- `agent/brains/nearai.ts`: the brain, on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart), model `deepseek-ai/DeepSeek-V4.1-Flash-1017`, which runs inside NEAR AI's TEE (private inference). Each step keeps its response id, which NEAR AI signs inside the TEE.
-- `agent/server/realTools.ts`: the seven tools the model can call: `get_portfolio`, `get_quote`, `buy_now`, `buy_at_price`, `get_sell_quote`, `sell_now` and `ask_user`. The model picks an asset by name and an amount in dollars; it never writes an address.
+`web/` is the app. `PrivyNearSigner` plugs the Privy wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
 
-Until you have an agent and a live grant, the chat runs on a simulated portfolio and no funds move.
+## Your limits and Inti's key
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/who-decides-dark.svg">
+  <img alt="Who decides what: you set the funding limits in the contract on your account, authorize or remove Inti's key that can only call fund_agent, and sign your agent's policy, which sends only to you and which you can freeze or unfreeze. Inti's server requests trades with a valid grant and checks the combined spending. Your NEAR Intents agent receives only limited funding." src="docs/diagrams/who-decides.svg" width="640">
+</picture>
+
+You keep your full-access key, in your Privy wallet. Inti gets a NEAR function-call key that is scoped to one contract (your own account) and one method (`fund_agent`), with no deposit allowed.
+
+What Inti's key **can** do: send one order to your own agent, within your limits.
+
+What Inti's key **cannot** do, because the network or the contract refuses it:
+
+- send NEAR or tokens to anyone, including itself;
+- call any method other than `fund_agent`, or attach a deposit;
+- change your limits or your agent (`set_limit`, `remove_limit` and `set_agent` require 1 yoctoNEAR, which a function-call key cannot attach);
+- choose where an order goes: `fund_agent` takes no destination, it always pays your agent;
+- add or remove keys, or deploy code.
+
+```rust
+require!(new_spent <= limit.per_day.0, "over the daily limit");
+```
+
+```ts
+if (amount > limit.perOrder) return "over_order_limit";
+if ((await chain.spentLast24h(account.owner, token)) + amount > limit.perDay) return "over_daily_limit";
+```
+
+`agent/server/orders.ts`: before it signs an order, Inti reads your limits and what the last 24 hours spent from your own contract. An order over a limit is stopped here, so it never reaches the chain and costs you nothing.
+
+`contracts/spending-limits/src/lib.rs`: the contract checks again. Before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits.
+
+Inti's key also has a gas allowance of 0.25 NEAR (`web/src/limits/config.ts`), from which it pays each order's network fee. It is one total, not per day, and the dashboard shows what is left under **Fees left for Inti**. When it runs out, Inti cannot send orders; **Pause Inti** and then **Resume Inti** add the key again with a new allowance.
+
+If Inti's key were stolen, the most it could do is send your limits to your own agent, use up the 24 orders of a day, and spend its 0.25 NEAR allowance on fees. Deleting the key ends all three. Because your account keeps its full-access key, it never depends on that allowance and cannot be locked out by it.
+
+The Agent API adds a second layer: your agent runs under a policy you sign, which only lets it send to your wallet.
+
+Contract details, tests and formal proofs: [Spending Limits contract](contracts/spending-limits/README.md).
+
+## Check it yourself
+
+### The code builds and its tests pass
+
+With Node 24 and pnpm 11, on a fresh clone and with no `.env`:
+
+```bash
+pnpm install
+pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm web:build
+```
+
+The contract has its own tests, property runs and formal proofs: see [Spending Limits contract](contracts/spending-limits/README.md#build-and-test).
+
+### The contract on mainnet is this code
+
+The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (tested with 0.23.0; the build itself runs inside the pinned Docker image). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
+
+```bash
+git clone https://github.com/JaDi03/inti.git
+cd inti
+git checkout cb3fe63
+cd contracts/spending-limits
+cargo near build reproducible-wasm
+sha256sum target/near/inti_spending_limits.wasm
+# ec08c308af218f6d1273a1ae785617d67b9bb3fa3ed95f843a5e1a9c19c3d161
+```
+
+The same hash is in `web/src/limits/config.ts`, and it matches `web/public/inti-spending-limits.wasm`, the only build the app installs.
 
 ### The AI model's hardware, checked live
-
-Next to the logo, a shield says whether the hardware of Inti's model is verified. Tap it to see each check and run them again.
 
 ```ts
 if (reportData.slice(64) === nonce) passed.add("binds_nonce");
@@ -68,7 +213,7 @@ if (reportData.slice(0, 64) === signingAddress.slice(2).padEnd(64, "0")) passed.
 
 `agent/server/attestation.ts`: Inti sends NEAR AI a new random challenge and gets back the hardware report of its model. It checks the Intel TDX quote against Intel's own certificates ([@phala/dcap-qvl](https://github.com/Phala-Network/dcap-qvl)), that the quote carries the challenge and the model's signing key, that the machine is not in debug mode, that its startup log and published setup match what the chip measured, and asks NVIDIA whether the GPU is genuine. The steps follow [NEAR AI's verification docs](https://docs.near.ai/cloud/verification). One recent result is shared by everyone who opens the app; "Verify again" runs a new one.
 
-Under each of Inti's replies, a line says whether it was signed by that chip's key:
+### Each reply, signed
 
 ```ts
 if (sig.text !== `${model}:${call.requestHash}:${call.responseHash}`) return "other_bytes";
@@ -78,21 +223,7 @@ if (sig.text !== `${model}:${call.requestHash}:${call.responseHash}`) return "ot
 
 Together they prove that a genuine, sealed Intel TDX machine with an NVIDIA GPU, running this model, signed each reply. They do not prove which of the model's machines served it (they share one key), which software runs inside beyond its own measurements, or that your messages are hidden: NEAR AI's gateway and Inti's server both see them.
 
-### The limits
-
-```rust
-require!(new_spent <= limit.per_day.0, "over the daily limit");
-```
-
-`contracts/spending-limits/src/lib.rs`: before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits. To stop Inti at once, delete its key from your account. Details: [Spending Limits contract](contracts/spending-limits/README.md).
-
-### Server and web app
-
-`agent/server/` is the API the web app calls: `POST /api/chat` runs the agent for the signed-in user, and the `/api/agent/*` routes create the user's agent and the grant the user signs. It checks the Privy access token on every request with Privy's public verification key, so it never needs the Privy app secret.
-
-`web/` is the app. `PrivyNearSigner` plugs the Privy wallet into the near-api-js `Signer`, so near-api-js builds and hashes NEP-413 messages and NEP-366 delegate actions, the two signatures the Agent API asks an owner for, and Privy signs the hash.
-
-## Run Your Own Server
+## Run your own server
 
 The app and its API on your own server, at `https://your-domain.com`. You need Ubuntu or Debian (x64, tested on Ubuntu 24.04), a user with `sudo`, and a domain pointing to the server with ports 80 and 443 open.
 
@@ -109,6 +240,8 @@ sudo bash deploy/install.sh
 | `NEAR_INTENTS_AGENT_API_KEY` | your partner key for the [Agent API](https://docs.agentsonintents.com) |
 | `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
 | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
+
+`.env.example` points the Agent API at `https://api.demo.agentsonintents.com`. NEAR Intents and the Agent API have no testnet, so orders through that host are real orders on NEAR mainnet.
 
 The script checks `.env` before it installs anything and says what is missing. It installs Node, pnpm and Caddy, creates Inti's key and the key that encrypts the grants, builds the app, and starts the API behind HTTPS. It ends with `Done. Open https://your-domain.com`. In the Privy dashboard, add that domain to the app's allowed domains.
 
@@ -136,7 +269,9 @@ Each install is a new release. If the new one does not start, the previous one k
 
 Users authorize Inti's key on their own account. Keep a copy of `/var/lib/inti/inti-key.json` and of `SERVER_GRANT_KEY` from `/etc/inti/inti.env`. To move to a new server without asking users to do it again, copy `inti-key.json` and `grants.json` to the new server's `/var/lib/inti/`, and put `SERVER_GRANT_KEY` in its `.env`, before you run the script. It keeps a key and grants that are already there.
 
-## Project Structure
+To run it on your computer or change the code, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Project structure
 
 ```
 agent/                 the investment agent (TypeScript)
@@ -151,11 +286,13 @@ web/                   app: login, Spending Limits, chat (React)
 deploy/                install.sh and the server files it sets up
 ```
 
-## Tech Stack
+## Tech stack
 
 - **[NEAR Intents](https://docs.near-intents.org)**: the swaps and price orders behind every buy and sell
-- **[@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)**: official Agent API types
+- **[NEAR Intents Agent API](https://docs.agentsonintents.com)**: each user's own agent, its signed policy and its confidential balance; types from [@near-intents-agent-api/sdk](https://docs.agentsonintents.com/integration/agent-api/sdk)
 - **[NEAR AI Cloud](https://docs.near.ai/cloud/quickstart)**: private inference in a TEE, through the [OpenAI SDK](https://github.com/openai/openai-node)
+- **NEAR function-call access keys**: Inti's key, limited to `fund_agent` on the user's account
+- **[near-sdk-rs](https://github.com/near/near-sdk-rs)** and **[cargo-near](https://github.com/near/cargo-near)**: the Spending Limits contract and its reproducible build
 - **[Privy](https://docs.privy.io)**: email and Google login with an embedded NEAR wallet
 - **[near-api-js](https://github.com/near/near-api-js)**: NEAR transactions, NEP-413 and NEP-366 encoding
 - **[fastify](https://fastify.dev)**: the API server
@@ -163,9 +300,11 @@ deploy/                install.sh and the server files it sets up
 - **[vitest](https://vitest.dev)**: tests
 - **[TypeScript](https://www.typescriptlang.org)**: language
 
-## Contributing
+## Built during the NEAR hackathon
 
-To run it on your computer or change the code, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Inti was written from scratch for the NEAR hackathon (build window 1 to 14 November 2026). The first commit is from 5 November 2026, and every change since is in the [commit history](https://github.com/JaDi03/inti/commits/main). No code from an earlier product is reused, and no other project of ours is entered in this hackathon. Open-source libraries are the ones listed under [Tech stack](#tech-stack).
+
+Tracks it is built for: **AI Security & Defense** (spending limits, a function-call key, TEE attestation), **Unstoppable DeFi** (trading through NEAR Intents with no custodian) and **Privacy & Private AI** (the model runs in a TEE, the agent trades from a confidential balance).
 
 ## License
 

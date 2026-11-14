@@ -63,8 +63,10 @@ Requires Rust 1.99.1 (the version CI uses) with the `wasm32-unknown-unknown` tar
 [cargo-near](https://github.com/near/cargo-near) to build the wasm.
 
 ```bash
-# unit, actor and property tests
+# unit, actor and property tests (about 8 minutes; the property tests take most of it)
 cargo test
+# on Windows, a test dependency builds aws-lc and needs:
+AWS_LC_SYS_PREBUILT_NASM=1 cargo test
 
 # contract wasm: target/near/inti_spending_limits.wasm
 cargo near build non-reproducible-wasm
