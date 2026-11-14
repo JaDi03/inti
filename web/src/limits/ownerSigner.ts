@@ -1,7 +1,7 @@
-import { Signer } from "near-api-js";
+import { Account, JsonRpcProvider, Signer } from "near-api-js";
 import type { DelegateAction, PublicKey, SignedMessage, Transaction } from "near-api-js";
 import type { LimitsConfig } from "./config";
-import { describeOwnerDelegate, describeOwnerMessage, describeOwnerTransaction, RefusedSigningError, type OwnerTransaction } from "./ownerActions";
+import { describeOwnerDelegate, describeOwnerMessage, describeOwnerTransaction, isIntiShapedKey, RefusedSigningError, type OwnerTransaction } from "./ownerActions";
 
 /** What near-api-js passes to sign a NEP-413 message. */
 interface MessagePayload {
@@ -38,6 +38,31 @@ export class OwnerSigner extends Signer {
     super();
   }
 
+  /**
+   * The keys this transaction removes, other than Inti's current one, that the chain shows with
+   * Inti's shape. Read here, not taken from the app, so only such keys can ever be removed.
+   */
+  private async earlierIntiKeys(tx: OwnerTransaction): Promise<Set<string>> {
+    const current = this.config.intiPublicKey;
+    // The signing key itself is never an earlier Inti key, whatever the chain answers.
+    const own = (await this.inner.getPublicKey()).toString();
+    const asked = tx.actions.flatMap((a) => {
+      const key = a.deleteKey?.publicKey.toString();
+      return key !== undefined && key !== current && key !== own ? [key] : [];
+    });
+    const found = new Set<string>();
+    if (asked.length === 0 || tx.receiverId !== tx.signerId) return found;
+    const account = new Account(tx.signerId, new JsonRpcProvider({ url: this.config.rpcUrl }));
+    for (const key of asked) {
+      try {
+        if (isIntiShapedKey((await account.getAccessKey(key)).permission, tx.signerId)) found.add(key);
+      } catch {
+        // Not on the account, or the chain did not answer: the key is not treated as Inti's.
+      }
+    }
+    return found;
+  }
+
   getPublicKey(): Promise<PublicKey> {
     return this.inner.getPublicKey();
   }
@@ -51,7 +76,7 @@ export class OwnerSigner extends Signer {
    * without asking again only if it reads exactly as approved, in the same order.
    */
   async approveAll(transactions: readonly OwnerTransaction[]): Promise<void> {
-    const each = transactions.map((t) => describeOwnerTransaction(t, this.config));
+    const each = await Promise.all(transactions.map(async (t) => describeOwnerTransaction(t, this.config, await this.earlierIntiKeys(t))));
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     this.approved = [];
     if (!(await this.confirm(each.flat()))) throw new SigningCancelledError("You cancelled the signature. Nothing was sent.");
@@ -59,7 +84,7 @@ export class OwnerSigner extends Signer {
   }
 
   override async signTransaction(transaction: Transaction) {
-    const lines = describeOwnerTransaction(transaction, this.config);
+    const lines = describeOwnerTransaction(transaction, this.config, await this.earlierIntiKeys(transaction));
     if (!this.hasPasskey()) throw new RefusedSigningError("Inti refused to sign: protect your account with a passkey or an authenticator app first.");
     const next = this.approved.shift();
     const preApproved = next !== undefined && next.length === lines.length && next.every((line, i) => line === lines[i]);
