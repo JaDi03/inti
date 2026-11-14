@@ -167,6 +167,15 @@ describe("signing with the user's account key", () => {
     expect(wallet.signed).toHaveLength(2);
   });
 
+  it("pauses with Inti's current key even when the list of keys cannot be read", async () => {
+    const wallet = userWallet();
+    const client = clientSigningThrough(wallet);
+    vi.spyOn(Account.prototype, "getAccessKeyList").mockRejectedValue(new Error("rpc down"));
+    await client.disconnectInti(wallet.accountId, wallet.signer);
+    expect(wallet.shown).toEqual([["Turn off Inti's access to your account."]]);
+    expect(wallet.signed).toHaveLength(1);
+  });
+
   const notInti: [string, (w: Wallet) => unknown][] = [
     ["the user's own full-access key", () => "FullAccess"],
     ["a key for another contract", () => ({ FunctionCall: { allowance: "1", receiver_id: "other.near", method_names: ["fund_agent"] } })],

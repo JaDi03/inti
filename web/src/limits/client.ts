@@ -155,10 +155,16 @@ export class LimitsClient {
 
   /**
    * Inti keys from before the server's key changed: keys that may only call fund_agent on the
-   * account, other than the current one. Pausing, resuming and turning off remove them too.
+   * account, other than the current one. Pausing, resuming and turning off remove them too. When
+   * the list cannot be read it is empty, so pausing never waits on it.
    */
   async earlierIntiKeys(accountId: string): Promise<string[]> {
-    const list = await new Account(accountId, this.provider).getAccessKeyList();
+    let list;
+    try {
+      list = await new Account(accountId, this.provider).getAccessKeyList();
+    } catch {
+      return [];
+    }
     return list.keys
       .filter((k) => k.public_key !== this.config.intiPublicKey && isIntiShapedKey(k.access_key.permission, accountId))
       .map((k) => k.public_key);
