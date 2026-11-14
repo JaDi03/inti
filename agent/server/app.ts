@@ -21,6 +21,7 @@ import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
 import { GRANT_DAY_CHOICES, GRANT_DAYS, newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
 import type { ChainPort } from "./orders.js";
+import { dryRunTools, type DryRunDeps, type DryRunRecord } from "./dryRun.js";
 import { DailyQuota } from "./quota.js";
 import { realTools } from "./realTools.js";
 import type { Trading } from "./trading.js";
@@ -50,6 +51,9 @@ export interface AppDeps {
   agentQuota?: DailyQuota;
   verifyQuota?: DailyQuota;
   heldSaleQuota?: DailyQuota;
+  /** Where dry-run quotes come from; without it, the dry run prices with the live token list. */
+  dryRun?: Omit<DryRunDeps, "tokens">;
+  dryRunQuota?: DailyQuota;
   logger?: boolean;
 }
 
@@ -665,6 +669,53 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return reply.code(502).send({ error: "agent_unavailable" });
     } finally {
       if (!started) busy.delete(userId);
+    }
+  });
+
+  // Dry run: open to anyone, no sign-in, no wallet. The tools can only read prices and quotes, so
+  // nothing here can move money; the caps per IP and per day bound what it costs in model calls.
+  const dryRunQuota = deps.dryRunQuota ?? new DailyQuota(LIMITS.dryRunsPerIpPerDay, LIMITS.dryRunsPerDayTotal);
+  const dryRunBusy = new Set<string>();
+  const dryRunSource = deps.dryRun ?? { quoteAgent: async () => null, agent: { quote: async () => null } };
+  app.post("/api/dry-run/chat", { config: { rateLimit: { max: LIMITS.dryRunsPerIpPerMinute, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const body = chatBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (!deps.agentEnabled) return reply.code(503).send({ error: "agent_paused" });
+    const client = req.ip;
+    if (dryRunBusy.has(client)) return reply.code(409).send({ error: "busy" });
+    dryRunBusy.add(client);
+    try {
+      const allowed = dryRunQuota.take(client);
+      if (allowed !== "ok") {
+        req.log.warn({ cap: allowed }, "dry_run_quota_refused");
+        return reply.code(429).send({ error: allowed });
+      }
+      const tokens = await deps.tokens();
+      const record: DryRunRecord = { log: [], steps: [] };
+      const result = await runCycle({
+        brain: deps.brain,
+        goal: body.data.message,
+        policy: deps.policy(),
+        portfolio: deps.newPortfolio(tokens),
+        mode: "execute",
+        tools: dryRunTools({ ...dryRunSource, tokens: deps.tokens }, record),
+        maxSteps: LIMITS.dryRunSteps,
+        deadline: now() + LIMITS.dryRunTimeLimitMs,
+      });
+      req.log.info({ stopReason: result.stopReason, tools: record.log.length }, "dry_run");
+      return {
+        dryRun: true,
+        report: result.report,
+        stopReason: result.stopReason,
+        events: result.events.map(publicEvent),
+        log: record.log,
+        steps: record.steps,
+      };
+    } catch (error) {
+      req.log.error({ err: error instanceof Error ? error.message : "unknown" }, "dry_run_failed");
+      return reply.code(502).send({ error: "agent_unavailable" });
+    } finally {
+      dryRunBusy.delete(client);
     }
   });
 

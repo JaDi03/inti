@@ -11,6 +11,7 @@ import { demoPolicy, demoPortfolio, fetchTokens } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
 import { agentApiAccounts } from "./agents.js";
 import { buildApp } from "./app.js";
+import { partnerQuoteAgent } from "./dryRun.js";
 import { agentApiView, dashboard } from "./dashboard.js";
 import { privyVerifier } from "./auth.js";
 import { LIMITS, loadConfig } from "./config.js";
@@ -34,7 +35,8 @@ async function main(): Promise<void> {
   const chain = nearChain(config.nearRpcUrl, await loadIntiKey(config.intiKeyFile, config.intiPublicKey));
   // Next to the grants, so it lives wherever the server already keeps its state.
   const spendLog = await fileSpendLog(join(dirname(config.grantFile), "agent-spend.json"));
-  const orders = trading({ agents, grants, chain, agent: agentApiPort(config.agentApiKey, config.agentApiUrl), tokens, spendLog });
+  const agentPort = agentApiPort(config.agentApiKey, config.agentApiUrl);
+  const orders = trading({ agents, grants, chain, agent: agentPort, tokens, spendLog });
 
   // What an agent holds goes back to its owner's wallet: at start, then every few minutes.
   let sweeping = false;
@@ -68,6 +70,7 @@ async function main(): Promise<void> {
       proveReply(model, calls, { fetch, apiKey: config.nearAiApiKey, attestedKey, wait: (ms) => new Promise((r) => setTimeout(r, ms)), now: Date.now }),
     policy: demoPolicy,
     newPortfolio: demoPortfolio,
+    dryRun: { quoteAgent: partnerQuoteAgent(config.agentApiKey, config.agentApiUrl), agent: agentPort },
     allowedOrigins: config.allowedOrigins,
     agentEnabled: config.agentEnabled,
     trustedProxy: config.trustedProxy,
