@@ -252,7 +252,8 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
   const show = (text: string) => (hidden ? HIDDEN : text);
 
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    // A phone packs the sections a little closer, so the whole portfolio sits higher on the screen.
+    <div className={cn("flex flex-col gap-3 lg:gap-4", className)}>
       {showWallet && (
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
@@ -326,8 +327,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     </div>
                   </div>
                   {row?.enabled && (
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground shadow-sm">
-                      <Check className="size-3" /> Enabled
+                    // A small check, so the asset's name keeps the width of the tile.
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm" title="Enabled">
+                      <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+                      <span className="sr-only">Enabled</span>
                     </span>
                   )}
                 </div>
@@ -853,7 +856,8 @@ export type MobileView = (typeof MOBILE_VIEWS)[number];
  */
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey);
-  const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
+  // The bottom room clears the phone's gesture bar, so the last tiles never touch the screen's edge.
+  const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-[max(2rem,env(safe-area-inset-bottom))]";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
   const money = { address, config, client, status, state, onManage, onChanged, getAccessToken };
