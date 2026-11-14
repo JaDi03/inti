@@ -38,17 +38,25 @@ const BARRIERS: readonly Barrier[] = [
 const APP_PATH = "/app";
 /** The dry run: try Inti with a practice wallet, no sign-in. */
 const TRY_PATH = "/try";
+/** The public source code and the demo video, for anyone who wants to check how it works. */
+const SOURCE_URL = "https://github.com/JaDi03/inti";
+const VIDEO_URL = "https://x.com/_Ja_V1/status/2121621345314189646";
 
 function Header() {
   return (
     <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
       <img src="/inti-logo-horizontal-dark.svg" alt="Inti" className="h-9 w-auto sm:h-10" />
-      <a
-        href={APP_PATH}
-        className="rounded-full border-2 border-white/70 px-4 py-1.5 text-sm font-bold transition-colors hover:border-(--landing-green) hover:text-(--landing-green)"
-      >
-        Open app
-      </a>
+      <nav className="flex items-center gap-4">
+        <a href={SOURCE_URL} className="text-sm font-bold text-white/75 transition-colors hover:text-(--landing-green)">
+          GitHub
+        </a>
+        <a
+          href={APP_PATH}
+          className="rounded-full border-2 border-white/70 px-4 py-1.5 text-sm font-bold transition-colors hover:border-(--landing-green) hover:text-(--landing-green)"
+        >
+          Open app
+        </a>
+      </nav>
     </header>
   );
 }
@@ -65,8 +73,9 @@ function Hero() {
         you.
       </h1>
       <p className="mx-auto mt-8 max-w-2xl text-lg text-white/75 sm:text-xl">
-        There are fewer barriers every year. The ones left are the ones that make people stop. Inti removes them, and you
-        stay in control.
+        Type what you want, like &ldquo;sell half my bitcoin and buy gold with it&rdquo;. Your own agent does it on NEAR
+        Intents, the AI runs on private hardware in NEAR AI Cloud, and a contract on your account refuses anything over the
+        limits you sign.
       </p>
       <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
         <a
@@ -88,6 +97,9 @@ function Hero() {
           What stops people?
         </a>
       </div>
+      <a href={VIDEO_URL} className="mt-6 inline-block text-sm font-bold text-white/75 underline underline-offset-4 hover:text-(--landing-green)">
+        Watch the demo
+      </a>
     </section>
   );
 }
