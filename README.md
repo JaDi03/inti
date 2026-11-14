@@ -22,7 +22,7 @@ Demo video: **https://x.com/_Ja_V1/status/2121621345314189646**
 
 Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
 
-You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
+You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply in the signed-in app carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
 
 ---
 
@@ -53,7 +53,7 @@ You sign in with email or Google, you type "buy $5 of bitcoin", and you read in 
 
 **Dry run** (no account, no wallet, nothing moves):
 
-Open **https://getinti.xyz/try**, or tap **Dry run, no funds** on the landing page. You get a practice wallet with $100 of NEAR set aside for orders, a limit of $25 per order and $50 per day, and the same portfolio, limits and rules panels as the real app.
+Open **https://getinti.xyz/try**, or tap **Dry run, no funds** on the landing page. You get a practice wallet with $100 of NEAR set aside for orders, a limit of $25 per order and $50 per day (each message starts a fresh practice day), and the same portfolio, limits and rules panels as the real app.
 
 - Type `buy $5 of bitcoin`. The agent asks NEAR Intents for a real quote (`dry: true`, so nothing is bought) and answers with what you would get.
 - Under the reply, **Where your money would sit** shows the four steps the money would take: it waits in your wallet under your limits, goes to your own agent on NEAR Intents, is swapped with a minimum you accept, and the bitcoin comes back to your wallet.
@@ -86,7 +86,7 @@ Open **https://getinti.xyz** on a phone or a computer.
 
    The gold purchase, its sale and the euro happened inside the agent's confidential balance, so no public transaction shows them. The euro stays with the agent (see [Where your assets sit](#where-your-assets-sit)).
 8. Type an order above your limit. Inti tells you it is over your limit and sends no transaction, so you pay no fee. If Inti's check were ever wrong, the contract would refuse the order on chain (see [Your limits and Inti's key](#your-limits-and-intis-key)).
-9. To stop Inti you have two switches, both signed by you. **Pause Inti** deletes Inti's key from your account, so no more money leaves your wallet; your agent can still trade what it already holds while your grant lasts. Freezing your agent stops everything it does until you unfreeze it.
+9. To stop Inti you have two switches, both signed by you. **Pause Inti** deletes Inti's key from your account, and any earlier Inti key it still has, so no more money leaves your wallet; your agent can still trade what it already holds while your grant lasts. Freezing your agent stops everything it does until you unfreeze it.
 
 ## What an intent is, and why it matters here
 
