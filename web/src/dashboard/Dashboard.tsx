@@ -252,8 +252,8 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
   const show = (text: string) => (hidden ? HIDDEN : text);
 
   return (
-    // A phone packs the sections a little closer, so the whole portfolio sits higher on the screen.
-    <div className={cn("flex flex-col gap-3 lg:gap-4", className)}>
+    // Sections sit close enough that the whole portfolio fits higher on the screen.
+    <div className={cn("flex flex-col gap-3", className)}>
       {showWallet && (
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
@@ -313,7 +313,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {showWalletAssets && GROUPS.map((group) => (
       <section key={group.title}>
-        <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
+        <h3 className="mb-2 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -375,7 +375,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {showAgent && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
-          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
+          <p className="mb-2 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
           <ul className="grid auto-rows-fr grid-cols-2 gap-3">
             {(() => {
               // Null while the agent's balance cannot be read.
@@ -862,8 +862,7 @@ export type MobileView = (typeof MOBILE_VIEWS)[number];
  */
 export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, children }: LayoutProps) {
   const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey);
-  // The bottom room clears the phone's gesture bar, so the last tiles never touch the screen's edge.
-  const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-[max(2rem,env(safe-area-inset-bottom))]";
+  const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
   const money = { address, config, client, status, state, onManage, onChanged, getAccessToken };
