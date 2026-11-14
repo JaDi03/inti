@@ -4,11 +4,13 @@
 ![node](https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
-Inti is an investment agent on NEAR. You say in plain words what to buy or sell, and it does it from your own wallet, within limits you sign.
+Inti is an investment agent on NEAR. You type `buy $5 of bitcoin`, and your own agent on NEAR Intents buys it with NEAR from your wallet, within limits you set.
 
 Live app: **https://getinti.xyz** (NEAR mainnet, real funds).
 
-Giving an AI agent money usually means giving it your keys. With Inti your funds stay in your wallet. Inti gets a key that can only send orders, and a contract on your own account refuses any order above your limits.
+Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
+
+You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
 
 ---
 
@@ -33,7 +35,7 @@ Every year there are fewer barriers to using a blockchain. The ones left are the
 - **A mistake you cannot undo.** One wrong network or address and the money is gone.
 - **Handing an AI the keys to your money.** An agent that can trade for you can usually also empty your account.
 
-Inti removes those three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address, and the limits you set are enforced by a contract on your own account, not by Inti's server.
+Inti works on all three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
 
 ## Try it
 
@@ -60,8 +62,8 @@ Open **https://getinti.xyz** on a phone or a computer.
    - [`5cr7nwxz`](https://nearblocks.io/txns/5cr7nwxzMiqmBeEHgN73v3vWs52E5HJ6Ad83SZAYhTLB): NEAR Intents sends 0.00003638 BTC to the user's wallet.
 
    The gold purchase, its sale and the euro happened inside the agent's confidential balance, so no public transaction shows them. The euro stays with the agent (see [Where your assets sit](#where-your-assets-sit)).
-8. Type an order above your limit. Inti tells you it is over your limit, and no transaction is sent, so you pay no fee. Your limits are checked twice: first by Inti, which reads them from your contract before it signs anything (`agent/server/orders.ts`, `fund`), and then by the contract itself on chain. The second check holds even if Inti's server were wrong or compromised; its refusals are covered by the contract's tests (`contracts/spending-limits/tests/`).
-9. To stop Inti at once, tap **Pause Inti** (deletes Inti's key from your account) or freeze your agent (it can do nothing until you unfreeze it). Both are your signature, not Inti's.
+8. Type an order above your limit. Inti tells you it is over your limit and sends no transaction, so you pay no fee. If Inti's check were ever wrong, the contract would refuse the order on chain (see [Your limits and Inti's key](#your-limits-and-intis-key)).
+9. To stop Inti you have two switches, both signed by you. **Pause Inti** deletes Inti's key from your account, so no more money leaves your wallet; your agent can still trade what it already holds while your grant lasts. Freezing your agent stops everything it does until you unfreeze it.
 
 ## What an intent is, and why it matters here
 
@@ -82,7 +84,7 @@ Inti takes that promise literally. The words you type become an intent on [NEAR 
 2. **The model decides.** It runs on [NEAR AI Cloud](https://docs.near.ai/cloud/quickstart) inside a TEE (private hardware) and picks one of eight tools. It names an asset and an amount in dollars; it never writes an address.
 3. **The contract checks.** Inti's key calls `fund_agent` on your account. The contract adds the order to what the last 24 hours already spent and refuses it if a limit would be passed.
 4. **Your agent trades.** The NEAR goes to your own agent on NEAR Intents, which swaps it with a minimum you accept, from its confidential balance.
-5. **The result comes home.** Bitcoin, ether and Zcash go to your wallet. Anything left with the agent is sent back to your wallet every 5 minutes.
+5. **The result comes home.** Bitcoin, ether and Zcash go to your wallet; if one could not be sent right away, Inti tries again every 5 minutes. Gold, euro, Solana and the NEAR from a sale stay with your agent (see [Where your assets sit](#where-your-assets-sit)).
 
 ### The agent
 
@@ -103,9 +105,9 @@ export const ASSETS = {
 
 The agent buys and sells bitcoin (BTC), ether (ETH) and Zcash (ZEC), and pays with NEAR. These go to your wallet.
 
-It also buys gold (XAUT), euro (EURe) and Solana (SOL) (`agent/policy/heldAssets.ts`). These stay in your agent's confidential balance on NEAR Intents, and the dashboard shows how much your agent holds of each, with its price. When you ask Inti to sell, the agent sells for NEAR and sends the NEAR to your wallet.
+It also buys gold (XAUT), euro (EURe) and Solana (SOL) (`agent/policy/heldAssets.ts`). These stay in your agent's confidential balance on NEAR Intents, and the dashboard shows how much your agent holds of each, with its price. When you ask Inti to sell, the agent sells for NEAR and keeps that NEAR to pay for your next purchase. To bring it to your wallet, type `send my NEAR to my wallet` or use the send button next to your agent's NEAR on the dashboard.
 
-Why they stay with the agent: since 12 November 2026 the Agent API trades only from the agent's confidential balance. From there it can send to a NEAR wallet only tokens that live on NEAR, and these three live on Ethereum, Gnosis and Solana.
+Why they stay with the agent: since 12 November 2026 the Agent API trades only from the agent's confidential balance; the public balance can only send funds out (the API answers `public_balance_exit_only`). From the confidential balance it sends to a NEAR wallet only tokens that live on NEAR. Gold, euro and Solana live on Ethereum, Gnosis and Solana, so a withdrawal of them answers `unsupported_token` (`agent/server/orders.ts`).
 
 What this means for you:
 
