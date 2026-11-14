@@ -188,6 +188,18 @@ Inti's key also has a gas allowance of 0.25 NEAR (`web/src/limits/config.ts`), f
 
 If Inti's key were stolen, the most it could do is send your limits to your own agent, use up the 24 orders of a day, and spend its 0.25 NEAR allowance on fees. Deleting the key ends all three. Because your account keeps its full-access key, it never depends on that allowance and cannot be locked out by it.
 
+We tried this on mainnet on 14 November 2026, with Inti's real key on a real user's account, acting as a thief would:
+
+1. Send 0.01 NEAR to another wallet. NEAR refused it before it ran: `Access key requires full access`.
+2. Send a tenth of the user's bitcoin to the same wallet. NEAR refused it before it ran: `Deposit is not allowed with function call`.
+3. Call `fund_agent` for 1 yoctoNEAR over the per-order limit. The contract refused it on chain: `Smart contract panicked: over the per-order limit` ([`Hum36XqT`](https://nearblocks.io/txns/Hum36XqT8zcF9fQHFvDxHDuocZ58Nb1GAPUPZJqsR3Qb)).
+
+The other wallet received nothing. The first two cost no fee; the third cost 0.00016 NEAR of gas from Inti's allowance.
+
+<p align="center">
+  <img alt="Terminal output of the three tries, each one stopped, next to the user's portfolio in Inti, which still shows the same bitcoin." src="docs/images/key-check-mainnet.png" width="720">
+</p>
+
 The Agent API adds a second layer: your agent runs under a policy you sign, which only lets it send to your wallet.
 
 Contract details, tests and formal proofs: [Spending Limits contract](contracts/spending-limits/README.md).
