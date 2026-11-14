@@ -1,11 +1,15 @@
+import { PrivyProvider } from "@privy-io/react-auth";
 import { ArrowLeftRight, Bot, Wallet } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MOBILE_VIEWS, PortfolioLayout, type MobileView } from "../dashboard/Dashboard";
+import type { DashboardData } from "../dashboard/dashboardClient";
+import { NOTHING_SIGNED, PRACTICE_WALLET, PracticeLimitsClient, practiceConfig, practiceStatus } from "./practice";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { IntiMascot } from "@/components/ui/inti-mascot";
 import { cn } from "@/lib/utils";
 import { ChatMessage, TypingIndicator } from "../chat/ChatMessage";
 import { logoSrc, ThemeProvider, ThemeToggle, useTheme } from "../theme";
-import { askDryRun, DryRunError, type DryRunLogEntry, type FundStep } from "./client";
+import { askDryRun, DryRunError, fetchPracticeDashboard, type DryRunLogEntry, type FundStep } from "./client";
 
 type Message = { id: number; from: "user" | "inti"; text: string; steps?: FundStep[]; log?: DryRunLogEntry[] };
 
@@ -75,8 +79,81 @@ function AgentLog({ log }: { log: DryRunLogEntry[] }) {
   );
 }
 
+/**
+ * The app's own portfolio panels around the chat, on the practice wallet: what can be bought, the
+ * limits, the agent's rules and the protections, exactly as a real owner sees them. Anything that
+ * would sign shows a note instead.
+ */
+function PracticePortfolio({ view, onNote, children }: { view: MobileView; onNote: (text: string) => void; children: ReactNode }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    void fetchPracticeDashboard().then((d) => {
+      if (!current) return;
+      if (d?.prices.near) setData(d);
+      else setFailed(true);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  const config = useMemo(() => practiceConfig(), []);
+  const client = useMemo(() => new PracticeLimitsClient(config), [config]);
+  const readDashboard = useCallback(() => Promise.resolve(data), [data]);
+  const noToken = useCallback(() => Promise.resolve(null), []);
+  if (!data?.prices.near) {
+    return (
+      <>
+        {failed && <p className="sr-only">The practice portfolio could not be loaded.</p>}
+        {children}
+      </>
+    );
+  }
+  return (
+    <PortfolioLayout
+      address={PRACTICE_WALLET}
+      config={config}
+      client={client}
+      status={practiceStatus(data.prices.near)}
+      getAccessToken={noToken}
+      onManage={() => onNote(NOTHING_SIGNED)}
+      onExport={() => onNote(NOTHING_SIGNED)}
+      onChanged={() => undefined}
+      view={view}
+      grantSigned
+      refreshKey={0}
+      readDashboard={readDashboard}
+    >
+      {children}
+    </PortfolioLayout>
+  );
+}
+
 function DryRunChat() {
   const { theme } = useTheme();
+  const [view, setView] = useState<MobileView>("chat");
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!note) return;
+    const timer = setTimeout(() => setNote(null), 4_000);
+    return () => clearTimeout(timer);
+  }, [note]);
+  // Every button of the portfolio panels that would act (sign, enable, renew, freeze, add a passkey)
+  // shows the note instead; only the ones that read (fold, show amounts, copy, refresh) still work.
+  useEffect(() => {
+    const reads = /^(Show amounts|Hide amounts|Refresh|Copy .+|.+ copied)$/;
+    const onClick = (e: MouseEvent) => {
+      const button = e.target instanceof Element ? e.target.closest("button") : null;
+      if (!button?.closest("aside")) return;
+      if (button.hasAttribute("aria-expanded") || reads.test(button.getAttribute("aria-label") ?? "")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setNote(NOTHING_SIGNED);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [thinking, setThinking] = useState(false);
   const nextId = useRef(0);
@@ -121,7 +198,31 @@ function DryRunChat() {
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col items-center px-4">
+      <div className="flex justify-center px-4 pb-2 group-has-[textarea:focus]/app:hidden lg:hidden" role="tablist" aria-label="View">
+        <div className="flex w-full max-w-md rounded-full bg-muted p-1 text-[13px]">
+          {MOBILE_VIEWS.map((v) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              className={cn("h-9 min-w-0 flex-1 rounded-full px-1 font-medium capitalize transition-colors", view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}
+              onClick={() => setView(v)}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {note && (
+        <p role="status" className="fixed inset-x-4 bottom-24 z-50 mx-auto max-w-md rounded-xl bg-foreground px-4 py-3 text-center text-sm text-background shadow-lg">
+          {note}
+        </p>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+      <PracticePortfolio view={view} onNote={setNote}>
+      <main className={cn("flex min-h-0 flex-1 flex-col items-center px-4", view !== "chat" && "hidden lg:flex")}>
         <div className={cn("flex w-full max-w-2xl shrink-0 flex-col items-center", empty ? "mt-[10vh]" : "mt-2 max-lg:hidden")}>
           <IntiMascot size={empty ? 160 : 96} state={thinking ? "thinking" : "idle"} />
           {empty && (
@@ -176,11 +277,30 @@ function DryRunChat() {
           <PromptInput onSubmit={(text) => void send(text)} placeholder="e.g. buy $5 of bitcoin" disabled={thinking} />
         </div>
       </main>
+      </PracticePortfolio>
+      </div>
     </div>
   );
 }
 
-/** The dry run page: no sign-in and no wallet, only its theme. */
+const appId = import.meta.env.PRIVY_APP_ID as string | undefined;
+
+/**
+ * The dry run page. The portfolio panels are the app's own, which expect the sign-in provider, so
+ * it is loaded; nobody signs in here, so there is no wallet and nothing that could sign.
+ */
 export function DryRunRoot() {
-  return <ThemeProvider>{() => <DryRunChat />}</ThemeProvider>;
+  return (
+    <ThemeProvider>
+      {(theme) =>
+        appId ? (
+          <PrivyProvider appId={appId} config={{ loginMethods: ["email", "google"], appearance: { theme, accentColor: "#00EB96" } }}>
+            <DryRunChat />
+          </PrivyProvider>
+        ) : (
+          <DryRunChat />
+        )
+      }
+    </ThemeProvider>
+  );
 }

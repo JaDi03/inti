@@ -1,3 +1,4 @@
+import type { DashboardData } from "../dashboard/dashboardClient";
 /** Public URL of Inti's agent API (INTI_API_URL in the root .env). Not a secret. */
 const API_URL = (import.meta.env as Record<string, string | undefined>).INTI_API_URL;
 
@@ -67,4 +68,17 @@ export async function askDryRun(message: string): Promise<DryRunReply> {
       })
     : [];
   return { report: typeof body.report === "string" ? body.report : "", log, steps };
+}
+
+/** The practice wallet's dashboard: live prices and the rules every agent signs. Null when it cannot be read. */
+export async function fetchPracticeDashboard(): Promise<DashboardData | null> {
+  if (!API_URL) return null;
+  try {
+    const res = await fetch(new URL("/api/dry-run/dashboard", API_URL), { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as DashboardData;
+    return typeof body === "object" && body !== null && typeof body.prices === "object" && body.prices !== null ? body : null;
+  } catch {
+    return null;
+  }
 }
