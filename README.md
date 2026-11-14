@@ -169,6 +169,17 @@ Contract details, tests and formal proofs: [Spending Limits contract](contracts/
 
 ## Check it yourself
 
+### The code builds and its tests pass
+
+With Node 24 and pnpm 11, on a fresh clone and with no `.env`:
+
+```bash
+pnpm install
+pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm web:build
+```
+
+The contract has its own tests, property runs and formal proofs: see [Spending Limits contract](contracts/spending-limits/README.md#build-and-test).
+
 ### The contract on mainnet is this code
 
 The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (tested with 0.23.0; the build itself runs inside the pinned Docker image). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
