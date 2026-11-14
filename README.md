@@ -303,16 +303,62 @@ To run it on your computer or change the code, see [CONTRIBUTING.md](CONTRIBUTIN
 ## Project structure
 
 ```
-agent/                 the investment agent (TypeScript)
-  core/                loop, simulated portfolio, money math
-  brains/              model adapters: NEAR AI Cloud, scripted brain for tests
-  policy/              the assets the agent trades, token units
-  server/              the API the web app calls, orders and grants
-  cli/new-key.ts       create Inti's key for a local setup
-contracts/
-  spending-limits/     NEAR contract on the user's own account (Rust)
-web/                   app: login, Spending Limits, chat (React)
-deploy/                install.sh and the server files it sets up
+inti/
+├── agent/                    the agent: the AI model proposes, the code decides
+│   ├── core/
+│   │   ├── loop.ts           one chat message: the model picks tools until it has an answer
+│   │   ├── tools.ts          the tools the model can call on the practice portfolio
+│   │   ├── guard.ts          limits checked in code before any action runs
+│   │   ├── money.ts          dollar math in whole micro-dollars, never floats
+│   │   ├── portfolio.ts      tokens and prices from the NEAR Intents token list
+│   │   ├── sanitize.ts       cleans token names before the model reads them
+│   │   └── types.ts          the shapes the loop speaks, whatever the model
+│   ├── brains/
+│   │   ├── nearai.ts         the model on NEAR AI Cloud, inside a TEE
+│   │   └── scripted.ts       a model that follows a script, for tests
+│   ├── policy/
+│   │   ├── assets.ts         the assets Inti trades, by a fixed name the model picks from
+│   │   ├── heldAssets.ts     the assets that stay with the agent (gold, euro, SOL)
+│   │   ├── agentPolicy.ts    the policy each agent signs: it sends only to its owner
+│   │   ├── build.ts          builds that policy in human units
+│   │   ├── verify.ts         checks a live policy matches the one the user signed
+│   │   └── units.ts          exact decimal to token-unit conversion
+│   ├── server/
+│   │   ├── index.ts          starts the server from the environment
+│   │   ├── app.ts            the routes the web app calls
+│   │   ├── config.ts         settings and every cap on use and cost
+│   │   ├── auth.ts           checks the Privy sign-in on every request
+│   │   ├── realTools.ts      the tools the model gets with real money
+│   │   ├── trading.ts        buys, sells and price orders for one user
+│   │   ├── orders.ts         one order end to end: fund the agent, swap, send home
+│   │   ├── agentCash.ts      trades paid with what the agent already holds
+│   │   ├── held.ts           buying and selling the assets the agent keeps
+│   │   ├── spendLog.ts       what Inti sent in the last 24 hours, checked before the contract
+│   │   ├── agents.ts         creates and finds each user's agent on the Agent API
+│   │   ├── grants.ts         the trading permission each user signs, stored encrypted
+│   │   ├── dashboard.ts      the agent's balances, open orders and signed rules
+│   │   ├── attestation.ts    checks the model runs on attested hardware
+│   │   ├── replyProof.ts     checks each reply was signed inside the TEE
+│   │   ├── chatJobs.ts       a message's progress while it runs
+│   │   ├── quota.ts          messages per user and per day
+│   │   └── dryRun.ts         the dry run: practice wallet, live quotes, nothing moves
+│   └── cli/new-key.ts        creates Inti's function-call key for a server
+├── contracts/spending-limits/
+│   ├── src/lib.rs            the contract on the user's own account: limits and fund_agent
+│   ├── tests/                unit, property and sandbox tests
+│   └── verification/         formal proofs (Kani) of the limit arithmetic
+├── web/src/
+│   ├── landing/              the landing page
+│   ├── dryrun/               the dry run page at /try
+│   ├── dashboard/            portfolio, receive, grant renewal, price protection
+│   ├── limits/               Spending Limits: activation, limits, passkey, signing
+│   ├── agent/                create the agent, sign the grant, freeze
+│   ├── chat/                 the chat and its messages
+│   ├── assets/               the assets panel
+│   ├── verify/               the AI hardware badge and each reply's signature
+│   └── privySigner.ts        lets near-api-js sign with the Privy wallet
+├── deploy/                   install.sh and the server files it sets up
+└── docs/                     diagrams and images used in this README
 ```
 
 ## Tech stack
