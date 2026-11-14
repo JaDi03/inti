@@ -190,9 +190,9 @@ If Inti's key were stolen, the most it could do is send your limits to your own 
 
 We tried this on mainnet on 14 November 2026, with Inti's real key on a real user's account, acting as a thief would:
 
-1. Send 0.01 NEAR to another wallet. NEAR refused it before it ran: `Access key requires full access`.
-2. Send a tenth of the user's bitcoin to the same wallet. NEAR refused it before it ran: `Deposit is not allowed with function call`.
-3. Call `fund_agent` for 1 yoctoNEAR over the per-order limit. The contract refused it on chain: `Smart contract panicked: over the per-order limit` ([`Hum36XqT`](https://nearblocks.io/txns/Hum36XqT8zcF9fQHFvDxHDuocZ58Nb1GAPUPZJqsR3Qb)).
+1. Send 0.01 NEAR to another wallet. NEAR refused it before it ran, because the key can only call `fund_agent`: `Access key requires full access`.
+2. Send a tenth of the user's bitcoin to the same wallet. NEAR refused it before it ran, because the key can call no other contract and attach no deposit: `Deposit is not allowed with function call`.
+3. Call `fund_agent`, the one call the key allows, for 1 yoctoNEAR over the per-order limit. The Spending Limits contract refused it on chain: `Smart contract panicked: over the per-order limit` ([`Hum36XqT`](https://nearblocks.io/txns/Hum36XqT8zcF9fQHFvDxHDuocZ58Nb1GAPUPZJqsR3Qb)).
 
 The other wallet received nothing. The first two cost no fee; the third cost 0.00016 NEAR of gas from Inti's allowance.
 
