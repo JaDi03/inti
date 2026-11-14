@@ -55,7 +55,11 @@ Open **https://getinti.xyz** on a phone or a computer.
    - **Set your spending limits** and tap **Activate Inti**. You sign two transactions. The first installs the Spending Limits contract on your account, sets your limits and gives Inti a key that can only call `fund_agent`. The second wraps the NEAR you set aside for orders.
 6. Sign a trading permission (a grant) for your agent, for 7, 30 or 90 days.
 7. Type `buy $5 of gold`, `buy Zcash if it drops to $900`, or `sell half my bitcoin and buy euro with it`. The agent places each order, one after another, and tells you what it got and what it cost. The result appears in your portfolio. To ask the price without buying, type `how much bitcoin do I get for $5?`.
-   One real order on mainnet: [`2g5VBGWH`](https://nearblocks.io/txns/2g5VBGWHZCAtQYM9S122tRNVYsvcqUkj3nPbCVfzECHk), Inti's key calling `fund_agent` with 0.0286 wNEAR on a user's account.
+   A real use on mainnet, 14 November 2026: `buy $5 of gold`, then `sell it, half for bitcoin and half for euro`. On chain you see only two transactions:
+   - [`C68paMYv`](https://nearblocks.io/txns/C68paMYvQmm9AWrfvErLXuEMNrcFQEsy4wmBRugaWhJh): the Spending Limits contract on the user's account sends 1.488 wNEAR to the user's agent in NEAR Intents, after checking the limits.
+   - [`5cr7nwxz`](https://nearblocks.io/txns/5cr7nwxzMiqmBeEHgN73v3vWs52E5HJ6Ad83SZAYhTLB): NEAR Intents sends 0.00003638 BTC to the user's wallet.
+
+   The gold purchase, its sale and the euro happened inside the agent's confidential balance, so no public transaction shows them. The euro stays with the agent (see [Where your assets sit](#where-your-assets-sit)).
 8. Type an order above your limit. Inti tells you it is over your limit, and no transaction is sent, so you pay no fee. Your limits are checked twice: first by Inti, which reads them from your contract before it signs anything (`agent/server/orders.ts`, `fund`), and then by the contract itself on chain. The second check holds even if Inti's server were wrong or compromised; its refusals are covered by the contract's tests (`contracts/spending-limits/tests/`).
 9. To stop Inti at once, tap **Pause Inti** (deletes Inti's key from your account) or freeze your agent (it can do nothing until you unfreeze it). Both are your signature, not Inti's.
 
