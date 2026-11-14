@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ScriptedBrain } from "../brains/scripted.js";
 import { demoPolicy, demoPortfolio } from "../core/demo.js";
 import type { PricedToken } from "../core/portfolio.js";
+import type { Brain } from "../core/types.js";
 import type { AgentEvent } from "../core/tools.js";
 import { ASSETS } from "../policy/assets.js";
 import { HELD_ASSETS } from "../policy/heldAssets.js";
@@ -11,6 +12,7 @@ import { buildApp } from "./app.js";
 import { dryRunTools, LOG_LINES, partnerQuoteAgent, QUOTES_PER_MESSAGE, type DryRunRecord } from "./dryRun.js";
 import type { GrantStore } from "./grants.js";
 import { FUNDING_ASSET } from "./orders.js";
+import { LIMITS } from "./config.js";
 import { DailyQuota } from "./quota.js";
 
 const AGENT_ID = "e".repeat(64);
@@ -122,10 +124,10 @@ describe("POST /api/dry-run/chat", () => {
       () => ({ text: "", stop: "tool_use", toolCalls: [{ id: "1", name: "buy_now", input: { asset: "bitcoin", usd: "5", reason: "asked" } }] }),
       () => ({ text: "Dry run: nothing was bought.", stop: "end", toolCalls: [] }),
     ]);
-  const server = (quota?: DailyQuota) =>
+  const server = (quota?: DailyQuota, brain: Brain = buyThenReport()) =>
     buildApp({
       verify: () => Promise.reject(new Error("no sign-in here")),
-      brain: buyThenReport(),
+      brain,
       tokens: () => Promise.resolve([...fixture.tokens, ...TOKENS]),
       agents: {} as AgentAccounts,
       grants: {} as GrantStore,
@@ -138,8 +140,8 @@ describe("POST /api/dry-run/chat", () => {
       dryRun: { quoteAgent: () => Promise.resolve(AGENT_ID), agent: { quote: () => Promise.resolve({ amountOut: 4945n, minAmountOut: 4895n, costUsd: null, costPercent: null, seconds: null }) } },
       ...(quota ? { dryRunQuota: quota } : {}),
     });
-  const send = (app: Awaited<ReturnType<typeof server>>, payload: unknown) =>
-    app.inject({ method: "POST", url: "/api/dry-run/chat", headers: { "content-type": "application/json" }, payload: JSON.stringify(payload) });
+  const send = (app: Awaited<ReturnType<typeof server>>, payload: unknown, remoteAddress = "127.0.0.1") =>
+    app.inject({ method: "POST", url: "/api/dry-run/chat", remoteAddress, headers: { "content-type": "application/json" }, payload: JSON.stringify(payload) });
 
   it("answers without signing in, with the log and the steps of the money", async () => {
     const res = await send(await server(), { message: "buy 5 dollars of bitcoin" });
@@ -158,6 +160,31 @@ describe("POST /api/dry-run/chat", () => {
     const second = await send(app, { message: "hi" });
     expect(second.statusCode).toBe(429);
     expect(second.json()).toEqual({ error: "user_limit" });
+  });
+
+  it("runs a few messages at once per network and caps how many run in total", async () => {
+    const releases: (() => void)[] = [];
+    const waiting: Brain = {
+      name: "waiting",
+      step: () => new Promise((r) => releases.push(() => r({ role: "assistant", text: "done", toolCalls: [], stop: "end" }))),
+    };
+    const app = await server(undefined, waiting);
+    const ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"];
+    const running = Array.from({ length: LIMITS.dryRunsAtOnceTotal }, (_, i) => send(app, { message: "hi" }, ips[Math.floor(i / LIMITS.dryRunsAtOncePerIp)]));
+    await new Promise((r) => setTimeout(r, 10));
+    const sameNetwork = await send(app, { message: "hi" }, "10.0.0.1");
+    expect(sameNetwork.statusCode).toBe(409);
+    expect(sameNetwork.json()).toEqual({ error: "busy" });
+    const full = await send(app, { message: "hi" }, "10.0.0.9");
+    expect(full.statusCode).toBe(503);
+    expect(full.json()).toEqual({ error: "dry_run_full" });
+    releases.forEach((release) => release());
+    expect((await Promise.all(running)).map((r) => r.statusCode)).toEqual(Array(LIMITS.dryRunsAtOnceTotal).fill(200));
+    releases.length = 0;
+    const after = send(app, { message: "hi" }, "10.0.0.1");
+    await new Promise((r) => setTimeout(r, 10));
+    releases.forEach((release) => release());
+    expect((await after).statusCode).toBe(200);
   });
 
   it("shows the practice dashboard without signing in: live prices and the rules every agent signs", async () => {

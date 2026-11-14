@@ -675,7 +675,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Dry run: open to anyone, no sign-in, no wallet. The tools can only read prices and quotes, so
   // nothing here can move money; the caps per IP and per day bound what it costs in model calls.
   const dryRunQuota = deps.dryRunQuota ?? new DailyQuota(LIMITS.dryRunsPerIpPerDay, LIMITS.dryRunsPerDayTotal);
-  const dryRunBusy = new Set<string>();
+  // Messages running now, per IP and in total.
+  const dryRunRunning = new Map<string, number>();
+  let dryRunRunningTotal = 0;
   const dryRunSource = deps.dryRun ?? { quoteAgent: async () => null, agent: { quote: async () => null } };
   // The practice wallet's dashboard: live prices and the rules every agent signs. No model call.
   app.get("/api/dry-run/dashboard", async (req, reply) => {
@@ -692,8 +694,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     if (!deps.agentEnabled) return reply.code(503).send({ error: "agent_paused" });
     const client = req.ip;
-    if (dryRunBusy.has(client)) return reply.code(409).send({ error: "busy" });
-    dryRunBusy.add(client);
+    const mine = dryRunRunning.get(client) ?? 0;
+    if (mine >= LIMITS.dryRunsAtOncePerIp) return reply.code(409).send({ error: "busy" });
+    if (dryRunRunningTotal >= LIMITS.dryRunsAtOnceTotal) return reply.code(503).send({ error: "dry_run_full" });
+    dryRunRunning.set(client, mine + 1);
+    dryRunRunningTotal++;
     try {
       const allowed = dryRunQuota.take(client);
       if (allowed !== "ok") {
@@ -725,7 +730,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       req.log.error({ err: error instanceof Error ? error.message : "unknown" }, "dry_run_failed");
       return reply.code(502).send({ error: "agent_unavailable" });
     } finally {
-      dryRunBusy.delete(client);
+      const left = (dryRunRunning.get(client) ?? 1) - 1;
+      if (left > 0) dryRunRunning.set(client, left);
+      else dryRunRunning.delete(client);
+      dryRunRunningTotal--;
     }
   });
 

@@ -71,8 +71,12 @@ export const LIMITS = {
   chatPollsPerIpPerMinute: 120,
   /** Dry-run messages, open to anyone without signing in: per IP per minute and per day, and in total per day. */
   dryRunsPerIpPerMinute: 5,
-  dryRunsPerIpPerDay: 20,
+  dryRunsPerIpPerDay: 100,
   dryRunsPerDayTotal: 300,
+  /** Dry-run messages running at once from one IP: judges in one room share a network. */
+  dryRunsAtOncePerIp: 3,
+  /** Dry-run messages running at once for everyone: bounds the model calls in flight. */
+  dryRunsAtOnceTotal: 10,
   /** Model steps one dry-run message may take: the portfolio, a quote or two, and the reply. */
   dryRunSteps: 6,
   /** After this long no new step of a dry-run message starts. */

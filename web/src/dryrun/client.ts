@@ -24,7 +24,8 @@ const MESSAGES: Record<string, string> = {
   user_limit: "You reached today's limit of dry-run messages. Open the app to keep going.",
   server_limit: "The dry run is very busy today. Try again tomorrow, or open the app.",
   rate_limited: "Too many messages in a minute. Wait a moment and retry.",
-  busy: "I'm still working on your last message.",
+  busy: "A few dry-run messages from your network are still running. Wait for one to finish.",
+  dry_run_full: "Many people are trying the dry run right now. Try again in a minute.",
   agent_paused: "Inti is paused for maintenance. Try again later.",
   agent_unavailable: "I couldn't reach my tools right now. Try again in a minute.",
 };
