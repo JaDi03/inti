@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
 import { IntiMascot } from "@/components/ui/inti-mascot";
+import { useBlurOnKeyboardClose } from "@/lib/keyboardClose";
 import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
@@ -70,6 +71,8 @@ export function App() {
   const { theme } = useTheme();
   const { createWallet } = useCreateWallet();
   const { exportWallet } = useExportWallet();
+  // The header and tabs hide while typing on a phone; they come back when the keyboard closes.
+  useBlurOnKeyboardClose();
   const [messages, setMessages] = useState<Message[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
