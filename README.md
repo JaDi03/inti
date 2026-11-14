@@ -56,7 +56,7 @@ Open **https://getinti.xyz** on a phone or a computer.
 6. Sign a trading permission (a grant) for your agent, for 7, 30 or 90 days.
 7. Type `buy $5 of gold`, `buy Zcash if it drops to $900`, or `sell half my bitcoin and buy euro with it`. The agent places each order, one after another, and tells you what it got and what it cost. The result appears in your portfolio. To ask the price without buying, type `how much bitcoin do I get for $5?`.
    One real order on mainnet: [`2g5VBGWH`](https://nearblocks.io/txns/2g5VBGWHZCAtQYM9S122tRNVYsvcqUkj3nPbCVfzECHk), Inti's key calling `fund_agent` with 0.0286 wNEAR on a user's account.
-8. Type an order above your limit. Inti says it is over your limit and nothing moves. The server checks your limits first (`agent/server/orders.ts`, `fund`); the contract checks them again on chain, so the refusal holds even if the server is wrong or compromised. The contract's own refusals are covered by its tests (`contracts/spending-limits/tests/`).
+8. Type an order above your limit. Inti tells you it is over your limit, and no transaction is sent, so you pay no fee. Your limits are checked twice: first by Inti, which reads them from your contract before it signs anything (`agent/server/orders.ts`, `fund`), and then by the contract itself on chain. The second check holds even if Inti's server were wrong or compromised; its refusals are covered by the contract's tests (`contracts/spending-limits/tests/`).
 9. To stop Inti at once, tap **Pause Inti** (deletes Inti's key from your account) or freeze your agent (it can do nothing until you unfreeze it). Both are your signature, not Inti's.
 
 ## What an intent is, and why it matters here
@@ -166,7 +166,14 @@ What Inti's key **cannot** do, because the network or the contract refuses it:
 require!(new_spent <= limit.per_day.0, "over the daily limit");
 ```
 
-`contracts/spending-limits/src/lib.rs`: before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits.
+```ts
+if (amount > limit.perOrder) return "over_order_limit";
+if ((await chain.spentLast24h(account.owner, token)) + amount > limit.perDay) return "over_daily_limit";
+```
+
+`agent/server/orders.ts`: before it signs an order, Inti reads your limits and what the last 24 hours spent from your own contract. An order over a limit is stopped here, so it never reaches the chain and costs you nothing.
+
+`contracts/spending-limits/src/lib.rs`: the contract checks again. Before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits.
 
 Inti's key also has a gas allowance of 0.25 NEAR (`web/src/limits/config.ts`), from which it pays each order's network fee. It is one total, not per day, and the dashboard shows what is left under **Fees left for Inti**. When it runs out, Inti cannot send orders; **Pause Inti** and then **Resume Inti** add the key again with a new allowance.
 
