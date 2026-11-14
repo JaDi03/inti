@@ -8,7 +8,7 @@ import { ASSETS } from "../policy/assets.js";
 import { HELD_ASSETS } from "../policy/heldAssets.js";
 import type { AgentAccounts } from "./agents.js";
 import { buildApp } from "./app.js";
-import { dryRunTools, partnerQuoteAgent, type DryRunRecord } from "./dryRun.js";
+import { dryRunTools, LOG_LINES, partnerQuoteAgent, QUOTES_PER_MESSAGE, type DryRunRecord } from "./dryRun.js";
 import type { GrantStore } from "./grants.js";
 import { FUNDING_ASSET } from "./orders.js";
 import { DailyQuota } from "./quota.js";
@@ -76,6 +76,20 @@ describe("dry-run tools", () => {
     const out = JSON.parse(await tools.run("buy_now", { asset: "bitcoin", usd: "26", reason: "asked" }, [])) as { status: string };
     expect(out.status).toBe("refused");
     expect(quotes).toEqual([]);
+  });
+
+  it("asks the trading service for at most a few quotes per message", async () => {
+    const { tools, quotes } = setup();
+    for (let i = 0; i < QUOTES_PER_MESSAGE; i++) await tools.run("get_quote", { asset: "bitcoin", usd: "5" }, []);
+    await expect(tools.run("get_quote", { asset: "bitcoin", usd: "5" }, [])).rejects.toThrow("at most");
+    expect(quotes).toHaveLength(QUOTES_PER_MESSAGE);
+  });
+
+  it("stops running tools once the log of one message is full", async () => {
+    const { tools, record } = setup();
+    for (let i = 0; i < LOG_LINES; i++) await tools.run("get_portfolio", {}, []);
+    await expect(tools.run("get_portfolio", {}, [])).rejects.toThrow("too many steps");
+    expect(record.log).toHaveLength(LOG_LINES);
   });
 
   it("without an agent to ask, it prices with the live token list and says so in the log", async () => {

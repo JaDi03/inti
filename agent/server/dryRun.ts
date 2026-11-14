@@ -21,6 +21,10 @@ export const PRACTICE_USD = "100";
 export const PRACTICE_PER_ORDER_USD = "25";
 export const PRACTICE_PER_DAY_USD = "50";
 const MIN_ORDER_USD = "0.10";
+/** Quotes one dry-run message may ask the trading service for. */
+export const QUOTES_PER_MESSAGE = 4;
+/** Lines of the log one reply carries. */
+export const LOG_LINES = 12;
 
 /** One line of the dry run's log: what the agent asked for and what came back. Built by code only. */
 export interface DryRunLogEntry {
@@ -118,8 +122,13 @@ export function dryRunTools(deps: DryRunDeps, record: DryRunRecord): Toolset & {
     return { byId, nearMicro: priceToMicro(near.price) };
   };
 
+  let quotesLeft = QUOTES_PER_MESSAGE;
+
   /** A live quote for `wnear` of NEAR into `to`: from NEAR Intents, or from live prices when no agent can quote. */
   const quote = async (tool: string, asked: Record<string, string>, to: string, wnear: bigint, token: PricedToken, nearMicro: bigint) => {
+    // A few quotes answer any one message; more would only spend the trading service's calls.
+    if (quotesLeft <= 0) throw new ToolInputError(`at most ${QUOTES_PER_MESSAGE} quotes per message in the dry run; answer with the ones you have`);
+    quotesLeft -= 1;
     const agentId = await deps.quoteAgent();
     if (agentId !== null) {
       const q = await deps.agent.quote(agentId, FUNDING_ASSET, to, wnear);
@@ -146,6 +155,8 @@ export function dryRunTools(deps: DryRunDeps, record: DryRunRecord): Toolset & {
     specs: dryRunToolSpecs,
     prompt: DRY_RUN_PROMPT,
     async run(name, rawInput, events: AgentEvent[]) {
+      // Bounds the tool calls of one message, however many the model asks for in a turn.
+      if (record.log.length >= LOG_LINES) throw new ToolInputError("too many steps for one message; answer with what you have");
       if (!(name in inputs)) throw new ToolInputError(`unknown tool: ${name}`);
       const parsed = inputs[name as ToolName].safeParse(rawInput);
       if (!parsed.success) throw new ToolInputError(`invalid input: ${parsed.error.message}`);
