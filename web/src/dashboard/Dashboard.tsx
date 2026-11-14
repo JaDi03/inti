@@ -281,7 +281,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
         {hidden ? (
           <p className="mt-1 font-mono text-xs text-muted-foreground">{HIDDEN}</p>
         ) : (
-          <AddressLine address={address} label="wallet address" className="mt-1" />
+          <AddressLine address={address} label="wallet address" className="mt-1" short />
         )}
         <p className="mt-1 h-10 text-4xl font-semibold tracking-tight tabular-nums">
           {hidden ? <span className="text-3xl tracking-[0.25em]">●●●●●●</span> : money(total)}
