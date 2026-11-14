@@ -207,8 +207,9 @@ export function App() {
   const installed = limits.setup.kind === "ready" && limits.status?.kind === "installed" ? { setup: limits.setup, status: limits.status } : null;
 
   return (
-    <div className="flex h-svh flex-col">
-      <header className="flex items-center justify-between px-4 py-3 sm:px-6">
+    // On a phone, typing hides the header and the view tabs, so the keyboard leaves room for the chat.
+    <div className="group/app flex h-svh flex-col">
+      <header className="flex items-center justify-between px-4 py-3 max-lg:group-has-[textarea:focus]/app:hidden sm:px-6">
         <div className="flex items-center gap-2">
           <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
           {address && <VerifiedBadge getAccessToken={getAccessToken} />}
@@ -269,7 +270,7 @@ export function App() {
       </header>
 
       {installed && (
-        <div className="flex justify-center px-4 pb-2 lg:hidden" role="tablist" aria-label="View">
+        <div className="flex justify-center px-4 pb-2 group-has-[textarea:focus]/app:hidden lg:hidden" role="tablist" aria-label="View">
           <div className="flex w-full max-w-md rounded-full bg-muted p-1 text-[13px]">
             {MOBILE_VIEWS.map((v) => (
               <button
@@ -312,6 +313,8 @@ export function App() {
           className={cn(
             "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
             empty && !activationCard ? "mt-[12vh]" : "mt-2",
+            // Once there are messages, a phone gives the mascot's room to the chat; its steps show the work.
+            !empty && "max-lg:hidden",
           )}
         >
           <IntiMascot size={empty ? (activationCard ? 96 : 180) : 104} state={working ? "thinking" : "idle"} />
