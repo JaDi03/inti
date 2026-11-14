@@ -35,6 +35,11 @@ function speechRecognizer(): SpeechRecognizerCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** A phone or tablet: focusing the text box opens the on-screen keyboard there. */
+function isTouchScreen(): boolean {
+  return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+}
+
 function ArrowUpIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -84,6 +89,8 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
   const audioContextRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const recognitionRef = useRef<SpeechRecognizer | null>(null);
+  // Dictation started from the mic on a touch screen: the box is not focused, so no keyboard covers the chat.
+  const skipFocusRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const topFadeRef = useRef<HTMLDivElement>(null);
@@ -129,38 +136,52 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
     if (!Recognizer) return;
     setMicError(null);
     setIsSmoothResize(false);
+    const touch = isTouchScreen();
+    skipFocusRef.current = touch;
     setExpanded(true);
 
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setMicError("Could not use the microphone. Check the browser permission.");
-      return;
-    }
-    streamRef.current = stream;
-    setIsRecording(true);
+    if (touch) {
+      // A phone gives the microphone to one user at a time, so dictation gets it alone and the bars
+      // only pulse instead of reading the voice level.
+      setIsRecording(true);
+      const pulse = () => {
+        const t = performance.now() / 180;
+        setAudioData(Array.from({ length: BANDS }, (_, i) => 0.35 + 0.25 * Math.sin(t + i)));
+        rafRef.current = requestAnimationFrame(pulse);
+      };
+      pulse();
+    } else {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        setMicError("Could not use the microphone. Check the browser permission.");
+        return;
+      }
+      streamRef.current = stream;
+      setIsRecording(true);
 
-    // Level meter for the bars next to the stop button.
-    const audioCtx = new AudioContext();
-    audioContextRef.current = audioCtx;
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 64;
-    audioCtx.createMediaStreamSource(stream).connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const step = Math.floor(data.length / BANDS);
-    const meter = () => {
-      analyser.getByteFrequencyData(data);
-      const bands = Array.from({ length: BANDS }, (_, i) => {
-        let sum = 0;
-        for (let j = 0; j < step; j++) sum += data[i * step + j] ?? 0;
-        // A normal speaking voice fills only a small part of the range: amplified so the bars move with it.
-        return Math.min(1, (sum / step / 255) * LEVEL_GAIN);
-      });
-      setAudioData(bands);
-      rafRef.current = requestAnimationFrame(meter);
-    };
-    meter();
+      // Level meter for the bars next to the stop button.
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      audioCtx.createMediaStreamSource(stream).connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const step = Math.floor(data.length / BANDS);
+      const meter = () => {
+        analyser.getByteFrequencyData(data);
+        const bands = Array.from({ length: BANDS }, (_, i) => {
+          let sum = 0;
+          for (let j = 0; j < step; j++) sum += data[i * step + j] ?? 0;
+          // A normal speaking voice fills only a small part of the range: amplified so the bars move with it.
+          return Math.min(1, (sum / step / 255) * LEVEL_GAIN);
+        });
+        setAudioData(bands);
+        rafRef.current = requestAnimationFrame(meter);
+      };
+      meter();
+    }
 
     const recognition = new Recognizer();
     recognition.continuous = true;
@@ -180,7 +201,8 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
       handleValueChange((baseline + (interim ? " " + interim : "")).trim());
     };
     recognition.onerror = (event) => {
-      if (event.error !== "aborted" && event.error !== "no-speech") setMicError("Dictation stopped because of a browser error.");
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") setMicError("The browser did not allow dictation. Check the microphone permission.");
+      else if (event.error !== "aborted" && event.error !== "no-speech") setMicError(`Dictation stopped because of a browser error (${event.error}).`);
       stopRecording();
     };
     recognition.onend = () => stopRecording();
@@ -204,7 +226,8 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
   }, [hasValue, expanded]);
 
   useEffect(() => {
-    if (!expanded || isRecording) return;
+    if (!expanded) skipFocusRef.current = false;
+    if (!expanded || isRecording || skipFocusRef.current) return;
     const timer = setTimeout(() => {
       const el = textareaRef.current;
       if (!el) return;
@@ -288,7 +311,8 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
     >
       <div
         onMouseDown={(e) => {
-          if (expanded && e.target !== textareaRef.current && !isRecording) {
+          // A tap on a button (mic, send) stays a button press, not a tap into the text box.
+          if (expanded && e.target !== textareaRef.current && !isRecording && !(e.target as Element).closest("button")) {
             e.preventDefault();
             textareaRef.current?.focus();
           }
@@ -308,6 +332,10 @@ export function PromptInput({ onSubmit, placeholder = "Tell Inti what you want t
           ref={textareaRef}
           value={value}
           onChange={(e) => handleValueChange(e.target.value)}
+          // The user tapped into the box: from now on it behaves as a normal text box again.
+          onFocus={() => {
+            skipFocusRef.current = false;
+          }}
           onScroll={updateFades}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

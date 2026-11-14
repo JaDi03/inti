@@ -278,6 +278,12 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
             </Button>
           </div>
         </div>
+        {/* The wallet's address lives here, not in the header, so it never covers the logo on a phone. */}
+        {hidden ? (
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{HIDDEN}</p>
+        ) : (
+          <AddressLine address={address} label="wallet address" className="mt-1" short />
+        )}
         <p className="mt-1 h-10 text-4xl font-semibold tracking-tight tabular-nums">
           {hidden ? <span className="text-3xl tracking-[0.25em]">●●●●●●</span> : money(total)}
         </p>

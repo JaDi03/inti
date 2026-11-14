@@ -1,6 +1,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useExportWallet } from "@privy-io/react-auth/extended-chains";
-import { Check, Copy, Eye, EyeOff, LogOut, Volume2, VolumeX } from "lucide-react";
+import { LogOut, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { PromptInput } from "@/components/ui/ai-chat-input";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AgentError, askAgent } from "./chat/agentClient";
 import { ChatMessage, initialsOf, TypingIndicator } from "./chat/ChatMessage";
 import { TradeGrantCard, useGrantNeeded } from "./agent/TradeGrantCard";
-import { MOBILE_VIEWS, PortfolioLayout, useHideAmounts, type MobileView } from "./dashboard/Dashboard";
+import { MOBILE_VIEWS, PortfolioLayout, type MobileView } from "./dashboard/Dashboard";
 import { ActivationCard } from "./limits/ActivationCard";
 import { SpendingLimitsPanel } from "./limits/SpendingLimitsPanel";
 import { UNAVAILABLE, useLimits } from "./limits/useLimits";
@@ -36,10 +36,6 @@ function nearAddress(accounts: readonly unknown[]): string | null {
     if (a.type === "wallet" && a.chainType === "near" && typeof a.address === "string") return a.address;
   }
   return null;
-}
-
-function shortAddress(address: string): string {
-  return address.length > 14 ? `${address.slice(0, 6)}...${address.slice(-6)}` : address;
 }
 
 function Wordmark({ className }: { className?: string }) {
@@ -79,8 +75,6 @@ export function App() {
   const [limitsOpen, setLimitsOpen] = useState(false);
   // On a phone the chat and the portfolio take turns; on a wide screen both show.
   const [view, setView] = useState<MobileView>("chat");
-  const hide = useHideAmounts("address");
-  const [copied, setCopied] = useState(false);
   // True while the agent works on the user's message.
   const [thinking, setThinking] = useState(false);
   /** What the agent is doing for the message it is working on, one line per step. */
@@ -207,38 +201,14 @@ export function App() {
   const installed = limits.setup.kind === "ready" && limits.status?.kind === "installed" ? { setup: limits.setup, status: limits.status } : null;
 
   return (
-    <div className="flex h-svh flex-col">
-      <header className="flex items-center justify-between px-4 py-3 sm:px-6">
+    // On a phone, typing hides the header and the view tabs, so the keyboard leaves room for the chat.
+    <div className="group/app flex h-svh flex-col">
+      <header className="flex items-center justify-between px-4 py-3 max-lg:group-has-[textarea:focus]/app:hidden sm:px-6">
         <div className="flex items-center gap-2">
           <img src={logoSrc(theme)} alt="Inti" className="h-8 w-auto" />
           {address && <VerifiedBadge getAccessToken={getAccessToken} />}
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {address && (
-            <div className="flex items-center rounded-full bg-muted pl-3 text-xs">
-              <code title={hide.hidden ? undefined : address}>{hide.hidden ? "••••••••" : shortAddress(address)}</code>
-              <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={hide.hidden ? "Show address" : "Hide address"} onClick={hide.toggleHidden}>
-                {hide.hidden ? <EyeOff /> : <Eye />}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-full"
-                aria-label={copied ? "Address copied" : "Copy address"}
-                onClick={() =>
-                  void navigator.clipboard.writeText(address).then(
-                    () => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    },
-                    () => undefined,
-                  )
-                }
-              >
-                {copied ? <Check className="text-primary" /> : <Copy />}
-              </Button>
-            </div>
-          )}
           <Button
             variant="ghost"
             size="icon"
@@ -269,7 +239,7 @@ export function App() {
       </header>
 
       {installed && (
-        <div className="flex justify-center px-4 pb-2 lg:hidden" role="tablist" aria-label="View">
+        <div className="flex justify-center px-4 pb-2 group-has-[textarea:focus]/app:hidden lg:hidden" role="tablist" aria-label="View">
           <div className="flex w-full max-w-md rounded-full bg-muted p-1 text-[13px]">
             {MOBILE_VIEWS.map((v) => (
               <button
@@ -312,6 +282,8 @@ export function App() {
           className={cn(
             "flex w-full max-w-2xl shrink-0 flex-col items-center transition-all duration-500",
             empty && !activationCard ? "mt-[12vh]" : "mt-2",
+            // Once there are messages, a phone gives the mascot's room to the chat; its steps show the work.
+            !empty && "max-lg:hidden",
           )}
         >
           <IntiMascot size={empty ? (activationCard ? 96 : 180) : 104} state={working ? "thinking" : "idle"} />
