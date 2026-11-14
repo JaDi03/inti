@@ -1,6 +1,14 @@
-# Inti
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/inti-logo-horizontal-dark.svg">
+    <img alt="Inti" src="web/public/inti-logo-horizontal.svg" height="48">
+  </picture>
+</p>
 
 ![network](https://img.shields.io/badge/NEAR-mainnet-00EC97?style=for-the-badge)
+![intents](https://img.shields.io/badge/NEAR_Intents-cross--chain-00EC97?style=for-the-badge)
+![tee](https://img.shields.io/badge/NEAR_AI_Cloud-TEE_Attestation-111827?style=for-the-badge)
+![security](https://img.shields.io/badge/Security-Function_Call_Keys-111827?style=for-the-badge)
 ![node](https://img.shields.io/badge/node-24-339933?style=for-the-badge&logo=node.js&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
