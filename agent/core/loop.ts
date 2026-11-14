@@ -84,6 +84,8 @@ export interface CycleOptions {
 /** A set of tools the cycle can offer instead of the simulated ones. */
 export interface Toolset {
   specs: readonly ToolSpec[];
+  /** The instructions for these tools; without them, the prompt for real money. */
+  prompt?: string;
   /** Runs one call and returns JSON for the model; throws ToolInputError on bad input. */
   run(name: string, input: unknown, events: AgentEvent[]): Promise<string>;
 }
@@ -119,7 +121,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
 
   for (let step = 0; step < maxSteps; step++) {
     if (options.deadline !== undefined && ctx.now() >= options.deadline) return { history, events, report: "", stopReason: "time_limit" };
-    const turn = await brain.step(options.tools ? REAL_SYSTEM_PROMPT : SYSTEM_PROMPT, history, options.tools?.specs ?? toolSpecs);
+    const turn = await brain.step(options.tools ? (options.tools.prompt ?? REAL_SYSTEM_PROMPT) : SYSTEM_PROMPT, history, options.tools?.specs ?? toolSpecs);
     history.push(turn);
     if (turn.stop === "end" || turn.toolCalls.length === 0) {
       return { history, events, report: turn.text, stopReason: "done" };

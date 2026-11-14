@@ -110,6 +110,7 @@ function useDashboard(
   getAccessToken: () => Promise<string | null>,
   grantSigned: boolean,
   refreshKey: number,
+  readDashboard?: () => Promise<DashboardData | null>,
 ): DashboardState {
   const [data, setData] = useState<DashboardData | null>(null);
   const [assets, setAssets] = useState<AssetRow[] | null>(null);
@@ -127,8 +128,11 @@ function useDashboard(
     async (quiet = false) => {
       if (!quiet) setLoading(true);
       try {
-        const token = await getAccessToken();
-        const [server, rows] = await Promise.all([token ? fetchDashboard(token) : Promise.resolve(null), client.assets(address).catch(() => null)]);
+        const readServer = readDashboard ?? (async () => {
+          const token = await getAccessToken();
+          return token ? fetchDashboard(token) : null;
+        });
+        const [server, rows] = await Promise.all([readServer(), client.assets(address).catch(() => null)]);
         // A failed read keeps what is already on screen instead of blanking it.
         if (server) setData(server);
         if (rows) setAssets(rows);
@@ -136,7 +140,7 @@ function useDashboard(
         if (!quiet) setLoading(false);
       }
     },
-    [address, client, getAccessToken],
+    [address, client, getAccessToken, readDashboard],
   );
 
   // Read again only when the account's balances, limits or Inti's permission really changed, not on
@@ -168,11 +172,13 @@ interface MoneyProps {
    * holds together; on a phone each has its own tab: "walletAssets" and "agent".
    */
   part: "wallet" | "assets" | "both" | "walletAssets" | "agent";
+  /** The dry run's practice wallet: its address takes no deposits, so Receive shows no QR code. */
+  practice?: boolean;
   className?: string;
 }
 
 /** The user's money: the wallet and the assets Inti can buy, each enabled from its own tile. */
-export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, getAccessToken, part, className }: MoneyProps) {
+export function MoneyPanel({ address, config, client, status, state, onManage, onChanged, getAccessToken, part, practice = false, className }: MoneyProps) {
   const { signer, confirmDialog } = useOwnerSigner(address, config);
   const { data, assets, loading, load } = state;
   const { hidden, toggleHidden } = useHideAmounts("money");
@@ -293,7 +299,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
           <BalanceRow label="Kept for account storage" near={show(`${nearText(status.setAside)} NEAR`)} value={show(money(locked))} />
         </dl>
         <div className="mt-4 grid grid-cols-[auto_1fr] gap-2">
-          <Button variant="outline" className="rounded-full" onClick={() => setReceiving(true)}>
+          <Button variant="outline" className="rounded-full" onClick={() => (practice ? onManage() : setReceiving(true))}>
             <ArrowDownToLine /> Receive
           </Button>
           <Button className="rounded-full" onClick={onManage}>
@@ -848,6 +854,8 @@ interface LayoutProps {
   grantSigned: boolean;
   /** Changes when the app wants the dashboard read again, e.g. after the agent traded. */
   refreshKey: number;
+  /** Where the agent's part comes from instead of the signed-in user's own (the dry run's practice wallet). */
+  readDashboard?: () => Promise<DashboardData | null>;
   children: React.ReactNode;
 }
 
@@ -860,12 +868,12 @@ export type MobileView = (typeof MOBILE_VIEWS)[number];
  * security) on the left, what Inti can buy on the right. Medium screens: everything on the right.
  * Phones: one section at a time (chat, wallet, assets, agent, settings), so nothing needs a long scroll.
  */
-export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, children }: LayoutProps) {
-  const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey);
+export function PortfolioLayout({ address, config, client, status, getAccessToken, onManage, onExport, onChanged, view, grantSigned, refreshKey, readDashboard, children }: LayoutProps) {
+  const state = useDashboard(address, client, status, getAccessToken, grantSigned, refreshKey, readDashboard);
   const side = "no-scrollbar min-h-0 overflow-y-auto px-4 pb-6";
   const rules = { address, config, client, status, state, onManage, onChanged, getAccessToken };
   const security = { address, config, client, status, onExport, onChanged };
-  const money = { address, config, client, status, state, onManage, onChanged, getAccessToken };
+  const money = { address, config, client, status, state, onManage, onChanged, getAccessToken, practice: readDashboard !== undefined };
   return (
     <>
       <aside className={cn(side, "hidden xl:block xl:w-[360px] xl:shrink-0 xl:pr-0 xl:pl-6")}>

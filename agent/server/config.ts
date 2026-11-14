@@ -69,6 +69,14 @@ export const LIMITS = {
   chatJobKeepMs: 15 * 60_000,
   /** Progress reads per IP per minute: the app asks every few seconds while a message runs. */
   chatPollsPerIpPerMinute: 120,
+  /** Dry-run messages, open to anyone without signing in: per IP per minute and per day, and in total per day. */
+  dryRunsPerIpPerMinute: 5,
+  dryRunsPerIpPerDay: 20,
+  dryRunsPerDayTotal: 300,
+  /** Model steps one dry-run message may take: the portfolio, a quote or two, and the reply. */
+  dryRunSteps: 6,
+  /** After this long no new step of a dry-run message starts. */
+  dryRunTimeLimitMs: 90_000,
 } as const;
 
 const envSchema = z.object({

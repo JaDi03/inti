@@ -36,6 +36,8 @@ const BARRIERS: readonly Barrier[] = [
 
 /** Where the app lives; the landing only links to it. */
 const APP_PATH = "/app";
+/** The dry run: try Inti with a practice wallet, no sign-in. */
+const TRY_PATH = "/try";
 
 function Header() {
   return (
@@ -72,6 +74,12 @@ function Hero() {
           className="landing-wiggle rounded-full bg-(--landing-green) px-7 py-3 text-lg font-bold text-(--landing-ink) shadow-xl"
         >
           Open app
+        </a>
+        <a
+          href={TRY_PATH}
+          className="rounded-full border-2 border-white/70 px-6 py-3 font-bold transition-colors hover:border-(--landing-green) hover:text-(--landing-green)"
+        >
+          Dry run, no funds
         </a>
         <a
           href="#barriers"
