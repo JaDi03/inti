@@ -8,6 +8,9 @@ import { ASSET_KEYS, ASSETS } from "../policy/assets.js";
 import { HELD_ASSETS, HELD_KEYS, tradable, TRADABLE_KEYS, type TradableKey } from "../policy/heldAssets.js";
 import { FUNDING_ASSET, staysOnAgent, type AgentPort, type SwapQuote } from "./orders.js";
 import { quoteView, usdToWnear } from "./realTools.js";
+import { agentPolicy } from "../policy/agentPolicy.js";
+import { summarizePolicy, type DashboardView } from "./dashboard.js";
+import { GRANT_DAYS } from "./grants.js";
 
 /**
  * Dry run: anyone can try Inti without an account or funds. The agent works on a practice wallet
@@ -236,5 +239,31 @@ export function partnerQuoteAgent(apiKey: string, baseUrl: string, fetcher: type
     } catch {
       return null;
     }
+  };
+}
+
+/** The practice wallet's account, shown on the page; it is not a real account and holds nothing. */
+export const PRACTICE_OWNER = "practice-wallet";
+/** The practice agent's account, shown on the page. */
+export const PRACTICE_AGENT = "practice-agent";
+
+/**
+ * The dashboard of the practice wallet: live prices, and the rules every real agent signs, summarized
+ * by the same code as a real user's. Nothing here is read from any real account.
+ */
+export function practiceDashboard(tokens: readonly PricedToken[], now: number): DashboardView {
+  const priceOf = (assetId: string) => tokens.find((t) => t.asset_id === assetId)?.price ?? null;
+  const prices = { near: priceOf(FUNDING_ASSET), ...Object.fromEntries(TRADABLE_KEYS.map((k) => [k, priceOf(tradable(k).assetId)])) } as DashboardView["prices"];
+  const policy = summarizePolicy({ policy: agentPolicy(PRACTICE_OWNER), cooldowns: null }, PRACTICE_OWNER, now);
+  return {
+    prices,
+    agent: {
+      account: PRACTICE_AGENT,
+      grantUntil: new Date(now + GRANT_DAYS * 86_400_000).toISOString(),
+      policy,
+      orders: [],
+      held: [],
+      cash: "0",
+    },
   };
 }

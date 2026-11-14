@@ -21,7 +21,7 @@ import type { Dashboard } from "./dashboard.js";
 import { LIMITS } from "./config.js";
 import { GRANT_DAY_CHOICES, GRANT_DAYS, newGrantRequest, usableGrant, type GrantRecord, type GrantStore } from "./grants.js";
 import type { ChainPort } from "./orders.js";
-import { dryRunTools, type DryRunDeps, type DryRunRecord } from "./dryRun.js";
+import { dryRunTools, practiceDashboard, type DryRunDeps, type DryRunRecord } from "./dryRun.js";
 import { DailyQuota } from "./quota.js";
 import { realTools } from "./realTools.js";
 import type { Trading } from "./trading.js";
@@ -677,6 +677,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const dryRunQuota = deps.dryRunQuota ?? new DailyQuota(LIMITS.dryRunsPerIpPerDay, LIMITS.dryRunsPerDayTotal);
   const dryRunBusy = new Set<string>();
   const dryRunSource = deps.dryRun ?? { quoteAgent: async () => null, agent: { quote: async () => null } };
+  // The practice wallet's dashboard: live prices and the rules every agent signs. No model call.
+  app.get("/api/dry-run/dashboard", async (req, reply) => {
+    try {
+      return practiceDashboard(await deps.tokens(), now());
+    } catch (error) {
+      req.log.error({ err: error instanceof Error ? error.message : "unknown" }, "dry_run_dashboard_failed");
+      return reply.code(502).send({ error: "agent_unavailable" });
+    }
+  });
+
   app.post("/api/dry-run/chat", { config: { rateLimit: { max: LIMITS.dryRunsPerIpPerMinute, timeWindow: "1 minute" } } }, async (req, reply) => {
     const body = chatBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });

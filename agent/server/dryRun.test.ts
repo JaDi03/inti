@@ -160,6 +160,16 @@ describe("POST /api/dry-run/chat", () => {
     expect(second.json()).toEqual({ error: "user_limit" });
   });
 
+  it("shows the practice dashboard without signing in: live prices and the rules every agent signs", async () => {
+    const res = await (await server()).inject({ method: "GET", url: "/api/dry-run/dashboard" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ prices: Record<string, number | null>; agent: { account: string; policy: { sendsOnlyToOwner: boolean; canBuyNow: boolean; destinations: string[] }; held: unknown[] } }>();
+    expect(body.prices.bitcoin).toBe(100_000);
+    expect(body.agent.account).toBe("practice-agent");
+    expect(body.agent.policy).toMatchObject({ sendsOnlyToOwner: true, canBuyNow: true, destinations: ["practice-wallet"] });
+    expect(body.agent.held).toEqual([]);
+  });
+
   it("refuses unknown fields and messages that are too long", async () => {
     const app = await server();
     expect((await send(app, { message: "hi", tools: ["sell_now"] })).statusCode).toBe(400);
