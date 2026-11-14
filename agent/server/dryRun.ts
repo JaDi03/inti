@@ -243,7 +243,7 @@ export function partnerQuoteAgent(apiKey: string, baseUrl: string, fetcher: type
 }
 
 /** The practice wallet's account, shown on the page; it is not a real account and holds nothing. */
-export const PRACTICE_OWNER = "practice-wallet";
+export const PRACTICE_OWNER = "0".repeat(64);
 /** The practice agent's account, shown on the page. */
 export const PRACTICE_AGENT = "practice-agent";
 

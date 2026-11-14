@@ -166,7 +166,7 @@ describe("POST /api/dry-run/chat", () => {
     const body = res.json<{ prices: Record<string, number | null>; agent: { account: string; policy: { sendsOnlyToOwner: boolean; canBuyNow: boolean; destinations: string[] }; held: unknown[] } }>();
     expect(body.prices.bitcoin).toBe(100_000);
     expect(body.agent.account).toBe("practice-agent");
-    expect(body.agent.policy).toMatchObject({ sendsOnlyToOwner: true, canBuyNow: true, destinations: ["practice-wallet"] });
+    expect(body.agent.policy).toMatchObject({ sendsOnlyToOwner: true, canBuyNow: true, destinations: ["0".repeat(64)] });
     expect(body.agent.held).toEqual([]);
   });
 
