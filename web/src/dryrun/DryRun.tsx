@@ -140,9 +140,10 @@ function DryRunChat() {
     return () => clearTimeout(timer);
   }, [note]);
   // Every button of the portfolio panels that would act (sign, enable, renew, freeze, add a passkey)
-  // shows the note instead; only the ones that read (fold, show amounts, copy, refresh) still work.
+  // shows the note instead; only the ones that read (fold, show amounts, refresh) still work. Copy is
+  // blocked too: the practice address takes real deposits that nobody could ever get back.
   useEffect(() => {
-    const reads = /^(Show amounts|Hide amounts|Refresh|Copy .+|.+ copied)$/;
+    const reads = /^(Show amounts|Hide amounts|Refresh)$/;
     const onClick = (e: MouseEvent) => {
       const button = e.target instanceof Element ? e.target.closest("button") : null;
       if (!button?.closest("aside")) return;
