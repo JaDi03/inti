@@ -252,7 +252,8 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
   const show = (text: string) => (hidden ? HIDDEN : text);
 
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    // Sections sit close enough that the whole portfolio fits higher on the screen.
+    <div className={cn("flex flex-col gap-3", className)}>
       {showWallet && (
       <section className="rounded-3xl border bg-card p-5">
         <div className="flex items-start justify-between">
@@ -312,7 +313,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       )}
       {showWalletAssets && GROUPS.map((group) => (
       <section key={group.title}>
-        <h3 className="mb-2.5 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
+        <h3 className="mb-2 px-1 font-heading text-xl font-semibold text-foreground">{group.title}</h3>
         <ul className="grid auto-rows-fr grid-cols-2 gap-3">
           {group.keys.map((key, i) => {
             const a = ASSETS[key];
@@ -332,8 +333,10 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
                     </div>
                   </div>
                   {row?.enabled && (
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground shadow-sm">
-                      <Check className="size-3" /> Enabled
+                    // A small check, so the asset's name keeps the width of the tile.
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm" title="Enabled">
+                      <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+                      <span className="sr-only">Enabled</span>
                     </span>
                   )}
                 </div>
@@ -372,7 +375,7 @@ export function MoneyPanel({ address, config, client, status, state, onManage, o
       {showAgent && (
         <section>
           <h3 className="px-1 font-heading text-xl font-semibold text-foreground">Held by your agent</h3>
-          <p className="mb-2.5 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
+          <p className="mb-2 px-1 text-xs text-muted-foreground">Kept privately by your agent. Sell them for NEAR anytime.</p>
           <ul className="grid auto-rows-fr grid-cols-2 gap-3">
             {(() => {
               // Null while the agent's balance cannot be read.
