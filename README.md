@@ -18,6 +18,8 @@ Inti is an investment agent on NEAR. You type `buy $5 of bitcoin`, and your own 
 
 Live app: **https://getinti.xyz** (NEAR mainnet, real funds). To try it without an account or funds, open the dry run at **https://getinti.xyz/try**.
 
+Demo video: **https://x.com/_Ja_V1/status/2121621345314189646**
+
 Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
 
 You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
