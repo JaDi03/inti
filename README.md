@@ -18,6 +18,8 @@ Inti is an investment agent on NEAR. You type `buy $5 of bitcoin`, and your own 
 
 Live app: **https://getinti.xyz** (NEAR mainnet, real funds). To try it without an account or funds, open the dry run at **https://getinti.xyz/try**.
 
+Demo video: **https://x.com/_Ja_V1/status/2121621345314189646**
+
 Giving an AI agent money usually means giving it your keys. Inti never holds your money or your full-access key. It gets a key that can only send one order at a time to your own agent, and a contract on your own account refuses any order above your limits. Inti checks the same limits first, so an order over them never reaches the chain.
 
 You can check this yourself: the contract on mainnet rebuilds to the same hash from this repository ([how](#the-contract-on-mainnet-is-this-code)), every AI reply carries a signature from the model's hardware ([how](#each-reply-signed)), and the transactions of a real trade are linked under [Try it](#try-it).
@@ -45,7 +47,7 @@ Every year there are fewer barriers to using a blockchain. The ones left are the
 - **A mistake you cannot undo.** One wrong network or address and the money is gone.
 - **Handing an AI the keys to your money.** An agent that can trade for you can usually also empty your account.
 
-Inti works on all three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
+You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address. Your limits live in a contract on your own account: Inti's server checks them first, and the contract refuses any order over them even if the server got it wrong.
 
 ## Try it
 
@@ -92,7 +94,7 @@ An intent is a signed statement of what you want ("I want $5 of bitcoin, and I a
 
 That idea came with a promise: people would say what they want and the chain would stay out of sight. NEAR's co-founder Illia Polosukhin [wrote in 2023](https://www.coindesk.com/opinion/2023/12/20/the-rise-of-chain-abstraction-and-end-of-blockchain-factionalism): "hopefully, users won't have to manage or even know about the technical layers."
 
-Inti takes that promise literally. The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
+The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
 
 ## How it works
 
@@ -188,6 +190,18 @@ Inti's key also has a gas allowance of 0.25 NEAR (`web/src/limits/config.ts`), f
 
 If Inti's key were stolen, the most it could do is send your limits to your own agent, use up the 24 orders of a day, and spend its 0.25 NEAR allowance on fees. Deleting the key ends all three. Because your account keeps its full-access key, it never depends on that allowance and cannot be locked out by it.
 
+We tried this on mainnet on 14 November 2026, with Inti's real key on a real user's account, acting as a thief would:
+
+1. Send 0.01 NEAR to another wallet. NEAR refused it before it ran, because the key can only call `fund_agent`: `Access key requires full access`.
+2. Send a tenth of the user's bitcoin to the same wallet. NEAR refused it before it ran, because the key can call no other contract and attach no deposit: `Deposit is not allowed with function call`.
+3. Call `fund_agent`, the one call the key allows, for 1 yoctoNEAR over the per-order limit. The Spending Limits contract refused it on chain: `Smart contract panicked: over the per-order limit` ([`Hum36XqT`](https://nearblocks.io/txns/Hum36XqT8zcF9fQHFvDxHDuocZ58Nb1GAPUPZJqsR3Qb)).
+
+The other wallet received nothing. The first two cost no fee and leave no transaction, because NEAR refuses them before they run; the third cost 0.00016 NEAR of gas from Inti's allowance. The check ran once from Inti's server with its real key; its script is not part of this repository.
+
+<p align="center">
+  <img alt="Terminal output of the three tries, each one stopped, next to the user's portfolio in Inti, which still shows the same bitcoin." src="docs/images/key-check-mainnet.png" width="720">
+</p>
+
 The Agent API adds a second layer: your agent runs under a policy you sign, which only lets it send to your wallet.
 
 Contract details, tests and formal proofs: [Spending Limits contract](contracts/spending-limits/README.md).
@@ -207,7 +221,7 @@ The contract has its own tests, property runs and formal proofs: see [Spending L
 
 ### The contract on mainnet is this code
 
-The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (tested with 0.23.0; the build itself runs inside the pinned Docker image). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
+The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (the CLI was tested with 0.23.0; the build itself runs inside the pinned Docker image `sourcescan/cargo-near:0.22.0-rust-1.99.1`). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
 
 ```bash
 git clone https://github.com/JaDi03/inti.git
@@ -291,16 +305,62 @@ To run it on your computer or change the code, see [CONTRIBUTING.md](CONTRIBUTIN
 ## Project structure
 
 ```
-agent/                 the investment agent (TypeScript)
-  core/                loop, simulated portfolio, money math
-  brains/              model adapters: NEAR AI Cloud, scripted brain for tests
-  policy/              the assets the agent trades, token units
-  server/              the API the web app calls, orders and grants
-  cli/new-key.ts       create Inti's key for a local setup
-contracts/
-  spending-limits/     NEAR contract on the user's own account (Rust)
-web/                   app: login, Spending Limits, chat (React)
-deploy/                install.sh and the server files it sets up
+inti/
+├── agent/                    the agent: the AI model proposes, the code decides
+│   ├── core/
+│   │   ├── loop.ts           one chat message: the model picks tools until it has an answer
+│   │   ├── tools.ts          the tools the model can call on the practice portfolio
+│   │   ├── guard.ts          limits checked in code before any action runs
+│   │   ├── money.ts          dollar math in whole micro-dollars, never floats
+│   │   ├── portfolio.ts      tokens and prices from the NEAR Intents token list
+│   │   ├── sanitize.ts       cleans token names before the model reads them
+│   │   └── types.ts          the shapes the loop speaks, whatever the model
+│   ├── brains/
+│   │   ├── nearai.ts         the model on NEAR AI Cloud, inside a TEE
+│   │   └── scripted.ts       a model that follows a script, for tests
+│   ├── policy/
+│   │   ├── assets.ts         the assets Inti trades, by a fixed name the model picks from
+│   │   ├── heldAssets.ts     the assets that stay with the agent (gold, euro, SOL)
+│   │   ├── agentPolicy.ts    the policy each agent signs: it sends only to its owner
+│   │   ├── build.ts          builds that policy in human units
+│   │   ├── verify.ts         checks a live policy matches the one the user signed
+│   │   └── units.ts          exact decimal to token-unit conversion
+│   ├── server/
+│   │   ├── index.ts          starts the server from the environment
+│   │   ├── app.ts            the routes the web app calls
+│   │   ├── config.ts         settings and every cap on use and cost
+│   │   ├── auth.ts           checks the Privy sign-in on every request
+│   │   ├── realTools.ts      the tools the model gets with real money
+│   │   ├── trading.ts        buys, sells and price orders for one user
+│   │   ├── orders.ts         one order end to end: fund the agent, swap, send home
+│   │   ├── agentCash.ts      trades paid with what the agent already holds
+│   │   ├── held.ts           buying and selling the assets the agent keeps
+│   │   ├── spendLog.ts       what Inti sent in the last 24 hours, checked before the contract
+│   │   ├── agents.ts         creates and finds each user's agent on the Agent API
+│   │   ├── grants.ts         the trading permission each user signs, stored encrypted
+│   │   ├── dashboard.ts      the agent's balances, open orders and signed rules
+│   │   ├── attestation.ts    checks the model runs on attested hardware
+│   │   ├── replyProof.ts     checks each reply was signed inside the TEE
+│   │   ├── chatJobs.ts       a message's progress while it runs
+│   │   ├── quota.ts          messages per user and per day
+│   │   └── dryRun.ts         the dry run: practice wallet, live quotes, nothing moves
+│   └── cli/new-key.ts        creates Inti's function-call key for a server
+├── contracts/spending-limits/
+│   ├── src/lib.rs            the contract on the user's own account: limits and fund_agent
+│   ├── tests/                unit, property and sandbox tests
+│   └── verification/         formal proofs (Kani) of the limit arithmetic
+├── web/src/
+│   ├── landing/              the landing page
+│   ├── dryrun/               the dry run page at /try
+│   ├── dashboard/            portfolio, receive, grant renewal, price protection
+│   ├── limits/               Spending Limits: activation, limits, passkey, signing
+│   ├── agent/                create the agent, sign the grant, freeze
+│   ├── chat/                 the chat and its messages
+│   ├── assets/               the assets panel
+│   ├── verify/               the AI hardware badge and each reply's signature
+│   └── privySigner.ts        lets near-api-js sign with the Privy wallet
+├── deploy/                   install.sh and the server files it sets up
+└── docs/                     diagrams and images used in this README
 ```
 
 ## Tech stack
