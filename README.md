@@ -187,11 +187,13 @@ Contract details, tests and formal proofs: [Spending Limits contract](contracts/
 
 ### The contract on mainnet is this code
 
-The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, with [cargo-near](https://github.com/near/cargo-near) and Docker:
+The contract is verified on [SourceScan](https://nearblocks.io/address/91e0e128471dd3633637fd82850489b14c84cf9d41f45e83f33e74e8e52880be) (verification transaction [`9spE94qW`](https://nearblocks.io/txns/9spE94qWajKdyTLbbZM5y1fWa2wGinkFj8AkeFVyrvby)). To rebuild it and compare the hash yourself, you need Linux, macOS or WSL, Docker running, and [cargo-near](https://github.com/near/cargo-near) (tested with 0.23.0; the build itself runs inside the pinned Docker image). The build writes its git commit into the wasm, so check out the commit that was deployed, `cb3fe63`, the one the contract's on-chain metadata names. It takes about 2 minutes.
 
 ```bash
 git clone https://github.com/JaDi03/inti.git
-cd inti/contracts/spending-limits
+cd inti
+git checkout cb3fe63
+cd contracts/spending-limits
 cargo near build reproducible-wasm
 sha256sum target/near/inti_spending_limits.wasm
 # ec08c308af218f6d1273a1ae785617d67b9bb3fa3ed95f843a5e1a9c19c3d161
