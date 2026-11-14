@@ -15,8 +15,8 @@ Giving an AI agent money usually means giving it your keys. With Inti your funds
 ## Table of Contents
 
 1. [Why Inti exists](#why-inti-exists)
-2. [What an intent is, and why it matters here](#what-an-intent-is-and-why-it-matters-here)
-3. [Try it](#try-it)
+2. [Try it](#try-it)
+3. [What an intent is, and why it matters here](#what-an-intent-is-and-why-it-matters-here)
 4. [How it works](#how-it-works)
 5. [Your limits and Inti's key](#your-limits-and-intis-key)
 6. [Check it yourself](#check-it-yourself)
@@ -35,14 +35,6 @@ Every year there are fewer barriers to using a blockchain. The ones left are the
 
 Inti removes those three. You sign in with email or Google, you type "buy $5 of bitcoin", and you read in plain words what you are about to sign. The agent never writes an address, and the limits you set are enforced by a contract on your own account, not by Inti's server.
 
-## What an intent is, and why it matters here
-
-An intent is a signed statement of what you want ("I want $5 of bitcoin, and I accept no less than this much"), not the steps to get it. Solvers compete to fill it, and the network checks that the result matches what you signed.
-
-That idea came with a promise: people would say what they want and the chain would stay out of sight. NEAR's co-founder Illia Polosukhin [wrote in 2023](https://www.coindesk.com/opinion/2023/12/20/the-rise-of-chain-abstraction-and-end-of-blockchain-factionalism): "hopefully, users won't have to manage or even know about the technical layers."
-
-Inti takes that promise literally. The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
-
 ## Try it
 
 Open **https://getinti.xyz** on a phone or a computer.
@@ -56,12 +48,24 @@ Open **https://getinti.xyz** on a phone or a computer.
 
 **With real funds** (NEAR mainnet):
 
-5. Send NEAR to the wallet address shown in **Your wallet**.
-6. Open **Spending limits**, set how much one order and one day may spend, and sign. In one transaction the app installs the Spending Limits contract on your account and gives Inti a key that can only call `fund_agent`. Activation asks for about 1.88 NEAR: most of it pays for the contract's storage on your account and comes back when you **Turn off Inti**.
-7. Create your agent and sign a trading permission (a grant) for 7, 30 or 90 days.
-8. Type `buy $5 of gold`, `buy Zcash if it drops to $900`, or `sell half my bitcoin and buy euro with it`. The agent places each order, one after another, and tells you what it got and what it cost. The result appears in your portfolio. To ask the price without buying, type `how much bitcoin do I get for $5?`.
-9. Type an order above your daily limit. The contract refuses it and nothing moves.
-10. To stop Inti at once, tap **Pause Inti** (deletes Inti's key from your account) or freeze your agent (it can do nothing until you unfreeze it). Both are your signature, not Inti's.
+5. Open **Spending limits** and follow its four steps in order:
+   - **Protect your account** with a passkey.
+   - **Add funds**: send NEAR to the address shown. The step tells you how much is needed (about 1.9 NEAR with 0.1 NEAR set aside for orders; it grows with what you set aside). About 1.7 NEAR of it pays for the contract's storage on your account and comes back when you **Turn off Inti**.
+   - **Create your agent**: your own agent on NEAR Intents, which can send only to you.
+   - **Set your spending limits** and tap **Activate Inti**. You sign two transactions. The first installs the Spending Limits contract on your account, sets your limits and gives Inti a key that can only call `fund_agent`. The second wraps the NEAR you set aside for orders.
+6. Sign a trading permission (a grant) for your agent, for 7, 30 or 90 days.
+7. Type `buy $5 of gold`, `buy Zcash if it drops to $900`, or `sell half my bitcoin and buy euro with it`. The agent places each order, one after another, and tells you what it got and what it cost. The result appears in your portfolio. To ask the price without buying, type `how much bitcoin do I get for $5?`.
+   One real order on mainnet: [`2g5VBGWH`](https://nearblocks.io/txns/2g5VBGWHZCAtQYM9S122tRNVYsvcqUkj3nPbCVfzECHk), Inti's key calling `fund_agent` with 0.0286 wNEAR on a user's account.
+8. Type an order above your limit. Inti says it is over your limit and nothing moves. The server checks your limits first (`agent/server/orders.ts`, `fund`); the contract checks them again on chain, so the refusal holds even if the server is wrong or compromised. The contract's own refusals are covered by its tests (`contracts/spending-limits/tests/`).
+9. To stop Inti at once, tap **Pause Inti** (deletes Inti's key from your account) or freeze your agent (it can do nothing until you unfreeze it). Both are your signature, not Inti's.
+
+## What an intent is, and why it matters here
+
+An intent is a signed statement of what you want ("I want $5 of bitcoin, and I accept no less than this much"), not the steps to get it. Solvers compete to fill it, and the network checks that the result matches what you signed.
+
+That idea came with a promise: people would say what they want and the chain would stay out of sight. NEAR's co-founder Illia Polosukhin [wrote in 2023](https://www.coindesk.com/opinion/2023/12/20/the-rise-of-chain-abstraction-and-end-of-blockchain-factionalism): "hopefully, users won't have to manage or even know about the technical layers."
+
+Inti takes that promise literally. The words you type become an intent on [NEAR Intents](https://docs.near-intents.org), placed by your own agent through the [Agent API](https://docs.agentsonintents.com). What stays visible is what should: your limits, what each order spends, and where your money is at every step.
 
 ## How it works
 
@@ -164,7 +168,9 @@ require!(new_spent <= limit.per_day.0, "over the daily limit");
 
 `contracts/spending-limits/src/lib.rs`: before Inti's key sends an order, the contract adds it to what the last 24 hours already sent. If the total would pass your daily limit, the order is refused and nothing moves. Even with Inti's key, nobody can spend more than your limits.
 
-If Inti's key were stolen, the most it could do is send your limits to your own agent, and use up the 24 orders of a day. Deleting the key ends both. Because your account keeps its full-access key, it never depends on a function-call key's gas allowance and cannot be locked out by it.
+Inti's key also has a gas allowance of 0.25 NEAR (`web/src/limits/config.ts`), from which it pays each order's network fee. It is one total, not per day, and the dashboard shows what is left under **Fees left for Inti**. When it runs out, Inti cannot send orders; **Pause Inti** and then **Resume Inti** add the key again with a new allowance.
+
+If Inti's key were stolen, the most it could do is send your limits to your own agent, use up the 24 orders of a day, and spend its 0.25 NEAR allowance on fees. Deleting the key ends all three. Because your account keeps its full-access key, it never depends on that allowance and cannot be locked out by it.
 
 The Agent API adds a second layer: your agent runs under a policy you sign, which only lets it send to your wallet.
 
@@ -222,6 +228,8 @@ sudo bash deploy/install.sh
 | `NEAR_INTENTS_AGENT_API_KEY` | your partner key for the [Agent API](https://docs.agentsonintents.com) |
 | `NEAR_AI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
 | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | your app in the [Privy dashboard](https://dashboard.privy.io) |
+
+`.env.example` points the Agent API at `https://api.demo.agentsonintents.com`. NEAR Intents and the Agent API have no testnet, so orders through that host are real orders on NEAR mainnet.
 
 The script checks `.env` before it installs anything and says what is missing. It installs Node, pnpm and Caddy, creates Inti's key and the key that encrypts the grants, builds the app, and starts the API behind HTTPS. It ends with `Done. Open https://your-domain.com`. In the Privy dashboard, add that domain to the app's allowed domains.
 
